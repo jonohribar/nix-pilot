@@ -1,0 +1,50 @@
+# Settings Schema Specification
+
+How the Settings surface is defined, versioned and shipped. The surface is product-authored: Nixpkgs cannot generate a consumer settings interface, so designing the workflows is product work (requirement [S3](../../requirements/requirements.md)). This spec pins the schema shape and the boundary that keeps the surface tractable.
+
+## Boundary
+
+The surface is bounded to system-owned settings. A setting is in scope only when all three hold (decision [D14](../../research/04-recommendations.md#decision-log)):
+
+- It maps to a stable NixOS option, not a per-desktop config-file backend.
+- It means the same thing across the desktops the product runs on.
+- The product can own its versioning and migration.
+
+Desktop-environment chrome (panels, themes, wallpapers, "show battery percent"), and per-application preferences, are out of scope. The product does not author a mapping for them; it links to the tool that owns them (the desktop's settings app, the application's own settings) or states "this setting lives in your desktop's settings". Nothing in the surface reimplements another tool's preferences.
+
+## Schema shape
+
+Each setting workflow is versioned record with the following fields:
+
+| Field | Contents |
+|---|---|
+| Identity | A stable, versioned key that does not change on cosmetic renames |
+| Presentation | Friendly name, plain-language behaviour, and the outcome statement shown to the user before the change is applied (REQ-3) |
+| Mapping | The single owned mapping to the backing NixOS option(s); one option per setting, never a per-desktop fork |
+| Supported actions | The operations the workflow supports (enable, disable, configure a value) and their valid ranges |
+| Scope | System-wide; the value is applied through the backend's generation transaction |
+| Search | Human-readable name, synonyms and supported actions, so the setting is findable and grouped by type (S1, S2) |
+| Currency | How the setting tracks the backing option across Nixpkgs revisions |
+
+## Currency and migration
+
+- The schema is versioned and ships a documented migration path, so a Nixpkgs option rename never silently breaks a user's setting (decision [D6](../../research/04-recommendations.md#decision-log); risk [R04](../risks.md#r04)).
+- When a setting's backing option no longer applies (renamed, removed or moved), the UI tells the user "this setting no longer applies" instead of generating stale configuration ([architecture.md, Settings surface](../architecture.md#settings-surface)).
+- A version change is additive and migration-bearing; old versions of a setting record remain readable so installed state can be upgraded rather than dropped.
+
+## Initial surface
+
+The first-release surface covers the areas in REQ-5: networking, display, sound, printers, users, power and remote access. Each area is a set of setting workflows meeting the boundary above; anything in those areas that fails the boundary (for example display appearance, which is desktop chrome) is exposed as a pointer, not a workflow.
+
+The surface is unbounded by nature; carrying and reviewing it is risk [R04](../risks.md#r04) and scope risk [R09](../risks.md#r09). The boundary above is what keeps it finite: only Nix-owned, cross-desktop, migrate-able settings are authored.
+
+## Relationship to the product model and search
+
+- Settings workflows are product data, not catalogue data: Nixpkgs produces the application catalogue (decision [D4](../../research/04-recommendations.md#decision-log)), while the settings surface is authored.
+- The desired-state model stores the user's chosen setting values; the schema above defines the shape each value takes and how it maps to generated config.
+- The settings index feeds the same search as applications and help, grouped and labelled by type (S1, S2), so a term can surface both a setting and a relevant application.
+
+## Non-goals
+
+- Not a generic editor for arbitrary NixOS options or hand-written configuration (requirements non-goals).
+- Not a replacement for any desktop's appearance preferences (decision [D14](../../research/04-recommendations.md#decision-log)).
