@@ -25,7 +25,7 @@ The plan has seven sections. Each section has one destination under `docs/`, one
 | 3 | Requirements | What the product must do: constraints, functional needs, explicit non-goals | `docs/requirements/requirements.md` | `nix-pilot-l3q` | Written (handover §3, §5, §6) |
 | 4 | Architecture | How the product is built: UI, product model, backend, catalogue service | `docs/design/architecture.md` | `nix-pilot-7wo` | Written (handover §7–8) |
 | 5 | Specifications | Precise engineering specifications per subsystem | `docs/design/specifications/*.md` | `nix-pilot-9f3` | Tasks open (3 specs) |
-| 6 | Verification | How we prove requirements: phase gates, acceptance criteria, measurement | `docs/design/verification.md` | `nix-pilot-nus` | Tasks open (2) |
+| 6 | Verification | How we prove requirements: phase gates, acceptance criteria, measurement | `docs/design/verification.md` | `nix-pilot-nus` | Written (handover §10; Phase 0 measurement plan) |
 | 7 | Validation | How we confirm the product meets user needs: usability, user testing | `docs/design/validation.md` | none yet | Deliberately empty; epic created when content exists |
 
 ## Document tree
@@ -38,8 +38,9 @@ The plan has seven sections. Each section has one destination under `docs/`, one
 │   │   ├── architecture.md
 │   │   ├── plan.md
 │   │   ├── risks.md
-│   │   └── specifications
-│   │       └── failure-and-recovery.md
+│   │   ├── specifications
+│   │   │   └── failure-and-recovery.md
+│   │   └── verification.md
 │   ├── requirements
 │   │   ├── requirements.md
 │   │   └── user-needs.md
@@ -54,7 +55,7 @@ The plan has seven sections. Each section has one destination under `docs/`, one
 └── README.md
 ```
 
-The tree lists actual files. Planned destinations not yet written — `verification.md`, `validation.md`, `catalogue-pipeline.md`, `settings-schema.md` — are tracked in the tables below.
+The tree lists actual files. Planned destinations not yet written — `validation.md`, `catalogue-pipeline.md`, `settings-schema.md` — are tracked in the tables below.
 
 ## Translation map — where handover content lands
 
