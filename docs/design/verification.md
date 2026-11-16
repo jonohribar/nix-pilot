@@ -44,3 +44,11 @@ Phase 0 may return "coverage is low and rising slowly". That finding must change
 ## Binary-cache inspection evaluation
 
 Follow-up to decision [D2](../research/04-recommendations.md#decision-log) (Hydra first). Hydra does not build unfree packages, so their images and metadata must come from elsewhere. This evaluation answers, for arbitrary binary-cache inspection: bandwidth and storage cost at the project's scale, coverage of unfree GUI applications, and whether the result is viable next to Hydra's metadata. It runs late in Phase 0, once the Hydra-derived baseline exists to compare against.
+
+## Phase 1 — failure-handling acceptance criterion
+
+A user who makes a change that fails to build or apply can recover to a working system without opening a terminal, and the UI showed the error and its remedy in plain language.
+
+This replaces the weaker criterion "the GUI can explain each operation without exposing Nix concepts" (recommendation [3](../research/04-recommendations.md#3-tighten-the-phase-1-failure-handling-acceptance-criterion)).
+
+It is tested in Phase 1 per [failure-and-recovery.md](specifications/failure-and-recovery.md#tested-guarantee): failure is injected at every transaction stage (evaluate, build, apply) and at boot, and the user recovers through the UI alone using only plainly-worded prompts. A system not wholly on one state is a release-blocking defect.
