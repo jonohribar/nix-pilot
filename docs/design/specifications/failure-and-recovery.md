@@ -8,6 +8,22 @@ A non-technical user must be able to recover to a working system when a change f
 - Before any change, the user sees one plain-language summary of what will change (REQ-3).
 - The previous working state is always recoverable (REQ-8).
 
+The states a change moves through, and where each failure returns to:
+
+```mermaid
+%%{init: {"theme": "dark"}}%%
+stateDiagram-v2
+    [*] --> Previous
+    Previous --> Accept: explain and confirm
+    Accept --> Build: evaluate and build
+    Build --> New: apply
+    Build --> Previous: failure, nothing changed
+    New --> Previous: rollback
+    Previous --> BootMenu: system will not boot
+    New --> BootMenu: system will not boot
+    BootMenu --> Previous: earlier state chosen
+```
+
 ## Build failure
 
 A failed build changes nothing on the system. The UI shows:
