@@ -1,16 +1,16 @@
 # Recommendations and Open Decisions
 
-> Research note · 2026-11-16 · Status: current Concrete changes to `nixos_system_centre_handoff.md`, derived from the analysis in `03-failure-modes-and-risks.md`. The decision log at the end tracks each open question to a named owner and decision date.
+> Research note · 2026-11-16 · Status: current Recommendations derived from the analysis in `03-failure-modes-and-risks.md`, with a decision log at the end that tracks each open question to a named owner and decision date.
 
 ## In one paragraph
 
-The handoff is sound on scope and ordering; these recommendations close the gaps it leaves: a failure-and-recovery spec written before any UI work, a risk-table entry for the settings surface, an explicit failure-handling acceptance criterion, a precise statement of the no-curation rule, pinned Phase-0 inputs (especially the unfree-package policy), and a sustainability commitment. Most are one-page additions; none require changing the phased plan.
+The brief is sound on scope and ordering; these recommendations close the gaps it leaves: a failure-and-recovery spec written before any UI work, a risk-table entry for the settings surface, an explicit failure-handling acceptance criterion, a precise statement of the no-curation rule, pinned Phase-0 inputs (especially the unfree-package policy), and a sustainability commitment. Most are one-page additions; none require changing the phased plan.
 
 ## Recommendations
 
-### 1. Add a prior-art section to the handoff
+### 1. Surface prior art in the project docs
 
-Summarise `01-prior-art.md` in 10 lines: what was tried, why each project died, and the two patterns to avoid. Future readers will otherwise re-derive this at cost — the handoff currently reads as if the space were empty.
+Summarise `01-prior-art.md` in 10 lines: what was tried, why each project died, and the two patterns to avoid. Future readers will otherwise re-derive this at cost — the docs should make the prior-art record visible rather than read as if the space were empty.
 
 ### 2. Write the failure-and-recovery spec before Phase 2 (highest priority)
 
@@ -19,7 +19,7 @@ One page answering, for a non-technical user:
 - What shows on screen when a rebuild fails (plain-language summary of the error, the exact raw error one click away, offered recovery actions).
 - What happens when the system does not boot (boot-time older-generation selection; documentation shipped *before* the failure, e.g. a recovery card in Settings).
 - How rollback is explained without Nix vocabulary ("go back to yesterday's system") and how the app recovers when a applied generation partially changed the system.
-- The explicit guarantee: a failed build must never leave the system partially applied (the handoff already promises this; the spec defines how it is tested).
+- The explicit guarantee: a failed build must never leave the system partially applied (the brief already promised this; the spec defines how it is tested).
 
 ### 3. Tighten the Phase 1 failure-handling acceptance criterion
 
@@ -34,7 +34,7 @@ Current wording invites a de facto allowlist through "safe, explicit product rul
 
 ### 5. Add the settings surface to the risk table
 
-Nixpkgs cannot generate a consumer settings interface (handoff section 5, agreed), which means the settings workflows are a hand-maintained, unbounded surface that tracks Nixpkgs option renames forever. Give it a risk row with the same weight as the catalogue, and a mitigation: a versioned settings schema with a documented migration path (this also protects users from option renames between Nixpkgs revisions).
+Nixpkgs cannot generate a consumer settings interface (a settled point), which means the settings workflows are a product-authored, unbounded surface that tracks Nixpkgs option renames forever. Give it a risk row with the same weight as the catalogue, and a mitigation: a versioned settings schema with a documented migration path (this also protects users from option renames between Nixpkgs revisions).
 
 ### 6. Pin the Phase-0 inputs and policy before starting
 
@@ -66,6 +66,13 @@ Every decision is recorded here once made; decided rows are never deleted. Open 
 | D6 | Settings schema versioning | **Versioned schema with documented migration** | Project owner | 2026-11-16 | Decided |
 | D7 | Repo/community home for sustained maintenance | **Local repo for now.** If the project proves out it becomes an open-source project (nix-community considered at that point). Internal docs may rely on AI-assisted tooling (e.g. beads); before any open-source release they are converted to developer-friendly, tool-independent format (chore task filed) | Project owner | 2026-11-16 | Decided |
 | D8 | Home of the commit-workflow rule | **Root AGENTS.md, "Commits" section.** AGENTS.md is the short rule set, always loaded by the tooling at work time; beads and plan.md were rejected as homes because neither is read at commit time. At open-source release the rule moves to CONTRIBUTING.md as part of the AGENTS.md rewrite (D7) | Project owner | 2026-11-16 | Decided |
+| D9 | Install mechanism for generated packages | **Declarative, single owner: the app's generated NixOS config.** Each install carries a scope, chosen at install time: per-user by default, generated into `users.users.<name>.packages`; system-wide only when explicitly chosen, generated into `environment.systemPackages`. No imperative per-user profiles. One system generation per change, uniform rollback through the existing generation + boot-menu recovery | Project owner | 2026-11-16 | Decided |
+| D10 | Catalogue scope for first release | **GUI/installable applications only.** The store lists applications the average user can install and run; it does not attempt to classify the whole nixpkgs package set | Project owner | 2026-11-16 | Decided |
+| D11 | Catalogue artifact architecture handling | **One universal index with per-entry architecture availability flags.** A single artifact per catalogue version; clients filter by which architectures the entry can build for. Supports the "unavailable on your system" state without shipping one index per architecture | Project owner | 2026-11-16 | Decided |
+| D12 | Catalogue regeneration cadence | **Weekly by default** | Project owner | 2026-11-16 | Decided |
+| D13 | App identity and join strategy | **Multi-signal tiered match** (package name, desktop-entry ID, binary name), showing only high-confidence joins and carrying a confidence tier per entry | Project owner | 2026-11-16 | Decided |
+| D14 | Settings surface boundary | **System-only settings plus pointers.** nix-pilot manages Nix-owned system settings that map to a stable NixOS option with the same meaning across desktops and ownable versioning/migration; all other preferences (desktop chrome, per-application settings) are deferred by linking to the tool that owns them, never reimplemented | Project owner | 2026-11-16 | Decided |
+| D15 | Phase 0 acceptance floors | **Provisional floors set now, reviewed after the QA sample.** The exact values are defined in the Phase 0 measurement plan (`nix-pilot-nus.2`); they are provisional and revisited when a hand-labelled QA sample exists | Project owner | 2026-11-16 | Decided |
 
 ## Cross-references
 
