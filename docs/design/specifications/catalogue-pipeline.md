@@ -42,7 +42,7 @@ Presentation fields (AppStream data, screenshots, icons) enrich a listing when a
 
 ## Classification and confidence
 
-A record is classified from evidence and rules, matching the handoff classification table:
+A record is classified from evidence and rules, matching the agreed classification table:
 
 | Class | Evidence | Presentation |
 |---|---|---|

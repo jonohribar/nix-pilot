@@ -58,13 +58,13 @@
 ### R03 — Knowledge gap at failure time
 
 - **Description:** hiding Nix concepts works until something fails; then recovery requires exactly the concepts that were hidden (rebuild, generations, boot selection). A failed `nixos-rebuild` produces errors in dependency/linker language; a non-booting system cannot be helped by the app at all.
-- **Evidence:** `../research/03-failure-modes-and-risks.md` risk C; handoff section 8.
+- **Evidence:** `../research/03-failure-modes-and-risks.md` risk C.
 - **Mitigation:** failure-and-recovery spec accepted as a Phase 2 prerequisite (D5) and filed (`nix-pilot-9f3.1`); tightened Phase 1 acceptance criterion — "recover without opening a terminal" (recommendation 3, `nix-pilot-nus.1`); boot-time recovery story and pre-failure documentation; "details one click away, always shown on error" branding instead of "hides Nix".
 - **Status:** Mitigating (prerequisite accepted; spec not yet written).
 
 ### R04 — Settings surface maintenance / Nixpkgs option drift
 
-- **Description:** settings workflows are hand-authored by design (handoff section 5); Nixpkgs renames, moves and deprecates options continuously, so the mapping from consumer setting to NixOS option silently breaks. This surface has no precedent and no automated safety net.
+- **Description:** settings workflows are product-authored by design (decision [D4](../research/04-recommendations.md#decision-log)); Nixpkgs renames, moves and deprecates options continuously, so the mapping from consumer setting to NixOS option silently breaks. This surface has no precedent and no automated safety net.
 - **Evidence:** `../research/03-failure-modes-and-risks.md` risk A.
 - **Mitigation:** versioned settings schema with documented migration (D6, decided); settings surface carried in the risk table with catalogue-level weight (recommendation 5); consumer-facing checks that surface "this setting no longer applies" instead of silently generating stale config.
 - **Status:** Mitigating (approach decided; design pending).
@@ -80,28 +80,28 @@
 
 - **Description:** mapping AppStream components to Nixpkgs packages via package names, desktop-entry names and executable names is ambiguous; the PackageKit-Nix backend's lived experience (unsearchable attributes, install/remove mismatches, crashes) is the baseline for naive joins.
 - **Evidence:** `../research/02-catalogue-feasibility.md` ("joining AppStream components").
-- **Mitigation:** confidence tiers and conservative presentation (handoff section 4.4); Phase 0 QA sample in the hundreds, reviewed manually as QA not curation (handoff section 10, step 6).
+- **Mitigation:** confidence tiers and conservative presentation (catalogue-pipeline.md); Phase 0 QA sample in the hundreds, reviewed manually as QA not curation (verification.md).
 - **Status:** Open.
 
 ### R07 — Catalogue and system revision drift
 
 - **Description:** the catalogue is generated for a pinned Nixpkgs revision; the running system tracks another. Search can advertise packages that evaluate differently on the user's system. nix-software-center hit exactly this with its offline snapshot and "unavailable" dialog.
-- **Evidence:** `../research/01-prior-art.md` (nix-software-center); handoff section 9.
-- **Mitigation:** bind catalogue to revision + architecture (handoff section 4.3); validate installation against the actual system before applying; treat "unavailable on your system" as a first-class UI state, not an error.
+- **Evidence:** `../research/01-prior-art.md` (nix-software-center).
+- **Mitigation:** bind catalogue to revision + architecture (catalogue-pipeline.md); validate installation against the actual system before applying; treat "unavailable on your system" as a first-class UI state, not an error.
 - **Status:** Open.
 
 ### R08 — Failed apply leaves system partially changed
 
 - **Description:** a rebuild interrupted or failed mid-transaction leaves the system in a confusing intermediate state for a user who cannot diagnose it.
-- **Evidence:** handoff section 8 promise; `../research/03-failure-modes-and-risks.md` risk C.
+- **Evidence:** the failed-build-never-partially-applies guarantee ([failure-and-recovery.md](specifications/failure-and-recovery.md)); `../research/03-failure-modes-and-risks.md` risk C.
 - **Mitigation:** transaction semantics specified and tested in Phase 1 (evaluate → build → apply as a single unit; never partial); failure-and-recovery spec (recommendation 2) defines the guarantee and how it is tested.
 - **Status:** Open.
 
 ### R09 — Scope: three products in one, settings unbounded
 
-- **Description:** the handoff bundles a data platform (catalogue), an OS transaction engine (desired state → apply), and a consumer UX (Settings + Software + Updates). Each is a multi-year project; the settings surface in particular is unbounded and has no precedent.
+- **Description:** the product bundles a data platform (catalogue), an OS transaction engine (desired state → apply), and a consumer UX (Settings + Software + Updates). Each is a multi-year project; the settings surface in particular is unbounded and has no precedent.
 - **Evidence:** `../research/03-failure-modes-and-risks.md` risk E.
-- **Mitigation:** the phased plan is in place (handoff section 10); scope boundaries (no existing configs, no raw Nix in normal mode) are firm; if Phase 0 results are poor, narrow the v1 app universe rather than expanding engineering.
+- **Mitigation:** the phased plan is in place (plan.md); scope boundaries (no existing configs, no raw Nix in normal mode) are firm; if Phase 0 results are poor, narrow the v1 app universe rather than expanding engineering.
 - **Status:** Open.
 
 ### R10 — No-curation rule erodes into a de facto allowlist
@@ -122,7 +122,7 @@
 
 - **Description:** Nixpkgs is not a stable platform: package renames, option renames, channels vs flakes, changes to the package set structure. The pipeline (generator, schema, joins) has four surfaces tracking this drift permanently.
 - **Evidence:** `../research/03-failure-modes-and-risks.md` risk B.
-- **Mitigation:** pinned-revision lifecycle as a first-class pipeline concept (handoff section 4.3); schema versioning; periodic (not event-driven) regeneration so drift is observed, not discovered by users.
+- **Mitigation:** pinned-revision lifecycle as a first-class pipeline concept (catalogue-pipeline.md); schema versioning; periodic (not event-driven) regeneration so drift is observed, not discovered by users.
 - **Status:** Open.
 
 ## Review log
@@ -136,5 +136,4 @@
 
 - `../research/00-README.md` — index of research notes
 - `../research/03-failure-modes-and-risks.md` — analysis behind R01–R12
-- `../research/04-recommendations.md` — mitigations (recommendations 1–8) and decision log (D1–D7)
-- `../../nixos_system_centre_handoff.md` — the project handoff this register guards
+- `../research/04-recommendations.md` — mitigations (recommendations 1–8) and decision log (D1–D15)

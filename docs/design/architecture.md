@@ -1,6 +1,6 @@
 # Architecture
 
-How the product is built: one desktop application (Settings, Software, Updates/Recovery, global search) over an application-owned desired-state model, a NixOS integration backend, and an independently generated catalogue service. Covers handover sections 7–8. Detail lives in the specifications: recovery behaviour and the transaction guarantee in [failure-and-recovery.md](specifications/failure-and-recovery.md), the settings surface in [settings-schema.md](specifications/settings-schema.md), the catalogue pipeline in [catalogue-pipeline.md](specifications/catalogue-pipeline.md).
+How the product is built: one desktop application (Settings, Software, Updates/Recovery, global search) over an application-owned desired-state model, a NixOS integration backend, and an independently generated catalogue service. Detail lives in the specifications: recovery behaviour and the transaction guarantee in [failure-and-recovery.md](specifications/failure-and-recovery.md), the settings surface in [settings-schema.md](specifications/settings-schema.md), the catalogue pipeline in [catalogue-pipeline.md](specifications/catalogue-pipeline.md).
 
 ## System overview
 
@@ -57,7 +57,7 @@ The User and the two metadata sources appear in the table rather than in the dia
 ## Product model
 
 - The application owns a structured desired-state model: installed applications (with a selected version or variant where applicable), user-facing settings, enabled system capabilities and services, and generation and update/recovery status.
-- The model is the source of truth; the NixOS configuration is generated output (constraint [C6](../../requirements/requirements.md#product-constraints); handover section 8).
+- The model is the source of truth; the NixOS configuration is generated output (constraint [C6](../../requirements/requirements.md#product-constraints)).
 - The structured desired-state schema and the settings schema are defined together in [settings-schema.md](specifications/settings-schema.md).
 
 ## Settings surface
@@ -69,7 +69,7 @@ The User and the two metadata sources appear in the table rather than in the dia
 
 ## NixOS integration backend
 
-- The backend translates the product model into generated NixOS configuration and modules, evaluates it, builds a new system generation, presents a plain-language summary, applies it, and reports progress (handover section 7; Phase 1 steps 1–5).
+- The backend translates the product model into generated NixOS configuration and modules, evaluates it, builds a new system generation, presents a plain-language summary, applies it, and reports progress (Phase 1 steps 1–5).
 - Nix is the implementation engine; nothing else from it reaches the normal user.
 - Every system change is one transaction: explain, evaluate, build, apply, with rollback available after apply. The guarantee that a failed build or apply never leaves the system partially applied, and its Phase 1 tests, are specified in [failure-and-recovery.md](specifications/failure-and-recovery.md).
 
@@ -89,13 +89,13 @@ flowchart LR
 
 ## Install and system-state model
 
-- For the initial release the application owns the configuration it generates; the desired-state model is the source of truth and the NixOS configuration is generated output (handover section 8).
+- For the initial release the application owns the configuration it generates; the desired-state model is the source of truth and the NixOS configuration is generated output.
 - Installing or removing an application updates the desired package set and deploys a new system generation.
 - The package deployment is declarative, with a single owner: the generated NixOS config. Each install carries a scope chosen at install time — per-user by default (`users.users.<name>.packages`), system-wide only when explicitly chosen (`environment.systemPackages`). No imperative per-user profiles. One system generation per change, uniform rollback through the existing generation and boot-menu recovery (decision [D9](../../research/04-recommendations.md#decision-log)).
 
 ## Catalogue service
 
-- The catalogue is an independent generator product, not a side effect of the application (handover section 7).
+- The catalogue is an independent generator product, not a side effect of the application.
 - It consumes a pinned Nixpkgs revision and upstream metadata, produces one versioned, universal index with per-entry architecture availability flags, and publishes it on a periodic regeneration cadence; pipeline details are in [catalogue-pipeline.md](specifications/catalogue-pipeline.md) and revision drift is risk [R07](../risks.md#r07) and risk [R12](../risks.md#r12).
 - The desktop application consumes the artifacts and keeps a local searchable cache; when a listed package does not match the running system, "unavailable on your system" is a first-class UI state, not an error (risk [R07](../risks.md#r07)).
 - Catalogue content is generated only: no hand-maintained per-package entries, and curated behaviour (featuring, categories, ranking) stays explainable and never required for installation (decision [D4](../../research/04-recommendations.md#decision-log)).
@@ -103,4 +103,4 @@ flowchart LR
 ## Cross-cutting
 
 - Architecture choices must remain maintainable by a one-to-two-person volunteer team for five years, applied to schema versioning, catalogue format stability and framework choice (recommendation 8; decision [D7](../../research/04-recommendations.md#decision-log)).
-- Developer diagnostics — raw Nix configuration, option provenance, module diagnostics, evaluation details — stay separate from the normal experience (handover section 7; constraint [C8](../../requirements/requirements.md#product-constraints)).
+- Developer diagnostics — raw Nix configuration, option provenance, module diagnostics, evaluation details — stay separate from the normal experience (constraint [C8](../../requirements/requirements.md#product-constraints)).

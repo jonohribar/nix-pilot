@@ -1,16 +1,16 @@
 # Recommendations and Open Decisions
 
-> Research note · 2026-11-16 · Status: current Concrete changes to `nixos_system_centre_handoff.md`, derived from the analysis in `03-failure-modes-and-risks.md`. The decision log at the end tracks each open question to a named owner and decision date.
+> Research note · 2026-11-16 · Status: current Recommendations derived from the analysis in `03-failure-modes-and-risks.md`, with a decision log at the end that tracks each open question to a named owner and decision date.
 
 ## In one paragraph
 
-The handoff is sound on scope and ordering; these recommendations close the gaps it leaves: a failure-and-recovery spec written before any UI work, a risk-table entry for the settings surface, an explicit failure-handling acceptance criterion, a precise statement of the no-curation rule, pinned Phase-0 inputs (especially the unfree-package policy), and a sustainability commitment. Most are one-page additions; none require changing the phased plan.
+The brief is sound on scope and ordering; these recommendations close the gaps it leaves: a failure-and-recovery spec written before any UI work, a risk-table entry for the settings surface, an explicit failure-handling acceptance criterion, a precise statement of the no-curation rule, pinned Phase-0 inputs (especially the unfree-package policy), and a sustainability commitment. Most are one-page additions; none require changing the phased plan.
 
 ## Recommendations
 
-### 1. Add a prior-art section to the handoff
+### 1. Surface prior art in the project docs
 
-Summarise `01-prior-art.md` in 10 lines: what was tried, why each project died, and the two patterns to avoid. Future readers will otherwise re-derive this at cost — the handoff currently reads as if the space were empty.
+Summarise `01-prior-art.md` in 10 lines: what was tried, why each project died, and the two patterns to avoid. Future readers will otherwise re-derive this at cost — the docs should make the prior-art record visible rather than read as if the space were empty.
 
 ### 2. Write the failure-and-recovery spec before Phase 2 (highest priority)
 
@@ -19,7 +19,7 @@ One page answering, for a non-technical user:
 - What shows on screen when a rebuild fails (plain-language summary of the error, the exact raw error one click away, offered recovery actions).
 - What happens when the system does not boot (boot-time older-generation selection; documentation shipped *before* the failure, e.g. a recovery card in Settings).
 - How rollback is explained without Nix vocabulary ("go back to yesterday's system") and how the app recovers when a applied generation partially changed the system.
-- The explicit guarantee: a failed build must never leave the system partially applied (the handoff already promises this; the spec defines how it is tested).
+- The explicit guarantee: a failed build must never leave the system partially applied (the brief already promised this; the spec defines how it is tested).
 
 ### 3. Tighten the Phase 1 failure-handling acceptance criterion
 
@@ -34,7 +34,7 @@ Current wording invites a de facto allowlist through "safe, explicit product rul
 
 ### 5. Add the settings surface to the risk table
 
-Nixpkgs cannot generate a consumer settings interface (handoff section 5, agreed), which means the settings workflows are a hand-maintained, unbounded surface that tracks Nixpkgs option renames forever. Give it a risk row with the same weight as the catalogue, and a mitigation: a versioned settings schema with a documented migration path (this also protects users from option renames between Nixpkgs revisions).
+Nixpkgs cannot generate a consumer settings interface (a settled point), which means the settings workflows are a product-authored, unbounded surface that tracks Nixpkgs option renames forever. Give it a risk row with the same weight as the catalogue, and a mitigation: a versioned settings schema with a documented migration path (this also protects users from option renames between Nixpkgs revisions).
 
 ### 6. Pin the Phase-0 inputs and policy before starting
 
