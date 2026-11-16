@@ -91,7 +91,7 @@ flowchart LR
 
 - For the initial release the application owns the configuration it generates; the desired-state model is the source of truth and the NixOS configuration is generated output (handover section 8).
 - Installing or removing an application updates the desired package set and deploys a new system generation.
-- The exact installation mechanism is an open decision that must be resolved before Phase 1 backend work: generated `environment.systemPackages` entries versus a user-profile strategy, or a documented combination with one owner. Criteria are a single ownership model (never mix mechanisms without one), rollback clarity, per-user versus system-wide scope, and five-year maintainability (recommendation 8). Do not mix independent mechanisms without a clear ownership model (handover section 8).
+- The package deployment is declarative, with a single owner: the generated NixOS config. Each install carries a scope chosen at install time — per-user by default (`users.users.<name>.packages`), system-wide only when explicitly chosen (`environment.systemPackages`). No imperative per-user profiles. One system generation per change, uniform rollback through the existing generation and boot-menu recovery (decision [D9](../../research/04-recommendations.md#decision-log)).
 
 ## Catalogue service
 
