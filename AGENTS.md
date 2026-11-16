@@ -7,6 +7,7 @@ Consumer desktop GUI for managing NixOS (Settings + Software Store + Updates). N
 - `docs/research/` — stable findings: `00-README` (index), `01-prior-art`, `02-catalogue-feasibility`, `03-failure-modes-and-risks`, `04-recommendations` (decision log D1–D15)
 - `docs/design/` — living docs: `plan.md` (hub), `risks.md` (R01–R12), `architecture.md`; `specifications/` holds the subsystem specs, `verification.md` the measurement plan
 - `docs/requirements/` — `user-needs.md` (personas/stories/journeys), `requirements.md` (REQ-1…8 + constraints/search/ranking)
+- `experiments/` — R&D: research-stage prototypes and experiments, separate from the product code; versioned, may graduate or be split into its own repo later
 
 ## Working rules
 
