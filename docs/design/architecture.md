@@ -39,7 +39,7 @@ The connections, and what each does:
 |---|---|---|
 | User | User interface | the user's only touchpoint; drives Settings, Software, Updates and search (documented here rather than drawn; see note) |
 | Nixpkgs and upstream metadata | Catalogue generator | feeds the pinned revision plus AppStream and desktop-entry metadata for evaluation |
-| Catalogue generator | Index artifacts | produces versioned, architecture-specific indexes |
+| Catalogue generator | Index artifacts | produces one versioned, universal index with per-entry architecture availability flags |
 | Index artifacts | User interface | downloaded into the app's local cache for browse and search |
 | User interface | Product model | edits the desired state; the model also feeds the UI back for display (two-way, one direction shown) |
 | Product model | System backend | translated into generated NixOS configuration |
@@ -96,7 +96,7 @@ flowchart LR
 ## Catalogue service
 
 - The catalogue is an independent generator product, not a side effect of the application (handover section 7).
-- It consumes a pinned Nixpkgs revision and upstream metadata, produces architecture-specific indexes, and publishes versioned artifacts on a periodic regeneration cadence; pipeline details are in [catalogue-pipeline.md](specifications/catalogue-pipeline.md) and revision drift is risk [R07](../risks.md#r07) and risk [R12](../risks.md#r12).
+- It consumes a pinned Nixpkgs revision and upstream metadata, produces one versioned, universal index with per-entry architecture availability flags, and publishes it on a periodic regeneration cadence; pipeline details are in [catalogue-pipeline.md](specifications/catalogue-pipeline.md) and revision drift is risk [R07](../risks.md#r07) and risk [R12](../risks.md#r12).
 - The desktop application consumes the artifacts and keeps a local searchable cache; when a listed package does not match the running system, "unavailable on your system" is a first-class UI state, not an error (risk [R07](../risks.md#r07)).
 - Catalogue content is generated only: no hand-maintained per-package entries, and curated behaviour (featuring, categories, ranking) stays explainable and never required for installation (decision [D4](../../research/04-recommendations.md#decision-log)).
 
