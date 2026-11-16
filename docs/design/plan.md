@@ -23,33 +23,38 @@ The plan has seven sections. Each section has one destination under `docs/`, one
 | 1 | User needs | Who the product is for; primary user, destinations, example journeys | `docs/requirements/user-needs.md` | `nix-pilot-msn` | Written (handover §1–2) |
 | 2 | Risks | Uncertain events with likelihood, impact, mitigation, owner | `docs/design/risks.md` | `nix-pilot-lw7` | Written (12 risks, R01–R12) |
 | 3 | Requirements | What the product must do: constraints, functional needs, explicit non-goals | `docs/requirements/requirements.md` | `nix-pilot-l3q` | Written (handover §3, §5, §6) |
-| 4 | Architecture | How the product is built: UI, product model, backend, catalogue service | `docs/design/architecture.md` | `nix-pilot-7wo` | Not yet translated |
+| 4 | Architecture | How the product is built: UI, product model, backend, catalogue service | `docs/design/architecture.md` | `nix-pilot-7wo` | Written (handover §7–8) |
 | 5 | Specifications | Precise engineering specifications per subsystem | `docs/design/specifications/*.md` | `nix-pilot-9f3` | Tasks open (3 specs) |
 | 6 | Verification | How we prove requirements: phase gates, acceptance criteria, measurement | `docs/design/verification.md` | `nix-pilot-nus` | Tasks open (2) |
 | 7 | Validation | How we confirm the product meets user needs: usability, user testing | `docs/design/validation.md` | none yet | Deliberately empty; epic created when content exists |
 
 ## Document tree
 
+```text
+.
+├── AGENTS.md
+├── docs
+│   ├── design
+│   │   ├── architecture.md
+│   │   ├── plan.md
+│   │   ├── risks.md
+│   │   └── specifications
+│   │       └── failure-and-recovery.md
+│   ├── requirements
+│   │   ├── requirements.md
+│   │   └── user-needs.md
+│   └── research
+│       ├── 00-README.md
+│       ├── 01-prior-art.md
+│       ├── 02-catalogue-feasibility.md
+│       ├── 03-failure-modes-and-risks.md
+│       └── 04-recommendations.md
+├── LICENSE
+├── nixos_system_centre_handoff.md
+└── README.md
 ```
-docs/
-  research/        stable research findings (index 00, prior art 01,
-                   feasibility 02, failure modes 03, recommendations 04)
-  requirements/    requirement documents (user-needs.md, requirements.md)
-  design/          living project documents
-    plan.md        this file (hub)
-    risks.md       risk register (R01–R12)
-    architecture.md            (destination of translation task)
-    specifications/
-      catalogue-pipeline.md    (destination of translation task)
-      settings-schema.md       (destination of translation task)
-      failure-and-recovery.md  (destination of translation task)
-    verification.md            (destination of phase-gate criteria)
-    validation.md              (empty placeholder)
 
-nixos_system_centre_handoff.md   source document (repo root). Translated
-                                 bit by bit; archived as superseded when
-                                 every section has a destination.
-```
+The tree lists actual files. Planned destinations not yet written — `verification.md`, `validation.md`, `catalogue-pipeline.md`, `settings-schema.md` — are tracked in the tables below.
 
 ## Translation map — where handover content lands
 
