@@ -40,6 +40,29 @@
       if meta == null || !(meta ? license) then null
       else let r = builtins.tryEval meta.license;
       in if r.success then builtins.typeOf r.value else "unreadable";
+    # Real license-freedom signal (decision D1/D17): whether any license in the
+    # package's license set reports free == false. Tri-state: true = all present
+    # are free, false = at least one is known-unfree, null = indeterminate or no
+    # licensing information. Used by the optional hide-unfree filter (l3q.2).
+    licFree =
+      if meta == null || !(meta ? license) then null
+      else let r = builtins.tryEval meta.license;
+      in
+      if !r.success then null
+      else let
+        one =
+          x:
+            if !builtins.isAttrs x then null
+            else let rr = builtins.tryEval (x.free or null);
+            in if rr.success && builtins.isBool rr.value then rr.value else null;
+        l = if builtins.isList r.value then r.value else [r.value];
+        flags = map one (builtins.filter builtins.isAttrs l);
+      in
+      if builtins.length flags == 0 then null
+      # Indeterminate: a licence without a free field reports no freedom signal.
+      else if builtins.any (x: x == null) flags then null
+      else if builtins.any (x: x == false) flags then false
+      else true;
     plats =
       if meta == null || !(meta ? platforms) then []
       else let
@@ -62,6 +85,7 @@
     mainProgram = mp;
     licenseOk = licOk;
     licenseType = licType;
+    licenseFree = licFree;
     platforms = plats;
     broken = brk;
   };

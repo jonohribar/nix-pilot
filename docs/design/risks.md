@@ -52,15 +52,15 @@
 
 - **Description:** the generated catalogue cannot reliably distinguish desktop applications from libraries/CLI tools, or coverage of real GUI apps falls below what a store needs to feel useful. The AppStream-metadata gap behind this has been an open nixpkgs RFC since 2016; unfree packages are not built on Hydra, so output-derived metadata for them is unavailable.
 - **Evidence:** `../research/02-catalogue-feasibility.md`.
-- **Mitigation:** (Phase 0 as written) measurement before UI; provisional precision/recall targets set before measuring (D3), reviewed after the QA sample; the negative result is a legitimate scope-changing finding, not a trigger to loosen the curation rule; unfree policy and output source decided (D1: unfree included by default; D2: Hydra first, binary-cache evaluation filed as `nix-pilot-9f3.4`).
+- **Mitigation:** (Phase 0 as written) measurement before UI; provisional precision/recall targets set before measuring (D3), reviewed after the QA sample; the negative result is a legitimate scope-changing finding, not a trigger to loosen the curation rule; unfree policy and output source decided (D1: unfree included by default; D2: Hydra first, binary-cache evaluation tracked in `../design/verification.md`).
 - **Status:** Mitigating (decisions recorded; measurement pending).
 
 ### R03 — Knowledge gap at failure time
 
 - **Description:** hiding Nix concepts works until something fails; then recovery requires exactly the concepts that were hidden (rebuild, generations, boot selection). A failed `nixos-rebuild` produces errors in dependency/linker language; a non-booting system cannot be helped by the app at all.
 - **Evidence:** `../research/03-failure-modes-and-risks.md` risk C.
-- **Mitigation:** failure-and-recovery spec accepted as a Phase 2 prerequisite (D5) and filed (`nix-pilot-9f3.1`); tightened Phase 1 acceptance criterion — "recover without opening a terminal" (recommendation 3, `nix-pilot-nus.1`); boot-time recovery story and pre-failure documentation; "details one click away, always shown on error" branding instead of "hides Nix".
-- **Status:** Mitigating (prerequisite accepted; spec not yet written).
+- **Mitigation:** failure-and-recovery spec accepted as a Phase 2 prerequisite (D5), specified in `../design/specifications/failure-and-recovery.md`; tightened Phase 1 acceptance criterion — "recover without opening a terminal" (recommendation 3, recorded in `../design/verification.md`); boot-time recovery story and pre-failure documentation; "details one click away, always shown on error" branding instead of "hides Nix".
+- **Status:** Mitigating (prerequisite accepted; spec written).
 
 ### R04 — Settings surface maintenance / Nixpkgs option drift
 
@@ -115,7 +115,7 @@
 
 - **Description:** indexing unfree packages, or redistributing their AppStream data and icons in a catalogue artifact, has licensing consequences (potentially making the index itself unfree). Unfree packages are also absent from Hydra, complicating any unified pipeline.
 - **Evidence:** `../research/02-catalogue-feasibility.md` question 1 and the vlinkz POC finding.
-- **Mitigation:** unfree policy decided (D1: unfree applications listed by default; optional user filter to hide them, feature filed `nix-pilot-l3q.2`); images and metadata for unfree apps to come from binary-cache inspection, evaluation filed (`nix-pilot-9f3.4`); catalogue artifact split so the unfree portion can be distributed separately if required.
+- **Mitigation:** unfree policy decided (D1: unfree applications listed by default; optional user filter to hide unfree apps, implemented as an opt-in filter); images and metadata for unfree apps to come from binary-cache inspection, evaluation tracked in `../design/verification.md`; catalogue artifact split so the unfree portion can be distributed separately if required.
 - **Status:** Mitigating (policy decided; implementation pending).
 
 ### R12 — Nixpkgs / ecosystem movement outpaces the pipeline

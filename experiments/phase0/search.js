@@ -4,7 +4,9 @@
 // score against attribute path, pname and description; results are grouped by
 // type (app vs command-line tool, decision D16) and bounded.
 //
-// Usage: node search.js "<query>" | node search.js --stats
+// Usage: node search.js "<query>" [--hide-unfree]  |  node search.js --stats [--hide-unfree]
+// --hide-unfree excludes known-unfree applications (opt-in filter, D1/l3q.2);
+// the signal comes from the generated index entry's unfree flag.
 const fs = require('fs');
 const path = require('path');
 
@@ -32,10 +34,15 @@ function score(rec, terms) {
 
 const drv = recs.filter((r) => !(idx && r.class === undefined) || r.class);
 
+const hideUnfree = process.argv.includes('--hide-unfree');
+
 if (process.argv[2] === '--stats') {
   const linuxOK = (r) => (r.platforms || []).some((p) => /(x86_64|aarch64|i686)-linux/.test(p));
   const stats = idx
-    ? { catalogue: 'index', schemaVersion: idx.schemaVersion, generated: idx.generated.date, ...idx.counts }
+    ? {
+        catalogue: 'index', schemaVersion: idx.schemaVersion, generated: idx.generated.date,
+        unfree: idx.entries.filter((r) => r.unfree).length, ...idx.counts,
+      }
     : {
         catalogue: 'raw metadata',
         cataloguedDocuments: drv.length,
@@ -52,13 +59,14 @@ if (process.argv[2] === '--stats') {
   process.exit(0);
 }
 
-const q = process.argv.slice(2).join(' ').trim();
+const q = process.argv.slice(2).filter((a) => !a.startsWith('--')).join(' ').trim();
 if (!q) {
   console.error('usage: node search.js "<query>"  |  node search.js --stats');
   process.exit(1);
 }
 const terms = toks(q);
 const ranked = drv
+  .filter((r) => !hideUnfree || !r.unfree)
   .map((r) => [score(r, terms), r])
   .filter((x) => x[0] > 0)
   .sort((a, b) => b[0] - a[0])
@@ -73,6 +81,7 @@ console.log(JSON.stringify(
     version: r.version,
     description: (r.description || '').slice(0, 90),
     licenseOk: r.licenseOk,
+    unfree: !!r.unfree,
     linuxOK: (r.platforms || []).some((p) => /(x86_64|aarch64|i686)-linux/.test(p)),
   })),
   null, 2,

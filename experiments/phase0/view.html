@@ -24,6 +24,9 @@
   .chip[data-c="term-app"].active{background:var(--term);color:#1a1508}
   .chip[data-c="cli"].active{background:var(--cli);color:#170b20}
   .chip b{font-weight:600}
+  .togglebar{display:flex;align-items:center;gap:8px;margin-left:auto;color:var(--dim);font-size:12.5px}
+  .togglebar input{accent-color:var(--accent)}
+  .unfree{color:var(--cli);border:1px solid var(--cli);border-radius:5px;padding:0 6px;font-size:11px;opacity:.85}
   main{padding:14px 22px 80px;max-width:980px;margin:0 auto}
   .stub{color:var(--dim);text-align:center;padding:60px 0}
   .group-h{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);
@@ -57,7 +60,7 @@
 
 <script>
 // ---- load index -------------------------------------------------------------
-const state = { entries: [], counts: {}, perPage: 80, page: 1, query: '', cat: 'all' };
+const state = { entries: [], counts: {}, perPage: 80, page: 1, query: '', cat: 'all', hideUnfree: false };
 const CLASS_LABEL = { app: 'application', 'term-app': 'terminal application', cli: 'command-line tool' };
 const CLASS_COLOR = { app: 'app', 'term-app': 'term-app', cli: 'cli' };
 const $ = (s) => document.querySelector(s);
@@ -87,7 +90,10 @@ function buildChips() {
     ['cli', `Command-line tools`, state.counts.cliTools]];
   $('#chips').innerHTML = chips
     .map(([c, label, n]) => `<div class="chip" data-c="${c}">${label} <b>${n.toLocaleString()}</b></div>`)
-    .join('');
+    .join('') +
+    '<label class="togglebar"><input type="checkbox" id="hidef"> Hide unfree apps</label>';
+  const hf = $('#hidef');
+  hf.addEventListener('change', () => { state.hideUnfree = hf.checked; state.page = 1; render(); });
   $('#chips').querySelectorAll('.chip').forEach((el) =>
     el.addEventListener('click', () => setCat(el.dataset.c)));
 }
@@ -111,6 +117,7 @@ function score(r, terms) {
 
 function visible() {
   let list = state.entries;
+  if (state.hideUnfree) list = list.filter((e) => !e.unfree);
   if (state.cat !== 'all') list = list.filter((e) => e.class === state.cat);
   if (state.query) {
     const terms = toks(state.query);
@@ -160,6 +167,7 @@ function render() {
       </div>
       ${e.description ? `<div class="desc">${esc(e.description)}</div>` : ''}
       <div class="kg">
+        ${e.unfree ? '<span class="unfree">unfree</span>' : ''}
         <span class="k">class <b>${CLASS_LABEL[e.class]}</b></span>
         <span class="k">tier <b>${e.tier}</b></span>
         <span class="k">confidence <b>${e.confidence}</b></span>

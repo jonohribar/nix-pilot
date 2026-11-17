@@ -72,6 +72,7 @@ for (const r of drv) {
     description: r.description,
     homePage: r.homePage,
     licenseOk: r.licenseOk,
+    unfree: r.licenseFree === false,   // hide-unfree filter (D1/l3q.2)
     linuxOK: linuxOK(r),
     mainProgram: r.mainProgram,
     class: cls,          // 'app' | 'cli'
@@ -94,6 +95,7 @@ const index = {
     cliTools: entries.filter((e) => e.class === 'cli').length,
     excludedLibraries: excludedLibs,
     installableOnLinux: entries.filter((e) => e.linuxOK).length,
+    unfreeShipped: entries.filter((e) => e.unfree).length, // known-unfree listed entries (D17)
   },
   entries,
 };

@@ -151,6 +151,14 @@ Index contents: 3,074 apps (100 % with description by construction; 96 % Linux-i
 - Two harness fixes from the first runs: `run()` now uses `spawnSync` to capture diagnostics even on non-zero exit (unfree/alias/eval errors exit non-zero with the message on stderr, which `execSync` swallowed on throw), and the unfree-license refusal is detected on the dry-run and marked `unfree-deferred` instead of being mislabelled `fetch-failed` and wastefully re-fetched.
 - Interim (482 evidence-tierable rows): **rich 18.5% · basic 25.3% · uncertain 56.2% — evidence-backed 43.8% ± 4.4pp**. The uncertain 56% demote into the D16 command-line group; the heuristic app class is thus only a modest minority evidence-backed.
 
+## Hide-unfree filter (l3q.2)
+
+Per decision D1 unfree applications are listed by default, with an optional user-controlled filter to hide them. The signal: `export.nix` now emits a tri-state `licenseFree` from `meta.license.free` (true = all licences free, false = ≥1 known-unfree, null = indeterminate), the generator carries it into each entry as `unfree = licenseFree === false`, and both surfaces expose the opt-in filter:
+- `view.html` — "Hide unfree apps" toggle (top-right) filters the list and tags single entries `unfree`.
+- `search.js <q> --hide-unfree` excludes known-unfree entries; `--stats` reports `unfree`. Measured: 1,081 of 22,030 shipped entries are signed unfree.
+
+This is explicit user behaviour, not curation, so it does not violate D4.
+
 ## Browsable viewer
 
 - `view.html` — self-contained page (no deps) that loads `results/catalogue-index.json` and does live grouped search plus category browsing (all / applications / terminal apps / command-line tools), with the same scoring as `search.js`.
