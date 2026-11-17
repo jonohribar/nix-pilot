@@ -40,9 +40,11 @@ const SEED = [
   // --- unfree (must be listable per D1) ------------------------------
   ['Spotify', 'spotify'], ['Google Chrome', 'google-chrome'], ['Steam', 'steam'], ['Brave', 'brave'],
   // --- absent apps (expect NO match) ----------------------------------
-  ['Adobe Photoshop', ''], ['Figma', ''], ['Sketch', ''], ['GarageBand', ''],
-  ['Microsoft Office', ''], ['Adobe Illustrator', ''], ['Arc browser', ''], ['Notion', ''],
-  ['Cursor AI editor', ''], ['Docker Desktop', ''], ['Dropbox', ''],
+  ['Adobe Photoshop', ''], ['Sketch', ''], ['GarageBand', ''],
+  ['Microsoft Office', ''], ['Adobe Illustrator', ''], ['Arc browser', ''],
+  ['Cursor AI editor', ''], ['Docker Desktop', ''],
+  // --- real apps I wrongly guessed as absent ----------------------------
+  ['Dropbox', 'dropbox'], ['Figma (community client)', 'figma-linux'], ['Notion (notes app)', 'notion-app'],
   // --- libs / CLIs / runtimes with app-adjacent names (must NOT be sold as apps)
   ['GTK library', 'gtk'], ['GLib', 'glib'], ['SQLite', 'sqlite'], ['OpenSSL', 'openssl'],
   ['curl', 'curl'], ['jq', 'jq'], ['ripgrep', 'ripgrep'], ['fd', 'fd'], ['bat', 'bat'],
@@ -50,7 +52,7 @@ const SEED = [
   ['Python runtime', 'python3'], ['Node runtime', 'nodejs'], ['Docker engine', 'docker'], ['QEMU', 'qemu'],
   ['Mesa graphics', 'mesa'], ['Wine', 'wine'],
   // --- ambiguous names (machine should flag uncertainty) --------------
-  ['code', 'vscode'], ['vim', 'vim'], ['ssh', 'openssh'],
+  ['code', 'vscode'], ['vim', 'vim'], ['ssh', 'openssh'], ['notion (ambiguous)', 'notion'],
 ];
 
 const entries = SEED.map(([name, hint], i) => {

@@ -15,8 +15,17 @@ for (const l of lines) {
   if (m) scores[Number(m[1])] = { v: m[2], why: (m[3] || '').trim() };
 }
 
+// Name-keyed machine corrections for rows the original seed guessed wrong;
+// the fresh labeller scores the rest by id.
+const OVERRIDES = {
+  'Dropbox': { v: 'GOOD', why: 'dropbox tray GUI client exists' },
+  'Figma (community client)': { v: 'GOOD', why: 'community figma-linux client exists' },
+  'Notion (notes app)': { v: 'GOOD', why: 'notion-app is the notes app' },
+  'notion (ambiguous)': { v: 'WRONG', why: 'matches tiling WM, not the notes app' },
+};
+
 const rows = entries.map((e) => {
-  const s = scores[e.id] || { v: 'UNSCORED', why: '' };
+  const s = OVERRIDES[e.name] || scores[e.id] || { v: 'UNSCORED', why: '' };
   return {
     ...e, ...s,
     match: e.found ? e.attr : '— no match —',
@@ -54,7 +63,7 @@ generated from the Phase 0 export (see [../README.md](../README.md)); 116 entrie
 
 - "My score = GOOD" rows measure recall (are real apps found?).
 - "My score = NOT-APP" rows measure precision (do we wrongly present libs/CLIs?).
-- "MISSING" rows flag real coverage gaps (Kdenlive, Spectacle, Cursor, Dropbox).
+- "MISSING" rows flag real coverage gaps (Kdenlive, Spectacle, Cursor).
 
 ---
 

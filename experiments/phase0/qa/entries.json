@@ -748,15 +748,6 @@
   },
   {
     "id": 84,
-    "name": "Figma",
-    "hint": null,
-    "found": false,
-    "attr": null,
-    "tier": "no-match",
-    "desc": null
-  },
-  {
-    "id": 85,
     "name": "Sketch",
     "hint": null,
     "found": false,
@@ -765,7 +756,7 @@
     "desc": null
   },
   {
-    "id": 86,
+    "id": 85,
     "name": "GarageBand",
     "hint": null,
     "found": false,
@@ -774,7 +765,7 @@
     "desc": null
   },
   {
-    "id": 87,
+    "id": 86,
     "name": "Microsoft Office",
     "hint": null,
     "found": false,
@@ -783,7 +774,7 @@
     "desc": null
   },
   {
-    "id": 88,
+    "id": 87,
     "name": "Adobe Illustrator",
     "hint": null,
     "found": false,
@@ -792,7 +783,7 @@
     "desc": null
   },
   {
-    "id": 89,
+    "id": 88,
     "name": "Arc browser",
     "hint": null,
     "found": false,
@@ -801,16 +792,7 @@
     "desc": null
   },
   {
-    "id": 90,
-    "name": "Notion",
-    "hint": null,
-    "found": false,
-    "attr": null,
-    "tier": "no-match",
-    "desc": null
-  },
-  {
-    "id": 91,
+    "id": 89,
     "name": "Cursor AI editor",
     "hint": null,
     "found": false,
@@ -819,7 +801,7 @@
     "desc": null
   },
   {
-    "id": 92,
+    "id": 90,
     "name": "Docker Desktop",
     "hint": null,
     "found": false,
@@ -828,13 +810,31 @@
     "desc": null
   },
   {
-    "id": 93,
+    "id": 91,
     "name": "Dropbox",
-    "hint": null,
-    "found": false,
-    "attr": null,
-    "tier": "no-match",
-    "desc": null
+    "hint": "dropbox",
+    "found": true,
+    "attr": "dropbox",
+    "tier": "exact",
+    "desc": "Online stored folders (daemon version)"
+  },
+  {
+    "id": 92,
+    "name": "Figma (community client)",
+    "hint": "figma-linux",
+    "found": true,
+    "attr": "figma-linux",
+    "tier": "exact",
+    "desc": "Unofficial Electron-based Figma desktop app for Linux"
+  },
+  {
+    "id": 93,
+    "name": "Notion (notes app)",
+    "hint": "notion-app",
+    "found": true,
+    "attr": "notion-app",
+    "tier": "exact",
+    "desc": "App to write, plan, collaborate, and get organised"
   },
   {
     "id": 94,
@@ -1042,5 +1042,14 @@
     "attr": "openssh",
     "tier": "exact",
     "desc": "Implementation of the SSH protocol"
+  },
+  {
+    "id": 117,
+    "name": "notion (ambiguous)",
+    "hint": "notion",
+    "found": true,
+    "attr": "notion",
+    "tier": "exact",
+    "desc": "Tiling tabbed window manager"
   }
 ]
