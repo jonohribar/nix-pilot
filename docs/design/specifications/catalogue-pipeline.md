@@ -4,7 +4,7 @@ How the Software store's application catalogue is generated, end to end. The cat
 
 ## Scope
 
-- The first-release catalogue lists GUI applications the average user can install and run: rich desktop applications, basic desktop applications and uncertain GUI candidates. It does not attempt to classify the whole Nixpkgs package set (decision [D10](../../research/04-recommendations.md#decision-log)).
+- The first-release catalogue lists GUI applications the average user can install and run: rich desktop applications, basic desktop applications and uncertain GUI candidates. It does not attempt to classify the whole Nixpkgs package set (decision [D10](../../research/04-recommendations.md#decision-log)). A product that the set cannot install is never listed: only derivations reach the catalogue, so absent or non-installable products simply do not appear.
 - Libraries and low-level tools are excluded from ordinary browsing (requirement [REQ-7](../../requirements/requirements.md)); they are not part of the catalogue.
 - The catalogue is generated, never curated: no hand-maintained per-package content, mappings, screenshots or descriptions (decision [D4](../../research/04-recommendations.md#decision-log)).
 

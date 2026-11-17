@@ -64,7 +64,22 @@ The 1,804 evaluation-failing attributes (6.6%, e.g. `AAAAAASomeThingsFailToEvalu
 - 76/79 resolve to a top-level attribute; all 79 resolve once nested sets count (KDE apps live under `kdePackages.*`; Tor Browser is `tor-browser`). The 3 apparent misses were attribute-path guessing, not real gaps.
 - Of resolvable apps, 100% carry a description; 73/76 are buildable on Linux.
 
-This is an automated proxy for the QA sample (link recall in the common-name → attribute-path direction); the hand-labelled precision/recall sample remains the open step.
+This is an automated proxy for the QA sample; the human-reviewed sample with scores is below.
+
+## QA sample v1 results
+
+[qa/sample-v1.md](qa/sample-v1.md) is a 117-entry sample (known GUI apps, unfree apps, absent-app decoys, and lib/CLI decoys for precision). It was pre-scored by an independent labeller subagent, corrected for seed misses (Dropbox, notion-app, figma-linux), and approved by the project owner (skip = agree). `qa/score.js` computes:
+
+| Metric | Value |
+|---|---|
+| Known apps in sample | 86 |
+| Recall (apps correctly found) | 94.2 % |
+| Precision (of rows presented as apps) | 98.8 % |
+| Precision if CLIs/libs were naively presented as apps | 77.1 % |
+| The one WRONG match | `notion` — a tiling window manager, not the notes app (precision trap) |
+| MISSING | Kdenlive, Spectacle, Cursor, Docker Desktop — not installable from this set, so never listed (products the set cannot install do not appear) |
+
+Reading: the naive name→attribute join is strong on recall (94 %) and nearly perfect on precision (98.8 %) *once classification stops libs/CLIs from being presented as app tiles* — without that guard precision would drop to 77 %. This is the empirical case for the classification tiering (D13) and for the CLI-labelled result-class proposal (`nix-pilot-9f3.7`).
 
 ## Unfree outputs on public caches (`nix-pilot-9f3.4` baseline)
 
