@@ -12,6 +12,9 @@ This folder records research done before implementation begins. It exists to pre
 | `02-catalogue-feasibility.md` | Technical evidence for the automatically generated app catalogue (Phase 0) | Engineers starting Phase 0 |
 | `03-failure-modes-and-risks.md` | The failure patterns that killed prior work, mapped to this project | Product owners, reviewers |
 | `04-recommendations.md` | Recommendations and an open-decision log | Decision makers |
+| `05-phase0-findings.md` | Measured Phase 0 result: catalogue generation proven with caveats | Engineers starting the generator build |
+
+`05` is the measured outcome of the Phase 0 prototypes in `../design/../experiments/` (the instruments live in `experiments/phase0/`); it supersedes the open question in `02` with numbers.
 
 Living project artifacts live in `../design/` — navigation hub `../design/plan.md` (plan structure, destination map, epic links), risk register `../design/risks.md`, architecture, specifications and verification. Requirement statements live in `../requirements/`. This folder holds stable research findings only.
 
@@ -19,7 +22,7 @@ Living project artifacts live in `../design/` — navigation hub `../design/plan
 
 - **Possible:** yes. Every component has precedent. Package metadata evaluation without building is proven (search.nixos.org). Scoped GUIs over NixOS config have been demonstrated repeatedly.
 - **Feasible as scoped:** conditionally. The brief's scope constraints are correct and are the main reason this attempt is better positioned than its predecessors.
-- **Unproven:** the catalogue generation pipeline (Phase 0). The underlying AppStream-metadata gap has been an open nixpkgs RFC since 2016. The environment is now the most favourable it has ever been (see `02`), but the work is unproven until measured.
+- **Unproven → measured:** the catalogue generation pipeline (Phase 0). The AppStream-metadata gap has been an open nixpkgs RFC since 2016, but the Phase 0 study now measures it: enumeration proven, join ~95/99 %, coverage ~13 % of derivations, classification needing output evidence (`05`).
 - **Highest risk:** sustainability. Every predecessor, including the most popular one, died from single-maintainer collapse, not technical failure.
 
 ## Maintenance guidance

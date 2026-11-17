@@ -51,7 +51,8 @@ The plan has seven sections. Each section has one destination under `docs/`, one
 │       ├── 01-prior-art.md
 │       ├── 02-catalogue-feasibility.md
 │       ├── 03-failure-modes-and-risks.md
-│       └── 04-recommendations.md
+│       ├── 04-recommendations.md
+│       └── 05-phase0-findings.md
 ├── experiments
 │   └── phase0
 ├── LICENSE

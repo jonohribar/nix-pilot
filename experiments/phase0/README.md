@@ -4,6 +4,8 @@ Research instrument for the catalogue-generation wager: can a useful application
 
 Status: scoped preliminary result on this machine: enumeration proven, output-discovery and the Exec-level join look strong on a hand sample, unfree coverage confirmed open. Research-stage: harness is deliberately small and ad hoc; the finding, not the code, is the deliverable.
 
+The canonical findings record lives in [docs/research/05-phase0-findings.md](../../docs/research/05-phase0-findings.md); this README keeps the method, run details and caveats.
+
 ## Pin
 
 - Snapshot: the `nixpkgs` flake registered on this machine, imported impurely. narHash `sha256-qXFIqA6FCcx7XeDzw0ZNlkDT9UiCzrNDwK8RuU8RcHM=`, store path `/nix/store/cjndb9il5365hpqnn5k8gxp4w02xybsw-source`, recorded 2026-11-16.
