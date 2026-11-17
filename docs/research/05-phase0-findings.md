@@ -14,7 +14,7 @@ The wager is substantially proven, with two caveats. Enumerating the whole packa
 | Metadata completeness | pname/version ~99.5 %; description ~98.7 %; homepage ~97 %; licence ~98.7 %; mainProgram 64 % |
 | Join recall | 94.2 % of known apps found correctly (86 known apps in the QA sample) |
 | Join precision | 98.8 % of rows presented as apps are right; 77.1 % if libs/CLIs are naively presented as apps |
-| Classification (description heuristics) | 86.9 % accuracy; catches real apps (98.7 % recall) but lets CLIs through (git, tmux, ffmpeg …) |
+| Classification (description heuristics) | 86.9 % accuracy on the QA sample; at app-candidate scale only ~34 % of heuristic app candidates are evidence-backed, the rest are TUI/CLI tools (tier-split sample) |
 | Coverage | 13.0 % ± 3.8 % of random derivations ship a desktop entry ≈ 3,200 GUI-app candidates; metainfo 4.0 % |
 | Unfree | metadata fully present in the default export; outputs 404 on cache.nixos.org and nix-community.cachix.org |
 

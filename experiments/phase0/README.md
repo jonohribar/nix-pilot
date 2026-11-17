@@ -147,6 +147,14 @@ Index contents: 3,181 apps (100 % with description by construction; 96 % Linux-i
 
 `search.js` queries the index when present and labels results by class — implementing D16: a search for `docker` returns the *command-line tool* group, never an app tile. This is the Phase 0 acceptance probe ("search one term, relevant results") over the classified app universe.
 
+## Tier-split sample — the classification finding
+
+`tier-sample.js` fetches output evidence (desktop entries / metainfo) for a random sample of the index's app candidates, to split them into rich / basic / uncertain. Resumable (`results/tier-sample.jsonl`).
+
+Result (41 evidence-tierable apps): **rich 15 %, basic 20 %, uncertain-no-evidence 66 %**. The uncertain set is overwhelmingly TUI/CLI tools the heuristic mistook for apps — `mc` (Midnight Commander, a TUI), `astroterm` ("Celestial viewer for the terminal"), `tuifimanager`, `termirs`, `bork` ("TUI chat client"), `shocco`, `http-nu` — while every real GUI app sampled (blueman, joplin-desktop, openra, aegisub, retext) carried desktop evidence.
+
+Big finding: **the count-calibrated heuristic app class (3,181) is only ~1/3 evidence-backed; ~2/3 are terminal/CLI tools.** Calibrating the count to the coverage rate was coincidental — heuristics and output evidence measure different populations. The evidence-defined app universe is the coverage survey's ~3,200 desktop-entry-bearing derivations; the generator's classification must be evidence-driven (fetch-based), which is the coverage pipeline's job, and the demoted TUIs belong in the D16 command-line group.
+
 ## What this proves
 
 - **Enumeration + metadata export is cheap and complete.** ~30 s for the full top-level set, near-complete pname/version/description/homepage/platforms/license.
