@@ -1,0 +1,1046 @@
+[
+  {
+    "id": 1,
+    "name": "Firefox",
+    "hint": "firefox",
+    "found": true,
+    "attr": "firefox",
+    "tier": "exact",
+    "desc": "Web browser built from Firefox source tree"
+  },
+  {
+    "id": 2,
+    "name": "Chromium",
+    "hint": "chromium",
+    "found": true,
+    "attr": "chromium",
+    "tier": "exact",
+    "desc": "Open source web browser from Google"
+  },
+  {
+    "id": 3,
+    "name": "Epiphany",
+    "hint": "epiphany",
+    "found": true,
+    "attr": "epiphany",
+    "tier": "exact",
+    "desc": "WebKit based web browser for GNOME"
+  },
+  {
+    "id": 4,
+    "name": "qutebrowser",
+    "hint": "qutebrowser",
+    "found": true,
+    "attr": "qutebrowser",
+    "tier": "exact",
+    "desc": "Keyboard-focused browser with a minimal GUI"
+  },
+  {
+    "id": 5,
+    "name": "Tor Browser",
+    "hint": "tor-browser",
+    "found": true,
+    "attr": "tor-browser",
+    "tier": "exact",
+    "desc": "Privacy-focused browser routing traffic through the Tor network"
+  },
+  {
+    "id": 6,
+    "name": "VS Code",
+    "hint": "vscode",
+    "found": true,
+    "attr": "vscode",
+    "tier": "exact",
+    "desc": "Code editor developed by Microsoft"
+  },
+  {
+    "id": 7,
+    "name": "VSCodium",
+    "hint": "vscodium",
+    "found": true,
+    "attr": "vscodium",
+    "tier": "exact",
+    "desc": "Open source source code editor developed by Microsoft for Windows,\nLin"
+  },
+  {
+    "id": 8,
+    "name": "gedit",
+    "hint": "gedit",
+    "found": true,
+    "attr": "gedit",
+    "tier": "exact",
+    "desc": "Former GNOME text editor"
+  },
+  {
+    "id": 9,
+    "name": "Geany",
+    "hint": "geany",
+    "found": true,
+    "attr": "geany",
+    "tier": "exact",
+    "desc": "Small and lightweight IDE"
+  },
+  {
+    "id": 10,
+    "name": "Neovide",
+    "hint": "neovide",
+    "found": true,
+    "attr": "neovide",
+    "tier": "exact",
+    "desc": "Simple, no-nonsense, cross-platform graphical user interface for Neovi"
+  },
+  {
+    "id": 11,
+    "name": "Emacs (GUI)",
+    "hint": "emacs",
+    "found": true,
+    "attr": "emacs",
+    "tier": "exact",
+    "desc": "Extensible, customizable GNU text editor"
+  },
+  {
+    "id": 12,
+    "name": "Mousepad",
+    "hint": "mousepad",
+    "found": true,
+    "attr": "mousepad",
+    "tier": "exact",
+    "desc": "Simple text editor for Xfce"
+  },
+  {
+    "id": 13,
+    "name": "Sublime Text",
+    "hint": "sublime4",
+    "found": true,
+    "attr": "sublime4",
+    "tier": "exact",
+    "desc": "Sophisticated text editor for code, markup and prose"
+  },
+  {
+    "id": 14,
+    "name": "kitty",
+    "hint": "kitty",
+    "found": true,
+    "attr": "kitty",
+    "tier": "exact",
+    "desc": "Fast, feature-rich, GPU based terminal emulator"
+  },
+  {
+    "id": 15,
+    "name": "Alacritty",
+    "hint": "alacritty",
+    "found": true,
+    "attr": "alacritty",
+    "tier": "exact",
+    "desc": "Cross-platform, GPU-accelerated terminal emulator"
+  },
+  {
+    "id": 16,
+    "name": "foot",
+    "hint": "foot",
+    "found": true,
+    "attr": "foot",
+    "tier": "exact",
+    "desc": "Fast, lightweight and minimalistic Wayland terminal emulator"
+  },
+  {
+    "id": 17,
+    "name": "Tilix",
+    "hint": "tilix",
+    "found": true,
+    "attr": "tilix",
+    "tier": "exact",
+    "desc": "Tiling terminal emulator following the Gnome Human Interface Guideline"
+  },
+  {
+    "id": 18,
+    "name": "xterm",
+    "hint": "xterm",
+    "found": true,
+    "attr": "xterm",
+    "tier": "exact",
+    "desc": "Terminal emulator for the X Window System"
+  },
+  {
+    "id": 19,
+    "name": "rxvt-unicode",
+    "hint": "rxvt-unicode",
+    "found": true,
+    "attr": "rxvt-unicode",
+    "tier": "exact",
+    "desc": "Clone of the well-known terminal emulator rxvt"
+  },
+  {
+    "id": 20,
+    "name": "WezTerm",
+    "hint": "wezterm",
+    "found": true,
+    "attr": "wezterm",
+    "tier": "exact",
+    "desc": "GPU-accelerated cross-platform terminal emulator and multiplexer writt"
+  },
+  {
+    "id": 21,
+    "name": "st terminal",
+    "hint": "st",
+    "found": true,
+    "attr": "st",
+    "tier": "exact",
+    "desc": "Simple Terminal for X from Suckless.org Community"
+  },
+  {
+    "id": 22,
+    "name": "Nautilus",
+    "hint": "nautilus",
+    "found": true,
+    "attr": "nautilus",
+    "tier": "exact",
+    "desc": "File manager for GNOME"
+  },
+  {
+    "id": 23,
+    "name": "Nemo",
+    "hint": "nemo",
+    "found": true,
+    "attr": "nemo",
+    "tier": "exact",
+    "desc": "File browser for Cinnamon"
+  },
+  {
+    "id": 24,
+    "name": "Thunar",
+    "hint": "thunar",
+    "found": true,
+    "attr": "thunar",
+    "tier": "exact",
+    "desc": "Xfce file manager"
+  },
+  {
+    "id": 25,
+    "name": "PCManFM",
+    "hint": "pcmanfm",
+    "found": true,
+    "attr": "pcmanfm",
+    "tier": "exact",
+    "desc": "File manager with GTK interface"
+  },
+  {
+    "id": 26,
+    "name": "Double Commander",
+    "hint": "doublecmd",
+    "found": true,
+    "attr": "doublecmd",
+    "tier": "exact",
+    "desc": "Two-panel graphical file manager written in Pascal"
+  },
+  {
+    "id": 27,
+    "name": "Krusader",
+    "hint": "krusader",
+    "found": true,
+    "attr": "krusader",
+    "tier": "exact",
+    "desc": "Norton/Total Commander clone for KDE"
+  },
+  {
+    "id": 28,
+    "name": "VLC",
+    "hint": "vlc",
+    "found": true,
+    "attr": "vlc",
+    "tier": "exact",
+    "desc": "Cross-platform media player and streaming server"
+  },
+  {
+    "id": 29,
+    "name": "mpv",
+    "hint": "mpv",
+    "found": true,
+    "attr": "mpv",
+    "tier": "exact",
+    "desc": "General-purpose media player, fork of MPlayer and mplayer2"
+  },
+  {
+    "id": 30,
+    "name": "Totem",
+    "hint": "totem",
+    "found": true,
+    "attr": "totem",
+    "tier": "exact",
+    "desc": "Movie player for the GNOME desktop based on GStreamer"
+  },
+  {
+    "id": 31,
+    "name": "Kdenlive",
+    "hint": "kdenlive",
+    "found": false,
+    "attr": null,
+    "tier": "no-match",
+    "desc": null
+  },
+  {
+    "id": 32,
+    "name": "Audacity",
+    "hint": "audacity",
+    "found": true,
+    "attr": "audacity",
+    "tier": "exact",
+    "desc": "Sound editor with graphical UI"
+  },
+  {
+    "id": 33,
+    "name": "Blender",
+    "hint": "blender",
+    "found": true,
+    "attr": "blender",
+    "tier": "exact",
+    "desc": "3D Creation/Animation/Publishing System"
+  },
+  {
+    "id": 34,
+    "name": "OBS Studio",
+    "hint": "obs-studio",
+    "found": true,
+    "attr": "obs-studio",
+    "tier": "exact",
+    "desc": "Free and open source software for video recording and live streaming"
+  },
+  {
+    "id": 35,
+    "name": "GIMP",
+    "hint": "gimp",
+    "found": true,
+    "attr": "gimp",
+    "tier": "exact",
+    "desc": "GNU Image Manipulation Program"
+  },
+  {
+    "id": 36,
+    "name": "Inkscape",
+    "hint": "inkscape",
+    "found": true,
+    "attr": "inkscape",
+    "tier": "exact",
+    "desc": "Vector graphics editor"
+  },
+  {
+    "id": 37,
+    "name": "Krita",
+    "hint": "krita",
+    "found": true,
+    "attr": "krita",
+    "tier": "exact",
+    "desc": "Free and open source painting application"
+  },
+  {
+    "id": 38,
+    "name": "Darktable",
+    "hint": "darktable",
+    "found": true,
+    "attr": "darktable",
+    "tier": "exact",
+    "desc": "Virtual lighttable and darkroom for photographers"
+  },
+  {
+    "id": 39,
+    "name": "RawTherapee",
+    "hint": "rawtherapee",
+    "found": true,
+    "attr": "rawtherapee",
+    "tier": "exact",
+    "desc": "RAW converter and digital photo processing software"
+  },
+  {
+    "id": 40,
+    "name": "Kodi",
+    "hint": "kodi",
+    "found": true,
+    "attr": "kodi",
+    "tier": "exact",
+    "desc": "Media center"
+  },
+  {
+    "id": 41,
+    "name": "LibreOffice",
+    "hint": "libreoffice",
+    "found": true,
+    "attr": "libreoffice",
+    "tier": "exact",
+    "desc": "Comprehensive, professional-quality productivity suite, a variant of o"
+  },
+  {
+    "id": 42,
+    "name": "Calibre",
+    "hint": "calibre",
+    "found": true,
+    "attr": "calibre",
+    "tier": "exact",
+    "desc": "Comprehensive e-book software"
+  },
+  {
+    "id": 43,
+    "name": "Evince",
+    "hint": "evince",
+    "found": true,
+    "attr": "evince",
+    "tier": "exact",
+    "desc": "GNOME's document viewer"
+  },
+  {
+    "id": 44,
+    "name": "Zathura",
+    "hint": "zathura",
+    "found": true,
+    "attr": "zathura",
+    "tier": "exact",
+    "desc": "Highly customizable and functional PDF viewer"
+  },
+  {
+    "id": 45,
+    "name": "PDF Arranger",
+    "hint": "pdfarranger",
+    "found": true,
+    "attr": "pdfarranger",
+    "tier": "exact",
+    "desc": "Merge or split pdf documents and rotate, crop and rearrange their page"
+  },
+  {
+    "id": 46,
+    "name": "Thunderbird",
+    "hint": "thunderbird",
+    "found": true,
+    "attr": "thunderbird",
+    "tier": "exact",
+    "desc": "Full-featured e-mail client"
+  },
+  {
+    "id": 47,
+    "name": "Evolution",
+    "hint": "evolution",
+    "found": true,
+    "attr": "evolution",
+    "tier": "exact",
+    "desc": "Personal information management application that provides integrated m"
+  },
+  {
+    "id": 48,
+    "name": "eog",
+    "hint": "eog",
+    "found": true,
+    "attr": "eog",
+    "tier": "exact",
+    "desc": "GNOME image viewer"
+  },
+  {
+    "id": 49,
+    "name": "feh",
+    "hint": "feh",
+    "found": true,
+    "attr": "feh",
+    "tier": "exact",
+    "desc": "Light-weight image viewer"
+  },
+  {
+    "id": 50,
+    "name": "Shotwell",
+    "hint": "shotwell",
+    "found": true,
+    "attr": "shotwell",
+    "tier": "exact",
+    "desc": "Popular photo organizer for the GNOME desktop"
+  },
+  {
+    "id": 51,
+    "name": "Flameshot",
+    "hint": "flameshot",
+    "found": true,
+    "attr": "flameshot",
+    "tier": "exact",
+    "desc": "Powerful yet simple to use screenshot software"
+  },
+  {
+    "id": 52,
+    "name": "Spectacle",
+    "hint": "spectacle",
+    "found": false,
+    "attr": null,
+    "tier": "no-match",
+    "desc": null
+  },
+  {
+    "id": 53,
+    "name": "GNOME Font Viewer",
+    "hint": "gnome-font-viewer",
+    "found": true,
+    "attr": "gnome-font-viewer",
+    "tier": "exact",
+    "desc": "Program that can preview fonts and create thumbnails for fonts"
+  },
+  {
+    "id": 54,
+    "name": "Signal",
+    "hint": "signal-desktop",
+    "found": true,
+    "attr": "signal-desktop",
+    "tier": "exact",
+    "desc": "Private, simple, and secure messenger"
+  },
+  {
+    "id": 55,
+    "name": "Discord",
+    "hint": "discord",
+    "found": true,
+    "attr": "discord",
+    "tier": "exact",
+    "desc": "All-in-one cross-platform voice and text chat for gamers"
+  },
+  {
+    "id": 56,
+    "name": "Telegram",
+    "hint": "telegram-desktop",
+    "found": true,
+    "attr": "telegram-desktop",
+    "tier": "exact",
+    "desc": "Telegram Desktop messaging app"
+  },
+  {
+    "id": 57,
+    "name": "Element",
+    "hint": "element-desktop",
+    "found": true,
+    "attr": "element-desktop",
+    "tier": "exact",
+    "desc": "Matrix client for desktop"
+  },
+  {
+    "id": 58,
+    "name": "Slack",
+    "hint": "slack",
+    "found": true,
+    "attr": "slack",
+    "tier": "exact",
+    "desc": "Desktop client for Slack"
+  },
+  {
+    "id": 59,
+    "name": "Rocket.Chat",
+    "hint": "rocketchat-desktop",
+    "found": true,
+    "attr": "rocketchat-desktop",
+    "tier": "exact",
+    "desc": "Official Desktop client for Rocket.Chat"
+  },
+  {
+    "id": 60,
+    "name": "GParted",
+    "hint": "gparted",
+    "found": true,
+    "attr": "gparted",
+    "tier": "exact",
+    "desc": "Graphical disk partitioning tool"
+  },
+  {
+    "id": 61,
+    "name": "GNOME Disk Utility",
+    "hint": "gnome-disk-utility",
+    "found": true,
+    "attr": "gnome-disk-utility",
+    "tier": "exact",
+    "desc": "Udisks graphical front-end"
+  },
+  {
+    "id": 62,
+    "name": "GNOME System Monitor",
+    "hint": "gnome-system-monitor",
+    "found": true,
+    "attr": "gnome-system-monitor",
+    "tier": "exact",
+    "desc": "System Monitor shows you what programs are running and how much proces"
+  },
+  {
+    "id": 63,
+    "name": "htop",
+    "hint": "htop",
+    "found": true,
+    "attr": "htop",
+    "tier": "exact",
+    "desc": "Interactive process viewer"
+  },
+  {
+    "id": 64,
+    "name": "btop",
+    "hint": "btop",
+    "found": true,
+    "attr": "btop",
+    "tier": "exact",
+    "desc": "Monitor of resources"
+  },
+  {
+    "id": 65,
+    "name": "KeePassXC",
+    "hint": "keepassxc",
+    "found": true,
+    "attr": "keepassxc",
+    "tier": "exact",
+    "desc": "Offline password manager with many features"
+  },
+  {
+    "id": 66,
+    "name": "Remmina",
+    "hint": "remmina",
+    "found": true,
+    "attr": "remmina",
+    "tier": "exact",
+    "desc": "Remote desktop client written in GTK"
+  },
+  {
+    "id": 67,
+    "name": "Pavucontrol",
+    "hint": "pavucontrol",
+    "found": true,
+    "attr": "pavucontrol",
+    "tier": "exact",
+    "desc": "PulseAudio Volume Control"
+  },
+  {
+    "id": 68,
+    "name": "Blueman",
+    "hint": "blueman",
+    "found": true,
+    "attr": "blueman",
+    "tier": "exact",
+    "desc": "GTK-based Bluetooth Manager"
+  },
+  {
+    "id": 69,
+    "name": "gThumb",
+    "hint": "gthumb",
+    "found": true,
+    "attr": "gthumb",
+    "tier": "exact",
+    "desc": "Image browser and viewer for GNOME"
+  },
+  {
+    "id": 70,
+    "name": "GNOME Calculator",
+    "hint": "gnome-calculator",
+    "found": true,
+    "attr": "gnome-calculator",
+    "tier": "exact",
+    "desc": "Application that solves mathematical equations and is suitable as a de"
+  },
+  {
+    "id": 71,
+    "name": "Baobab",
+    "hint": "baobab",
+    "found": true,
+    "attr": "baobab",
+    "tier": "exact",
+    "desc": "Graphical application to analyse disk usage in any GNOME environment"
+  },
+  {
+    "id": 72,
+    "name": "GNOME Chess",
+    "hint": "gnome-chess",
+    "found": true,
+    "attr": "gnome-chess",
+    "tier": "exact",
+    "desc": "Play the classic two-player boardgame of chess"
+  },
+  {
+    "id": 73,
+    "name": "GNOME Mines",
+    "hint": "gnome-mines",
+    "found": true,
+    "attr": "gnome-mines",
+    "tier": "exact",
+    "desc": "Clear hidden mines from a minefield"
+  },
+  {
+    "id": 74,
+    "name": "Foliate",
+    "hint": "foliate",
+    "found": true,
+    "attr": "foliate",
+    "tier": "exact",
+    "desc": "Simple and modern GTK eBook reader"
+  },
+  {
+    "id": 75,
+    "name": "Qalculate",
+    "hint": "qalculate-gtk",
+    "found": true,
+    "attr": "qalculate-gtk",
+    "tier": "exact",
+    "desc": "Ultimate desktop calculator"
+  },
+  {
+    "id": 76,
+    "name": "FreeCAD",
+    "hint": "freecad",
+    "found": true,
+    "attr": "freecad",
+    "tier": "exact",
+    "desc": "General purpose Open Source 3D CAD/MCAD/CAx/CAE/PLM modeler"
+  },
+  {
+    "id": 77,
+    "name": "Godot",
+    "hint": "godot",
+    "found": true,
+    "attr": "godot",
+    "tier": "exact",
+    "desc": "Free and Open Source 2D and 3D game engine"
+  },
+  {
+    "id": 78,
+    "name": "GnuCash",
+    "hint": "gnucash",
+    "found": true,
+    "attr": "gnucash",
+    "tier": "exact",
+    "desc": "Free software for double entry accounting"
+  },
+  {
+    "id": 79,
+    "name": "Spotify",
+    "hint": "spotify",
+    "found": true,
+    "attr": "spotify",
+    "tier": "exact",
+    "desc": "Play music from the Spotify music service"
+  },
+  {
+    "id": 80,
+    "name": "Google Chrome",
+    "hint": "google-chrome",
+    "found": true,
+    "attr": "google-chrome",
+    "tier": "exact",
+    "desc": "Freeware web browser developed by Google"
+  },
+  {
+    "id": 81,
+    "name": "Steam",
+    "hint": "steam",
+    "found": true,
+    "attr": "steam",
+    "tier": "exact",
+    "desc": "Digital distribution platform"
+  },
+  {
+    "id": 82,
+    "name": "Brave",
+    "hint": "brave",
+    "found": true,
+    "attr": "brave",
+    "tier": "exact",
+    "desc": "Privacy-oriented browser for Desktop and Laptop computers"
+  },
+  {
+    "id": 83,
+    "name": "Adobe Photoshop",
+    "hint": null,
+    "found": false,
+    "attr": null,
+    "tier": "no-match",
+    "desc": null
+  },
+  {
+    "id": 84,
+    "name": "Figma",
+    "hint": null,
+    "found": false,
+    "attr": null,
+    "tier": "no-match",
+    "desc": null
+  },
+  {
+    "id": 85,
+    "name": "Sketch",
+    "hint": null,
+    "found": false,
+    "attr": null,
+    "tier": "no-match",
+    "desc": null
+  },
+  {
+    "id": 86,
+    "name": "GarageBand",
+    "hint": null,
+    "found": false,
+    "attr": null,
+    "tier": "no-match",
+    "desc": null
+  },
+  {
+    "id": 87,
+    "name": "Microsoft Office",
+    "hint": null,
+    "found": false,
+    "attr": null,
+    "tier": "no-match",
+    "desc": null
+  },
+  {
+    "id": 88,
+    "name": "Adobe Illustrator",
+    "hint": null,
+    "found": false,
+    "attr": null,
+    "tier": "no-match",
+    "desc": null
+  },
+  {
+    "id": 89,
+    "name": "Arc browser",
+    "hint": null,
+    "found": false,
+    "attr": null,
+    "tier": "no-match",
+    "desc": null
+  },
+  {
+    "id": 90,
+    "name": "Notion",
+    "hint": null,
+    "found": false,
+    "attr": null,
+    "tier": "no-match",
+    "desc": null
+  },
+  {
+    "id": 91,
+    "name": "Cursor AI editor",
+    "hint": null,
+    "found": false,
+    "attr": null,
+    "tier": "no-match",
+    "desc": null
+  },
+  {
+    "id": 92,
+    "name": "Docker Desktop",
+    "hint": null,
+    "found": false,
+    "attr": null,
+    "tier": "no-match",
+    "desc": null
+  },
+  {
+    "id": 93,
+    "name": "Dropbox",
+    "hint": null,
+    "found": false,
+    "attr": null,
+    "tier": "no-match",
+    "desc": null
+  },
+  {
+    "id": 94,
+    "name": "GTK library",
+    "hint": "gtk",
+    "found": false,
+    "attr": null,
+    "tier": "no-match",
+    "desc": null
+  },
+  {
+    "id": 95,
+    "name": "GLib",
+    "hint": "glib",
+    "found": true,
+    "attr": "glib",
+    "tier": "exact",
+    "desc": "C library of programming buildings blocks"
+  },
+  {
+    "id": 96,
+    "name": "SQLite",
+    "hint": "sqlite",
+    "found": true,
+    "attr": "sqlite",
+    "tier": "exact",
+    "desc": "Self-contained, serverless, zero-configuration, transactional SQL data"
+  },
+  {
+    "id": 97,
+    "name": "OpenSSL",
+    "hint": "openssl",
+    "found": true,
+    "attr": "openssl",
+    "tier": "exact",
+    "desc": "Cryptographic library that implements the SSL and TLS protocols"
+  },
+  {
+    "id": 98,
+    "name": "curl",
+    "hint": "curl",
+    "found": true,
+    "attr": "curl",
+    "tier": "exact",
+    "desc": "Command line tool for transferring files with URL syntax"
+  },
+  {
+    "id": 99,
+    "name": "jq",
+    "hint": "jq",
+    "found": true,
+    "attr": "jq",
+    "tier": "exact",
+    "desc": "Lightweight and flexible command-line JSON processor"
+  },
+  {
+    "id": 100,
+    "name": "ripgrep",
+    "hint": "ripgrep",
+    "found": true,
+    "attr": "ripgrep",
+    "tier": "exact",
+    "desc": "Utility that combines the usability of The Silver Searcher with the ra"
+  },
+  {
+    "id": 101,
+    "name": "fd",
+    "hint": "fd",
+    "found": true,
+    "attr": "fd",
+    "tier": "exact",
+    "desc": "Simple, fast and user-friendly alternative to find"
+  },
+  {
+    "id": 102,
+    "name": "bat",
+    "hint": "bat",
+    "found": true,
+    "attr": "bat",
+    "tier": "exact",
+    "desc": "Cat(1) clone with syntax highlighting and Git integration"
+  },
+  {
+    "id": 103,
+    "name": "tmux",
+    "hint": "tmux",
+    "found": true,
+    "attr": "tmux",
+    "tier": "exact",
+    "desc": "Terminal multiplexer"
+  },
+  {
+    "id": 104,
+    "name": "zsh",
+    "hint": "zsh",
+    "found": true,
+    "attr": "zsh",
+    "tier": "exact",
+    "desc": "Z shell"
+  },
+  {
+    "id": 105,
+    "name": "Git CLI",
+    "hint": "git",
+    "found": true,
+    "attr": "git",
+    "tier": "exact",
+    "desc": "Distributed version control system"
+  },
+  {
+    "id": 106,
+    "name": "FFmpeg",
+    "hint": "ffmpeg",
+    "found": true,
+    "attr": "ffmpeg",
+    "tier": "exact",
+    "desc": "Complete, cross-platform solution to record, convert and stream audio "
+  },
+  {
+    "id": 107,
+    "name": "GCC",
+    "hint": "gcc",
+    "found": true,
+    "attr": "gcc",
+    "tier": "exact",
+    "desc": "GNU Compiler Collection, version 15.3.0 (wrapper script)"
+  },
+  {
+    "id": 108,
+    "name": "Python runtime",
+    "hint": "python3",
+    "found": true,
+    "attr": "python3",
+    "tier": "exact",
+    "desc": "High-level dynamically-typed programming language"
+  },
+  {
+    "id": 109,
+    "name": "Node runtime",
+    "hint": "nodejs",
+    "found": true,
+    "attr": "nodejs",
+    "tier": "exact",
+    "desc": "Event-driven I/O framework for the V8 JavaScript engine"
+  },
+  {
+    "id": 110,
+    "name": "Docker engine",
+    "hint": "docker",
+    "found": true,
+    "attr": "docker",
+    "tier": "exact",
+    "desc": "Open source project to pack, ship and run any application as a lightwe"
+  },
+  {
+    "id": 111,
+    "name": "QEMU",
+    "hint": "qemu",
+    "found": true,
+    "attr": "qemu",
+    "tier": "exact",
+    "desc": "Generic and open source machine emulator and virtualizer"
+  },
+  {
+    "id": 112,
+    "name": "Mesa graphics",
+    "hint": "mesa",
+    "found": true,
+    "attr": "mesa",
+    "tier": "exact",
+    "desc": "Open source 3D graphics library"
+  },
+  {
+    "id": 113,
+    "name": "Wine",
+    "hint": "wine",
+    "found": true,
+    "attr": "wine",
+    "tier": "exact",
+    "desc": "Open Source implementation of the Windows API on top of X, OpenGL, and"
+  },
+  {
+    "id": 114,
+    "name": "code",
+    "hint": "vscode",
+    "found": true,
+    "attr": "vscode",
+    "tier": "exact",
+    "desc": "Code editor developed by Microsoft"
+  },
+  {
+    "id": 115,
+    "name": "vim",
+    "hint": "vim",
+    "found": true,
+    "attr": "vim",
+    "tier": "exact",
+    "desc": "Most popular clone of the VI editor"
+  },
+  {
+    "id": 116,
+    "name": "ssh",
+    "hint": "openssh",
+    "found": true,
+    "attr": "openssh",
+    "tier": "exact",
+    "desc": "Implementation of the SSH protocol"
+  }
+]

@@ -68,7 +68,7 @@ This is an automated proxy for the QA sample (link recall in the common-name →
 
 ## Unfree outputs on public caches (`nix-pilot-9f3.4` baseline)
 
-With `allowUnfree = true` the unfree packages evaluate and their metadata is fully present in the exported set — the default gate, not the set, is what hides them from the catalogue.
+Unfree packages (`discord`, `spotify`, `slack`, `vscode`, `google-chrome`) are fully present in the default export with complete metadata — the gate refuses instantiating/building them, not enumerating them, so the catalogue can list them by default (D1) with the metadata evaluation provides.
 
 Their outputs, however, are absent from public caches at this snapshot, checked by store-path hash:
 
@@ -97,6 +97,12 @@ Sample queries return sensible, ranked application results ("browser" → browse
 
 Documented limitations: mainProgram coverage is 64%; description quality varies; the index is attribute-name/pname/description text only; no icons or screenshots yet.
 
+## Statistical coverage sample (deferred)
+
+`sample-coverage.js` draws a random sample of derivations, dry-runs each (skipping anything that would build locally or exceed the 150 MiB cap), fetches the rest from the cache, and scans for `.desktop`/metainfo. It is resumable (incremental `results/coverage-sample.jsonl`).
+
+Attempted on this laptop: 112/250 items in 30 min — 32 fetched, 74 failed, 6 too-large. The failures are cache-download connection errors (`Could not connect to cache.nixos.org:443`), the same network class as the session's ENETUNREACH plumbing issues (tracked as `nix-pilot-ege`), not a hardware or script fault. At n=32 the GUI rate (4/32) carries a ±11.5 % confidence interval, too noisy to report. Deferred: run the harness — or a paced variant — on real infra or a stable network, where it needs hours of machine time, not manual interaction.
+
 ## What this proves
 
 - **Enumeration + metadata export is cheap and complete.** ~30 s for the full top-level set, near-complete pname/version/description/homepage/platforms/license.
@@ -107,8 +113,8 @@ Documented limitations: mainProgram coverage is 64%; description quality varies;
 
 - **Coverage across the whole set, not a hand sample**: what share of all 24,658 derivations ship desktop entries/metainfo, and what does that imply for GUI-candidate recall.
 - **Join precision/recall at scale** on a hand-labelled QA sample (hundreds of apps), including ambiguous and cross-package cases.
-- **Full-set GUI-coverage scan**: what share of all 24,658 derivations ship desktop entries/metainfo. Needs fetching or building thousands of outputs; the natural next Phase-0 stage on real infra, not a quick probe.
-- **Hand-labelled QA sample**: precision/recall scored by manual review of hundreds of apps (QA, not curation) per the measurement plan.
+- **GUI-coverage estimate**: what share of all derivations ship desktop entries/metainfo. Needs stable network / real infra (this machine's cache connection is flaky; harness `sample-coverage.js` is ready and resumable).
+- **Hand-labelled QA sample**: [qa/sample-v1.md](qa/sample-v1.md) is generated and pre-scored, ready for human review (QA, not curation) per the measurement plan.
 - **Unfree images/metadata path** (`nix-pilot-9f3.4`): baseline recorded above (404 on official and nix-community caches); the alternate route is still open.
 
 ## Run
