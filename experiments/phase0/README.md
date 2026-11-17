@@ -143,9 +143,11 @@ This is the store's app-universe size expectation and the empirical case for cla
 
 Calibration: description/mainProgram heuristics alone over-flood (54 % apps at a low threshold). Requiring app−cli ≥ 3 reproduces the measured coverage base rate almost exactly — 3,181 app candidates = 12.9 % vs the 13.0 % ± 3.8 % coverage-survey estimate. The count-calibrated universe is the defensible part; confidence in v1 is high but undifferentiated (a calibrated binary, not a tier), so rich/basic/uncertain differentiation still needs desktop-entry evidence (the coverage-pipeline upgrade path).
 
-Index contents: 3,181 apps (100 % with description by construction; 96 % Linux-installable; 95 % with mainProgram), 18,849 command-line tools, 2,628 excluded libraries.
+Index contents: 3,074 apps (100 % with description by construction; 96 % Linux-installable; 95 % with mainProgram), 289 terminal applications (the TUI grey zone, pulled out of apps so they are never sold as GUI apps — `astroterm`, `termirs`, `bork`), 18,667 command-line tools, 2,628 excluded libraries. The taxonomy is mutable: more categories can be added and "everything not an app" can share a bucket, so a misplacement is presentation-only, never data loss; the evidence-driven rerun (`nix-pilot-nus.4`) is what ultimately sharpens the assignment.
 
 `search.js` queries the index when present and labels results by class — implementing D16: a search for `docker` returns the *command-line tool* group, never an app tile. This is the Phase 0 acceptance probe ("search one term, relevant results") over the classified app universe.
+
+Accepted interim (2026-11-17): the heuristic index stands as the v1 deliverable for demos and further study, with the confidence caveat above; the evidence-driven reclassification (fetching desktop entries for all candidates) is parked as a batch job for a real-infra/stable-network run, which produces the product-grade index.
 
 ## Tier-split sample — the classification finding
 

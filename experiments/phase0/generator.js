@@ -29,6 +29,10 @@ const CLI_HINTS = [
   'library for', 'utilities', 'script', 'plugin', 'agreement',
 ];
 const LIB_NAME = /^(lib|lib[0-9]|perl|python-?|node-?|ruby|haskell|php|guile|ocaml|dotnet|julia)/i;
+// Grey zone: interactive terminal applications (TUIs) are neither GUI apps nor
+// bare CLI tools; they get their own class so they are never mislabelled as
+// either. "terminal emulator" stays an app (kitty, alacritty are apps).
+const TUI_HINTS = /\btui\b|terminal-based|for the terminal|terminal user interface|ratatui|ncurses|curses-based|terminal app|uppercase terminal/;
 
 function classify(r) {
   const d = (r.description || '').toLowerCase();
@@ -44,6 +48,8 @@ function classify(r) {
   // Calibrated so the app-candidate count lands in the measured coverage band
   // (13.0% ± 3.8% of derivations ship a desktop entry; threshold 3 reproduces it).
   if (cli >= app + 3) return { cls: 'excluded-lib', conf: 0.6, tier: 'heuristic' };
+  // TUI/terminal-app signal overrides app classification (grey zone class).
+  if (!/terminal emulator/.test(d) && TUI_HINTS.test(d)) return { cls: 'term-app', conf: 0.8, tier: 'heuristic' };
   if (app - cli >= 3) {
     const conf = Math.min(0.95, 0.5 + (app - cli) / (app + cli + 6));
     return { cls: 'app', conf, tier: 'heuristic' };
@@ -84,6 +90,7 @@ const index = {
   },
   counts: {
     appCandidates: entries.filter((e) => e.class === 'app').length,
+    terminalApps: entries.filter((e) => e.class === 'term-app').length,
     cliTools: entries.filter((e) => e.class === 'cli').length,
     excludedLibraries: excludedLibs,
     installableOnLinux: entries.filter((e) => e.linuxOK).length,

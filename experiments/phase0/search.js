@@ -67,7 +67,7 @@ const ranked = drv
 console.log(JSON.stringify(
   ranked.map(([s, r]) => ({
     score: s,
-    group: r.class === 'cli' ? 'command-line tool' : 'application',
+    group: r.class === 'cli' ? 'command-line tool' : r.class === 'term-app' ? 'terminal application' : 'application',
     attr: r.name || r.attr,
     pname: r.pname,
     version: r.version,
