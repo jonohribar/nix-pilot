@@ -32,9 +32,20 @@ function rng(seed) {
   };
 }
 const rand = rng(SEED);
-const sample = [];
 const seen = new Set();
-while (sample.length < N) {
+const retry = [];
+// Resume: keep finished statuses; re-queue environmental failures (fetch-failed,
+// error) for retry; exclude everything already recorded from fresh sampling.
+if (fs.existsSync(OUTL)) {
+  for (const l of fs.readFileSync(OUTL, 'utf8').split('\n').filter(Boolean)) {
+    const j = JSON.parse(l);
+    seen.add(j.attr);
+    if (!j.status || j.status === 'fetch-failed' || j.status === 'error') retry.push(j.attr);
+  }
+}
+const sample = [...retry];
+console.log(`resuming: ${seen.size} recorded, ${retry.length} retried, filling to ${N}`);
+while (sample.length < N && seen.size < pool.length) {
   const name = pool[Math.floor(rand() * pool.length)];
   if (!seen.has(name)) { seen.add(name); sample.push(name); }
 }

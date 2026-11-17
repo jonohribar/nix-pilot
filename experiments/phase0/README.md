@@ -125,11 +125,15 @@ Sample queries return sensible, ranked application results ("browser" → browse
 
 Documented limitations: mainProgram coverage is 64%; description quality varies; the index is attribute-name/pname/description text only; no icons or screenshots yet.
 
-## Statistical coverage sample (deferred)
+## Statistical coverage sample
 
-`sample-coverage.js` draws a random sample of derivations, dry-runs each (skipping anything that would build locally or exceed the 150 MiB cap), fetches the rest from the cache, and scans for `.desktop`/metainfo. It is resumable (incremental `results/coverage-sample.jsonl`).
+`sample-coverage.js` draws a random sample of derivations, dry-runs each (skipping anything that would build locally or exceed the 150 MiB cap), fetches the rest from the cache, and scans for `.desktop`/metainfo. Resumable: partial results persist in `results/coverage-sample.jsonl` and fetch-failed items are re-queued on rerun.
 
-Attempted on this laptop: 112/250 items in 30 min — 32 fetched, 74 failed, 6 too-large. The failures are cache-download connection errors (`Could not connect to cache.nixos.org:443`), the same network class as the session's ENETUNREACH plumbing issues (tracked as `nix-pilot-ege`), not a hardware or script fault. At n=32 the GUI rate (4/32) carries a ±11.5 % confidence interval, too noisy to report. Deferred: run the harness — or a paced variant — on real infra or a stable network, where it needs hours of machine time, not manual interaction.
+Result (this machine, stable network, 293 fetched of 429 sampled): **GUI-app rate 13.0 % ± 3.8 %** (95 % CI) — 38 of 293 random derivations ship a desktop entry — extrapolating to **≈ 3,200 GUI application candidates** across the ~24,600-derivation set. The rate held stable across two independent chunks (13.2 % then 13.0 %). Metainfo rate 4.0 %.
+
+Caveats: desktop-entry presence counts window managers (`berry`, `muffin`) as GUI; the 119 unfetched items are mostly packages needing local builds (wrapped/patched), not network failures, and no correlation with GUI-ness was observed.
+
+This is the store's app-universe size expectation and the empirical case for classification: ~87 % of derivations are libraries/CLIs that must be tiered out of ordinary browsing.
 
 ## What this proves
 
