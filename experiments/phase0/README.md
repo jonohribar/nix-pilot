@@ -137,6 +137,16 @@ Caveats: desktop-entry presence counts window managers (`berry`, `muffin`) as GU
 
 This is the store's app-universe size expectation and the empirical case for classification: ~87 % of derivations are libraries/CLIs that must be tiered out of ordinary browsing.
 
+## Generator v1 — classified, versioned index
+
+`generator.js` turns the full-set export into a versioned catalogue index (`results/catalogue-index.json`, schema 0.1) with the classification table's classes: application candidates, command-line tools (decision [D16](../../docs/research/04-recommendations.md#decision-log)) and excluded libraries/system components.
+
+Calibration: description/mainProgram heuristics alone over-flood (54 % apps at a low threshold). Requiring app−cli ≥ 3 reproduces the measured coverage base rate almost exactly — 3,181 app candidates = 12.9 % vs the 13.0 % ± 3.8 % coverage-survey estimate. The count-calibrated universe is the defensible part; confidence in v1 is high but undifferentiated (a calibrated binary, not a tier), so rich/basic/uncertain differentiation still needs desktop-entry evidence (the coverage-pipeline upgrade path).
+
+Index contents: 3,181 apps (100 % with description by construction; 96 % Linux-installable; 95 % with mainProgram), 18,849 command-line tools, 2,628 excluded libraries.
+
+`search.js` queries the index when present and labels results by class — implementing D16: a search for `docker` returns the *command-line tool* group, never an app tile. This is the Phase 0 acceptance probe ("search one term, relevant results") over the classified app universe.
+
 ## What this proves
 
 - **Enumeration + metadata export is cheap and complete.** ~30 s for the full top-level set, near-complete pname/version/description/homepage/platforms/license.

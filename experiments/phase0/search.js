@@ -1,19 +1,22 @@
 #!/usr/bin/env node
-// First searchable catalogue: ranked search over the exported metadata
-// (results/records.json). Query terms score against attribute path, pname and
-// description; results are ranked and bounded. This is the "a user can search
-// one term and receive relevant application results" acceptance probe.
+// First searchable catalogue: ranked search over the exported metadata or the
+// generated index (results/catalogue-index.json when present). Query terms
+// score against attribute path, pname and description; results are grouped by
+// type (app vs command-line tool, decision D16) and bounded.
 //
 // Usage: node search.js "<query>" | node search.js --stats
 const fs = require('fs');
 const path = require('path');
 
-const recs = JSON.parse(fs.readFileSync(path.join(__dirname, 'results/records.json'), 'utf8'));
-const drv = recs.filter((r) => r.isDerivation && !r.evalError);
+const idxPath = path.join(__dirname, 'results/catalogue-index.json');
+const idx = fs.existsSync(idxPath) ? JSON.parse(fs.readFileSync(idxPath, 'utf8')) : null;
+const recs = idx
+  ? idx.entries
+  : JSON.parse(fs.readFileSync(path.join(__dirname, 'results/records.json'), 'utf8')).filter((r) => r.isDerivation && !r.evalError);
 const toks = (q) => q.toLowerCase().split(/[^a-z0-9.+-]+/).filter(Boolean);
 
 function score(rec, terms) {
-  const nameT = (rec.name || '').toLowerCase();
+  const nameT = (rec.name || rec.attr || '').toLowerCase();
   const pn = (rec.pname || '').toLowerCase();
   const desc = (rec.description || '').toLowerCase();
   let s = 0;
@@ -27,19 +30,24 @@ function score(rec, terms) {
   return s;
 }
 
+const drv = recs.filter((r) => !(idx && r.class === undefined) || r.class);
+
 if (process.argv[2] === '--stats') {
   const linuxOK = (r) => (r.platforms || []).some((p) => /(x86_64|aarch64|i686)-linux/.test(p));
-  const stats = {
-    cataloguedDocuments: drv.length,
-    withPname: drv.filter((r) => r.pname).length,
-    withVersion: drv.filter((r) => r.version).length,
-    withDescription: drv.filter((r) => r.description).length,
-    withHomePage: drv.filter((r) => r.homePage).length,
-    withLicense: drv.filter((r) => r.licenseOk).length,
-    withMainProgram: drv.filter((r) => r.mainProgram).length,
-    installableOnLinux: drv.filter(linuxOK).length,
-    evalErrorEntries: recs.filter((r) => r.evalError).length,
-  };
+  const stats = idx
+    ? { catalogue: 'index', schemaVersion: idx.schemaVersion, generated: idx.generated.date, ...idx.counts }
+    : {
+        catalogue: 'raw metadata',
+        cataloguedDocuments: drv.length,
+        withPname: drv.filter((r) => r.pname).length,
+        withVersion: drv.filter((r) => r.version).length,
+        withDescription: drv.filter((r) => r.description).length,
+        withHomePage: drv.filter((r) => r.homePage).length,
+        withLicense: drv.filter((r) => r.licenseOk).length,
+        withMainProgram: drv.filter((r) => r.mainProgram).length,
+        installableOnLinux: drv.filter(linuxOK).length,
+        evalErrorEntries: recs.filter((r) => r.evalError).length,
+      };
   console.log(JSON.stringify(stats, null, 2));
   process.exit(0);
 }
@@ -59,7 +67,8 @@ const ranked = drv
 console.log(JSON.stringify(
   ranked.map(([s, r]) => ({
     score: s,
-    attr: r.name,
+    group: r.class === 'cli' ? 'command-line tool' : 'application',
+    attr: r.name || r.attr,
     pname: r.pname,
     version: r.version,
     description: (r.description || '').slice(0, 90),
