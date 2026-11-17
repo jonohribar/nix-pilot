@@ -33,7 +33,7 @@ Importing existing configurations, editing raw Nix and advanced diagnostics may 
 
 ## Search
 
-- **S1.** The search index combines three document types: applications (names, aliases, package names, descriptions, upstream IDs, executable names, categories), settings (human-readable names, descriptions, synonyms, supported actions) and help content (explanations and task guidance).
+- **S1.** The search index combines four document types: applications (names, aliases, package names, descriptions, upstream IDs, executable names, categories), settings (human-readable names, descriptions, synonyms, supported actions), command-line tools (names, descriptions, package names) and help content (explanations and task guidance).
 - **S2.** Results are grouped and labelled by type. A common term such as "ssh" shows both the Remote Access setting and the OpenSSH application where relevant (journey B in user-needs).
 - **S3.** Settings workflows are product-authored. Nixpkgs cannot automatically generate a good consumer settings interface for every system option; designing those workflows is product work, while the application catalogue is generated (decision [D4](../research/04-recommendations.md#decision-log)).
 
@@ -56,5 +56,5 @@ These are the canonical requirement statements; each carries the origin story id
 - **REQ-4** (stories P4, L4). A user has a plain-language recovery path when a change fails to apply or the system will not start; at minimum, return to the previous working state. This is the deepest requirement and is tracked as risk [R03](../design/risks.md).
 - **REQ-5** (story P6). Common system configuration is presented as settings screens covering networking, display, sound, printers, users, power and remote access.
 - **REQ-6** (story P7; constraint C2). Nix concepts, configuration files and error output stay out of the normal experience.
-- **REQ-7** (stories P1, L1; constraint C9). The set of installable applications is clear, and libraries and low-level tools are excluded from ordinary browsing.
+- **REQ-7** (stories P1, L1; constraint C9). The set of installable applications is clear, and libraries and system components are excluded from ordinary browsing; command-line tools are searchable as a labelled "Command-line tool" group, never as application tiles (decision [D16](../research/04-recommendations.md#decision-log)).
 - **REQ-8** (story P5). Updates are reported in plain language and applied as a confirmable, recoverable transaction.

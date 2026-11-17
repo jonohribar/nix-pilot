@@ -5,7 +5,7 @@ How the Software store's application catalogue is generated, end to end. The cat
 ## Scope
 
 - The first-release catalogue lists GUI applications the average user can install and run: rich desktop applications, basic desktop applications and uncertain GUI candidates. It does not attempt to classify the whole Nixpkgs package set (decision [D10](../../research/04-recommendations.md#decision-log)). A product that the set cannot install is never listed: only derivations reach the catalogue, so absent or non-installable products simply do not appear.
-- Libraries and low-level tools are excluded from ordinary browsing (requirement [REQ-7](../../requirements/requirements.md)); they are not part of the catalogue.
+- Libraries and system components are excluded entirely. Command-line tools are indexed but presented as a labelled "Command-line tool" group in search, never as application tiles (decision [D16](../../research/04-recommendations.md#decision-log); requirement [REQ-7](../../requirements/requirements.md)).
 - The catalogue is generated, never curated: no hand-maintained per-package content, mappings, screenshots or descriptions (decision [D4](../../research/04-recommendations.md#decision-log)).
 
 ## Inputs and cadence
@@ -49,7 +49,8 @@ A record is classified from evidence and rules, matching the agreed classificati
 | Rich desktop application | AppStream component joined to a package | Normal Store listing, full available metadata |
 | Basic desktop application | Valid `.desktop` entry joined to a package | Normal Store listing, generated or basic details |
 | Uncertain GUI candidate | Heuristic evidence only | Lower-confidence or secondary results; never shown as certain |
-| Non-application | No desktop-app evidence | Excluded from ordinary browsing |
+| Command-line tool | CLI signature, no desktop entry | Searchable as a labelled "Command-line tool" group, never an app tile (decision [D16](../../research/04-recommendations.md#decision-log)) |
+| Library or system component | No app evidence | Excluded entirely |
 
 - Uncertain matches are never presented as certain; the confidence tier travels with the record so the UI can demote them.
 - The system must not silently fall back to a hand-maintained allowlist or mapping table.
@@ -61,7 +62,7 @@ A record is classified from evidence and rules, matching the agreed classificati
 ## Unfree packages
 
 - Unfree applications are listed by default (decision [D1](../../research/04-recommendations.md#decision-log)); an optional user filter may hide them later.
-- Hydra builds do not cover unfree packages (they are not built on Hydra), so deferring their images and metadata to Hydra alone is not possible; the primary source is Hydra where it applies, and binary-cache inspection for unfree coverage is evaluated separately.
+- Enrichment is interim: unfree apps are listed with the metadata evaluation provides (name, description), icons and screenshots are deferred, and installing one builds it locally with honest progress (decision [D17](../../research/04-recommendations.md#decision-log)). Hydra does not build unfree packages and no public cache serves their outputs (measured, `experiments/phase0`), so a separate cache route is the future upgrade path.
 
 ## Relationship to measurement
 
