@@ -36,8 +36,13 @@ const SCAN_TIMEOUT = Number(process.env.EV_SCAN_MS || 30000);
 
 const root = path.join(__dirname);
 const idx = JSON.parse(fs.readFileSync(path.join(root, 'results/catalogue-index.json'), 'utf8'));
-const pool = idx.entries.filter((e) => e.class === 'app').map((e) => e.attr);
-const OUTL = path.join(root, 'results/evidence.jsonl');
+// Pool is the app-candidate attrs by default; --attrs-from FILE overrides it with
+// an explicit newline list (e.g. app-smelling cli entries for the nus.5 recovery).
+const argA = process.argv.indexOf('--attrs-from');
+const pool = argA >= 0
+  ? fs.readFileSync(path.join(root, process.argv[argA + 1]), 'utf8').split('\n').map((s) => s.trim()).filter(Boolean)
+  : idx.entries.filter((e) => e.class === 'app').map((e) => e.attr);
+const OUTL = path.join(root, process.env.EV_OUT || 'results/evidence.jsonl');
 
 // Capture output even on non-zero exit (unfree/alias/eval errors exit non-zero but
 // their diagnostics live in stderr, which execSync would swallow on throw).

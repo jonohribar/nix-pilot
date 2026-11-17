@@ -19,15 +19,22 @@ const path = require('path');
 const root = path.join(__dirname);
 const IDX = path.join(root, 'results/catalogue-index.json');
 const EV = path.join(root, 'results/evidence.jsonl');
+const EV_CLI = path.join(root, 'results/evidence-cli.jsonl'); // nus.5 recovery source (optional)
 const write = process.argv.includes('--write');
 
 const idx = JSON.parse(fs.readFileSync(IDX, 'utf8'));
-const ev = new Map();
-for (const l of fs.readFileSync(EV, 'utf8').split('\n').filter(Boolean)) {
-  let j;
-  try { j = JSON.parse(l); } catch { continue; } // ignore a torn/partial concurrent line
-  ev.set(j.attr, j);
-}
+const load = (file) => {
+  const m = new Map();
+  if (!fs.existsSync(file)) return m;
+  for (const l of fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)) {
+    let j;
+    try { j = JSON.parse(l); } catch { continue; } // ignore a torn/partial line
+    m.set(j.attr, j);
+  }
+  return m;
+};
+const ev = load(EV);
+const evCli = load(EV_CLI);
 
 // tier -> (class, tier, note)
 const MAP = {
@@ -46,7 +53,17 @@ let dropped = 0;
 let changed = 0;
 const out = [];
 for (const e of idx.entries) {
-  if (e.class === 'term-app' || e.class === 'cli') { out.push(e); continue; }
+  // nus.5: recover real apps wrongly sitting in the cli pool (evidence-rich/basic -> app)
+  if (e.class === 'cli') {
+    const r = evCli.get(e.attr);
+    if (r) {
+      if (r.tier === 'rich') { changed++; out.push({ ...e, class: 'app', tier: 'rich' }); continue; }
+      if (r.tier === 'basic') { changed++; out.push({ ...e, class: 'app', tier: 'basic' }); continue; }
+    }
+    out.push(e);
+    continue;
+  }
+  if (e.class === 'term-app') { out.push(e); continue; }
   const row = ev.get(e.attr);
   let cls = e.class, tier = e.tier, note = e.note;
   if (e.class === 'app') {
