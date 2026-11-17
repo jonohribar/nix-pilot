@@ -23,6 +23,7 @@
   .chip[data-c="app"].active{background:var(--app);color:#0c1a10}
   .chip[data-c="term-app"].active{background:var(--term);color:#1a1508}
   .chip[data-c="cli"].active{background:var(--cli);color:#170b20}
+  .chip[data-c="unverified"].active{background:#7a7f8c;color:#f0f0f2}
   .chip b{font-weight:600}
   .togglebar{display:flex;align-items:center;gap:8px;margin-left:auto;color:var(--dim);font-size:12.5px}
   .togglebar input{accent-color:var(--accent)}
@@ -41,7 +42,7 @@
   .card .kg{margin-top:6px;font-size:11.5px;color:var(--dim);display:flex;gap:12px;flex-wrap:wrap}
   .kg .k b{color:var(--txt);font-weight:600}
   .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:1px}
-  .dot.app{background:var(--app)}.dot.term-app{background:var(--term)}.dot.cli{background:var(--cli)}
+  .dot.app{background:var(--app)}.dot.term-app{background:var(--term)}.dot.cli{background:var(--cli)}.dot.unverified{background:#7a7f8c}
   .empty{color:var(--dim);padding:14px 0}
   #more{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;
     padding:9px 16px;cursor:pointer;font-size:13px;display:block;margin:16px auto}
@@ -61,8 +62,8 @@
 <script>
 // ---- load index -------------------------------------------------------------
 const state = { entries: [], counts: {}, perPage: 80, page: 1, query: '', cat: 'all', hideUnfree: false };
-const CLASS_LABEL = { app: 'application', 'term-app': 'terminal application', cli: 'command-line tool' };
-const CLASS_COLOR = { app: 'app', 'term-app': 'term-app', cli: 'cli' };
+const CLASS_LABEL = { app: 'application', 'term-app': 'terminal application', cli: 'command-line tool', unverified: 'unverified application' };
+const CLASS_COLOR = { app: 'app', 'term-app': 'term-app', cli: 'cli', unverified: 'unverified' };
 const $ = (s) => document.querySelector(s);
 
 fetch('results/catalogue-index.json')
@@ -86,6 +87,7 @@ fetch('results/catalogue-index.json')
 function buildChips() {
   const chips = [['all', `Everything`, state.entries.length],
     ['app', `Applications`, state.counts.appCandidates],
+    ['unverified', `Unverified apps`, state.counts.unverifiedApps || 0],
     ['term-app', `Terminal apps`, state.counts.terminalApps],
     ['cli', `Command-line tools`, state.counts.cliTools]];
   $('#chips').innerHTML = chips
@@ -147,7 +149,7 @@ function render() {
   if (!list.length) { main.innerHTML = '<div class="empty">No matches.</div>'; return; }
 
   // group by class, preserving query order (or category)
-  const order = ['app', 'term-app', 'cli'];
+  const order = ['app', 'unverified', 'term-app', 'cli'];
   const groups = new Map();
   for (const e of sliced) {
     const g = groups.get(e.class) || [];
@@ -169,7 +171,7 @@ function render() {
       <div class="kg">
         ${e.unfree ? '<span class="unfree">unfree</span>' : ''}
         <span class="k">class <b>${CLASS_LABEL[e.class]}</b></span>
-        <span class="k">tier <b>${e.tier}</b></span>
+        <span class="k">tier <b>${e.tier}</b></span>${e.note ? ` <span class="k">note <b>${esc(e.note)}</b></span>` : ''}
         <span class="k">confidence <b>${e.confidence}</b></span>
         <span class="k">Linux <b>${e.linuxOK ? 'yes' : 'no'}</b></span>
         <span class="k">main <b>${esc(e.mainProgram || '—')}</b></span>

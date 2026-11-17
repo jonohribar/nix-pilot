@@ -12,16 +12,27 @@
 // nothing. Runs a bounded LIMIT of NEW items per invocation then stops cleanly
 // so it can be called repeatedly in stop-and-resume chunks.
 //
-// Usage: node evidence-all.js [LIMIT=200]
+// Usage: node evidence-all.js [LIMIT=200] [--bucket I] [--nbuckets N]
+// When --bucket/--nbuckets are given, only attrs whose stable hash falls in
+// bucket I of N are processed, so several instances can run in parallel on
+// disjoint pools into the same append-only evidence.jsonl (O_APPEND line writes
+// are atomic). A normal run (no flags) is fully sequential.
 const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');
 
 const LIMIT = Number(process.argv[2] || 200);
+const argB = process.argv.indexOf('--bucket');
+const argN = process.argv.indexOf('--nbuckets');
+const B = argB >= 0 ? Number(process.argv[argB + 1]) : 0;
+const NB = argN >= 0 ? Number(process.argv[argN + 1]) : 1;
+// Stable string hash so a bucket partition is deterministic across runs.
+const hash = (s) => { let x = 0; for (let i = 0; i < s.length; i++) x = ((x * 31) + s.charCodeAt(i)) >>> 0; return x; };
+const inBucket = (a) => (NB <= 1 || hash(a) % NB === B);
 const SIZE_CAP_MB = 500;
-const DRY_TIMEOUT = 120000;
-const FETCH_TIMEOUT = 300000;
-const SCAN_TIMEOUT = 30000;
+const DRY_TIMEOUT = Number(process.env.EV_DRY_MS || 120000);
+const FETCH_TIMEOUT = Number(process.env.EV_FETCH_MS || 300000);
+const SCAN_TIMEOUT = Number(process.env.EV_SCAN_MS || 30000);
 
 const root = path.join(__dirname);
 const idx = JSON.parse(fs.readFileSync(path.join(root, 'results/catalogue-index.json'), 'utf8'));
@@ -41,14 +52,15 @@ const seen = new Set();
 const retry = new Set();
 if (fs.existsSync(OUTL)) {
   for (const l of fs.readFileSync(OUTL, 'utf8').split('\n').filter(Boolean)) {
-    const j = JSON.parse(l);
+    let j;
+    try { j = JSON.parse(l); } catch { continue; } // ignore a torn/partial line
     seen.add(j.attr);
-    if (j.tier === 'error' || j.tier === 'fetch-failed') retry.add(j.attr);
+    if (inBucket(j.attr) && (j.tier === 'error' || j.tier === 'fetch-failed')) retry.add(j.attr);
   }
 }
 
-// Work queue: re-queued failures first, then unprocessed pool attrs.
-const queue = [...retry, ...pool.filter((a) => !seen.has(a))];
+// Work queue: this bucket's re-queued failures first, then its unprocessed attrs.
+const queue = [...retry, ...pool.filter((a) => inBucket(a) && !seen.has(a))];
 const toRun = queue.slice(0, LIMIT);
 console.log(`evidence-all: ${retry.size} re-queued, running ${toRun.length} (limit ${LIMIT}; ${queue.length - toRun.length} still queued of ${pool.length} app candidates)`);
 

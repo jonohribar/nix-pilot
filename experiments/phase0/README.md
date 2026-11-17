@@ -145,11 +145,13 @@ Calibration: description/mainProgram heuristics alone over-flood (54 % apps at a
 
 Index contents: 3,074 apps (100 % with description by construction; 96 % Linux-installable; 95 % with mainProgram), 289 terminal applications (the TUI grey zone, pulled out of apps so they are never sold as GUI apps — `astroterm`, `termirs`, `bork`), 18,667 command-line tools, 2,628 excluded libraries. The taxonomy is mutable: more categories can be added and "everything not an app" can share a bucket, so a misplacement is presentation-only, never data loss; the evidence-driven rerun (`nix-pilot-nus.4`) is what ultimately sharpens the assignment.
 
-## Evidence run (`nus.4`) — in progress, resumable
+## Evidence run (`nus.4`) — complete (2026-11-18)
 
-- `evidence-all.js` — the full evidence pass over **every** app candidate in the index (not a sample): fetch desktop-entry/AppStream-metainfo output evidence and tier each `rich` (>0 metainfo) / `basic` (>0 .desktop) / `uncertain-no-evidence` / plus too-large, build-needed, alias-missing, **unfree-deferred** (D17: instantiation refused on an unfree license, no public-cache route, really a listing metadata-only), error, fetch-failed. Resumable via `results/evidence.jsonl` (append-only; error + fetch-failed re-queued each run).
+- `evidence-all.js` — the full evidence pass over **every** app candidate in the index (not a sample): fetch desktop-entry/AppStream-metainfo output evidence and tier each `rich` (>0 metainfo) / `basic` (>0 .desktop) / `uncertain-no-evidence` / plus too-large, build-needed, alias-missing, **unfree-deferred** (D17: instantiation refused on an unfree license, no public-cache route, really a listing metadata-only), error, fetch-failed. Resumable via `results/evidence.jsonl` (append-only; error + fetch-failed re-queued each run). Supports parallel `--bucket I --nbuckets N` workers (stable attr-hash partition, atomic O_APPEND) with env-overridable timeouts (`EV_DRY_MS`/`EV_FETCH_MS`/`EV_SCAN_MS`).
 - Two harness fixes from the first runs: `run()` now uses `spawnSync` to capture diagnostics even on non-zero exit (unfree/alias/eval errors exit non-zero with the message on stderr, which `execSync` swallowed on throw), and the unfree-license refusal is detected on the dry-run and marked `unfree-deferred` instead of being mislabelled `fetch-failed` and wastefully re-fetched.
-- Interim (482 evidence-tierable rows): **rich 18.5% · basic 25.3% · uncertain 56.2% — evidence-backed 43.8% ± 4.4pp**. The uncertain 56% demote into the D16 command-line group; the heuristic app class is thus only a modest minority evidence-backed.
+- **Result (full app pool, deduped):** rich 438 · basic 746 · uncertain 1,451 · too-large 219 · unfree-deferred 220 · fetch-failed 4 · error 2. Evidence-tierable 2,635 → **evidence-backed 1,184 = 44.9%**; the 55 % uncertain majority become an `unverified application` group (D-N1: a distinct labelled class, never a tile), not collapsed into CLI — some uncertain entries are genuine apps the cache could not evidence.
+- `classify-evidence.js --write` overlays the evidence tiers onto the index: rich/basic/unfree-deferred → class `app`; uncertain/too-large/build-needed/error/fetch-failed/unevidenced → class `unverified`; alias-missing → dropped (D10). Search/viewer render the `unverified application` group.
+- **Residual gap (heuristic, pre-existing):** ~2,195 of 18,667 `cli` entries are description-app-smelling (e.g. gimp, blender, libreoffice, krita were misclassified `cli` by the heuristic generator and never entered the app pool / evidence pass). A targeted evidence pass over app-smelling `cli` entries is the follow-up recovery.
 
 ## Hide-unfree filter (l3q.2)
 
@@ -197,4 +199,17 @@ Big finding: **the count-calibrated heuristic app class (3,181) is only ~1/3 evi
 ./phase0/measure.sh 27271   # full top-level set
 ```
 
-A reproducible full run should pin a concrete Nixpkgs commit and run on real infra (CI), not a local snapshot.
+## Pipeline runbook (reproducible order)
+
+The Phase 0 catalogue path, in run order. Each stage reads the previous stage's artifact; all `results/*.json*` are generated (gitignored).
+
+```sh
+bash measure.sh 27271        # 1. export: full-set records.json (~25 s, nix eval, no build)
+node generator.js            # 2. classify: heuristic catalogue-index.json (app/term-app/cli)
+node evidence-all.js 99999   # 3. evidence: fetch .desktop/metainfo per app candidate (hours, network; resumable, rerun until fetch-failed burns down)
+node classify-evidence.js --write   # 4. reclassify: evidence tiers -> rich/basic/unfree-deferred apps + unverified group, drop alias-missing
+node search.js "<q>"         # 5. search the tiered index (or open the viewer)
+node serve.js                #     browsable viewer at http://localhost:8137/view.html
+```
+
+Stage 3 is the long pole and the only network-dependent stage; it is append-only and resumable, so it can be chunked across sessions or moved to real infra/CI. Stages 1–2 take ~30 s total. A production-grade run should additionally pin a concrete Nixpkgs commit (not the local flake snapshot) and run stage 3 on stable network.
