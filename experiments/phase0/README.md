@@ -81,6 +81,19 @@ This is an automated proxy for the QA sample; the human-reviewed sample with sco
 
 Reading: the naive name→attribute join is strong on recall (94 %) and nearly perfect on precision (98.8 %) *once classification stops libs/CLIs from being presented as app tiles* — without that guard precision would drop to 77 %. This is the empirical case for the classification tiering (D13) and for the CLI-labelled result-class proposal (`nix-pilot-9f3.7`).
 
+## Classification probe (description heuristics)
+
+`classify.js` tests whether description-keyword + mainProgram heuristics can satisfy "the generator distinguishes ordinary desktop-app candidates from libraries and CLI tools with measurable confidence" (initial acceptance criteria). Against the QA labels (104 rows):
+
+| Metric | Value |
+|---|---|
+| Accuracy | 86.9 % |
+| App precision | 86.2 % |
+| App recall | 98.7 % |
+| Typical false-APP | htop, btop, ripgrep, fd, bat, tmux, zsh, git, ffmpeg |
+
+Finding: description heuristics find real apps (near-total recall) but cannot reliably reject CLIs — meaning alone is not enough. The plan's sharper signal is output-derived desktop-entry evidence, which the (deferred) coverage scan will supply; note even desktop presence has edge cases (htop ships a `.desktop`), supporting the CLI-labelled result class.
+
 ## Unfree outputs on public caches (`nix-pilot-9f3.4` baseline)
 
 Unfree packages (`discord`, `spotify`, `slack`, `vscode`, `google-chrome`) are fully present in the default export with complete metadata — the gate refuses instantiating/building them, not enumerating them, so the catalogue can list them by default (D1) with the metadata evaluation provides.
