@@ -145,6 +145,12 @@ Calibration: description/mainProgram heuristics alone over-flood (54 % apps at a
 
 Index contents: 3,074 apps (100 % with description by construction; 96 % Linux-installable; 95 % with mainProgram), 289 terminal applications (the TUI grey zone, pulled out of apps so they are never sold as GUI apps — `astroterm`, `termirs`, `bork`), 18,667 command-line tools, 2,628 excluded libraries. The taxonomy is mutable: more categories can be added and "everything not an app" can share a bucket, so a misplacement is presentation-only, never data loss; the evidence-driven rerun (`nix-pilot-nus.4`) is what ultimately sharpens the assignment.
 
+## Evidence run (`nus.4`) — in progress, resumable
+
+- `evidence-all.js` — the full evidence pass over **every** app candidate in the index (not a sample): fetch desktop-entry/AppStream-metainfo output evidence and tier each `rich` (>0 metainfo) / `basic` (>0 .desktop) / `uncertain-no-evidence` / plus too-large, build-needed, alias-missing, **unfree-deferred** (D17: instantiation refused on an unfree license, no public-cache route, really a listing metadata-only), error, fetch-failed. Resumable via `results/evidence.jsonl` (append-only; error + fetch-failed re-queued each run).
+- Two harness fixes from the first runs: `run()` now uses `spawnSync` to capture diagnostics even on non-zero exit (unfree/alias/eval errors exit non-zero with the message on stderr, which `execSync` swallowed on throw), and the unfree-license refusal is detected on the dry-run and marked `unfree-deferred` instead of being mislabelled `fetch-failed` and wastefully re-fetched.
+- Interim (482 evidence-tierable rows): **rich 18.5% · basic 25.3% · uncertain 56.2% — evidence-backed 43.8% ± 4.4pp**. The uncertain 56% demote into the D16 command-line group; the heuristic app class is thus only a modest minority evidence-backed.
+
 ## Browsable viewer
 
 - `view.html` — self-contained page (no deps) that loads `results/catalogue-index.json` and does live grouped search plus category browsing (all / applications / terminal apps / command-line tools), with the same scoring as `search.js`.
