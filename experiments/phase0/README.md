@@ -57,9 +57,28 @@ The 1,804 evaluation-failing attributes (6.6%, e.g. `AAAAAASomeThingsFailToEvalu
 - The remaining 3 (umpv, rofi-theme-selector, evince-previewer) are bundled helper binaries of an already-matched parent package — recoverable via the containing-output signal.
 - Because discovery scans a package's own output, the containing output *is* the join; the Exec-name match is a corroborating signal, not the primary one. This supports the confidence-tiered design (D13).
 
-## Unfree gate
+## Known-apps recall
 
-Unfree packages (`vscode`, `spotify`, `slack`) are refused by evaluation by default and are not served by the official binary cache. Their metadata/images consequently need the separate binary-cache path (`nix-pilot-9f3.4`); this remains open.
+`recall.js` resolves 79 well-known GUI applications (browsers, editors, terminals, file managers, media, office, messaging, system utilities) against the exported metadata:
+
+- 76/79 resolve to a top-level attribute; all 79 resolve once nested sets count (KDE apps live under `kdePackages.*`; Tor Browser is `tor-browser`). The 3 apparent misses were attribute-path guessing, not real gaps.
+- Of resolvable apps, 100% carry a description; 73/76 are buildable on Linux.
+
+This is an automated proxy for the QA sample (link recall in the common-name → attribute-path direction); the hand-labelled precision/recall sample remains the open step.
+
+## Unfree outputs on public caches (`nix-pilot-9f3.4` baseline)
+
+With `allowUnfree = true` the unfree packages evaluate and their metadata is fully present in the exported set — the default gate, not the set, is what hides them from the catalogue.
+
+Their outputs, however, are absent from public caches at this snapshot, checked by store-path hash:
+
+| App | cache.nixos.org | nix-community.cachix.org |
+|---|---|---|
+| vscode | 404 | (not checked) |
+| spotify | 404 | 404 |
+| slack | 404 | 404 |
+
+So unfree metadata is cheaply cataloguable, but output-derived enrichment (icons, desktop entries, metainfo) and binary substitution for unfree apps require a route that does not exist on the official or nix-community caches today (`nix-pilot-9f3.4`).
 
 ## First searchable catalogue
 
@@ -88,8 +107,9 @@ Documented limitations: mainProgram coverage is 64%; description quality varies;
 
 - **Coverage across the whole set, not a hand sample**: what share of all 24,658 derivations ship desktop entries/metainfo, and what does that imply for GUI-candidate recall.
 - **Join precision/recall at scale** on a hand-labelled QA sample (hundreds of apps), including ambiguous and cross-package cases.
-- **Unfree coverage** (`nix-pilot-9f3.4`): an alternate cache path for unfree images/metadata.
-- **First searchable catalogue** over the proven metadata, with documented coverage and omissions.
+- **Full-set GUI-coverage scan**: what share of all 24,658 derivations ship desktop entries/metainfo. Needs fetching or building thousands of outputs; the natural next Phase-0 stage on real infra, not a quick probe.
+- **Hand-labelled QA sample**: precision/recall scored by manual review of hundreds of apps (QA, not curation) per the measurement plan.
+- **Unfree images/metadata path** (`nix-pilot-9f3.4`): baseline recorded above (404 on official and nix-community caches); the alternate route is still open.
 
 ## Run
 
