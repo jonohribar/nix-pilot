@@ -2,7 +2,7 @@
 
 Research instrument for the catalogue-generation wager: can a useful application catalogue be generated from Nixpkgs and upstream metadata without building everything and without per-package curation? This is task `nix-pilot-nus.3`; the measurement plan and acceptance floors live in [verification.md](../../docs/design/verification.md), the pipeline design in [catalogue-pipeline.md](../../docs/design/specifications/catalogue-pipeline.md).
 
-Status: scoped preliminary result on this machine. Research-stage: harness is deliberately small and ad hoc; the finding, not the code, is the deliverable.
+Status: scoped preliminary result on this machine: enumeration proven, output-discovery and the Exec-level join look strong on a hand sample, unfree coverage confirmed open. Research-stage: harness is deliberately small and ad hoc; the finding, not the code, is the deliverable.
 
 ## Pin
 
@@ -12,7 +12,7 @@ Status: scoped preliminary result on this machine. Research-stage: harness is de
 ## Method
 
 - `export.nix` walks top-level attributes of `legacyPackages.x86_64-linux` and emits one record per name with a JSON-safe metadata contract: `pname`, `version`, `description`, `homepage`, `mainProgram`, `licenseOk`, `platforms`, `broken`. Every field is forced to a primitive under `tryEval` and each entry is deep-forced so a single broken or pseudo package yields an `evalError` record instead of sinking the run. Nothing is built.
-- `measure.sh [N]` evaluates the first N top-level attrs and times it; `analyze.js` summarises timing and field completeness. `results/` is generated output and not committed.
+- `measure.sh [N]` evaluates the first N top-level attrs and times it; `analyze.js` summarises timing and field completeness. `discover.sh` fetches candidate outputs from the binary cache and scans them for `.desktop`/metainfo. `join.js` scores Exec-basename joins against attribute paths and pnames. `results/` is generated output and not committed.
 
 ## Results
 
@@ -34,16 +34,41 @@ Full set (N = 27,271), this machine, the pinned snapshot:
 | `license` resolvable | 98.7 % |
 | `mainProgram` present | 64.1 % |
 
+## Discovery probe (provisional)
+
+`discover.sh` fetches a candidate's outputs from the binary cache (no local build) and scans them. Sample of 16 (13 GUI candidates + 3 CLI controls); the pinned snapshot's derivations hash-match the official cache, so fetches succeed instantly:
+
+| Candidate | Class | `.desktop` | AppStream metainfo |
+|---|---|---|---|
+| feh, kitty, rofi, xterm, htop, pcmanfm | image/launcher/terminal/file/TUI utilities | 1–2 each | 0 |
+| mpv, meld, gedit, evince, gnome-calculator, baobab, eog | media + GNOME apps | 1–2 each | 1 each (evince: 8) |
+| jq, curl, unzip | CLI controls | 0 | 0 |
+
+13/13 GUI candidates shipped at least one `.desktop` entry; 7/13 also shipped AppStream metainfo (`org.gnome.*.metainfo.xml` etc.); 3/3 CLI controls correctly had none. `konsole`/`transmission` were dropped from the sample (attribute removed in this snapshot, not a discovery result).
+
+## Join (provisional)
+
+`join.js` takes the `.desktop` files discovered above and matches their `Exec` basename against the pinned set's top-level attribute paths and pnames:
+
+- 18 desktop files found; 15/18 `Exec` names match a top-level attribute path exactly (feh, mpv, kitty, rofi, xterm, meld, pcmanfm, htop, gedit, evince, …).
+- The remaining 3 (umpv, rofi-theme-selector, evince-previewer) are bundled helper binaries of an already-matched parent package — recoverable via the containing-output signal.
+- Because discovery scans a package's own output, the containing output *is* the join; the Exec-name match is a corroborating signal, not the primary one. This supports the confidence-tiered design (D13).
+
+## Unfree gate
+
+Unfree packages (`vscode`, `spotify`, `slack`) are refused by evaluation by default and are not served by the official binary cache. Their metadata/images consequently need the separate binary-cache path (`nix-pilot-9f3.4`); this remains open.
+
 ## What this proves
 
-- **Enumeration + metadata export is cheap and complete.** Evaluating the whole top-level set takes ~30 s on this machine and yields near-complete pname/version/description/homepage/platforms/license. This is the half the research called *proven* (search.nixos.org does it); here it is measured, not assumed. The ~9.6 % non-derivations are aliases and nested sets, not GUI candidates.
-- **Output-derived desktop data is present in available outputs.** This machine's already-installed store contains 12,036 `.desktop` files and `share/metainfo` directories, so discovery from already-available outputs is observable. Caveat: these come from the system's store at a different Nixpkgs revision, not the pinned set, so they do not yet establish coverage for the catalogue's own outputs.
+- **Enumeration + metadata export is cheap and complete.** ~30 s for the full top-level set, near-complete pname/version/description/homepage/platforms/license.
+- **Output-derived discovery works.** Desktop entries and metainfo are present in the pinned set's cache-served outputs, and the Exec-level join is near-total on the sample (all unmatched cases are packaged helpers of a matched parent).
+- **The unfree gap is real and unchanged** (gate + no cache coverage), matching the research's expectation.
 
 ## What remains (open sub-questions)
 
-- **Coverage within a single pinned set**: how many GUI candidates in the pinned revision actually ship `.desktop`/metainfo. Requires inspecting that revision's outputs (build or binary-cache nar listing).
-- **The join**: mapping a store output / desktop entry to a Nixpkgs package, and its precision/recall on a hand-labelled QA sample (hundreds of apps).
-- **Unfree coverage** (`nix-pilot-9f3.4`): images/metadata for unfree packages via binary-cache inspection, since Hydra does not build them.
+- **Coverage across the whole set, not a hand sample**: what share of all 24,658 derivations ship desktop entries/metainfo, and what does that imply for GUI-candidate recall.
+- **Join precision/recall at scale** on a hand-labelled QA sample (hundreds of apps), including ambiguous and cross-package cases.
+- **Unfree coverage** (`nix-pilot-9f3.4`): an alternate cache path for unfree images/metadata.
 - **First searchable catalogue** over the proven metadata, with documented coverage and omissions.
 
 ## Run
