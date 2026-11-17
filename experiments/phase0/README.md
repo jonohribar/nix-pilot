@@ -145,6 +145,11 @@ Calibration: description/mainProgram heuristics alone over-flood (54 % apps at a
 
 Index contents: 3,074 apps (100 % with description by construction; 96 % Linux-installable; 95 % with mainProgram), 289 terminal applications (the TUI grey zone, pulled out of apps so they are never sold as GUI apps — `astroterm`, `termirs`, `bork`), 18,667 command-line tools, 2,628 excluded libraries. The taxonomy is mutable: more categories can be added and "everything not an app" can share a bucket, so a misplacement is presentation-only, never data loss; the evidence-driven rerun (`nix-pilot-nus.4`) is what ultimately sharpens the assignment.
 
+## Browsable viewer
+
+- `view.html` — self-contained page (no deps) that loads `results/catalogue-index.json` and does live grouped search plus category browsing (all / applications / terminal apps / command-line tools), with the same scoring as `search.js`.
+- `serve.js` — tiny static server (fetch of the 7.5 MB JSON needs HTTP, not `file://`): `node serve.js` then open `http://localhost:8137/view.html`.
+
 `search.js` queries the index when present and labels results by class — implementing D16: a search for `docker` returns the *command-line tool* group, never an app tile. This is the Phase 0 acceptance probe ("search one term, relevant results") over the classified app universe.
 
 Accepted interim (2026-11-17): the heuristic index stands as the v1 deliverable for demos and further study, with the confidence caveat above; the evidence-driven reclassification (fetching desktop entries for all candidates) is parked as a batch job for a real-infra/stable-network run, which produces the product-grade index.

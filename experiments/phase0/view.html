@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nix-pilot — catalogue index (v1 interim)</title>
+<style>
+  :root{color-scheme:dark;--bg:#17181c;--panel:#1f2127;--panel2:#26292f;--line:#32353d;
+    --txt:#d8dae0;--dim:#8b90a0;--accent:#7fb0ff;--app:#8ad0a0;--term:#d0c08a;--cli:#c0a0e0;}
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--txt)}
+  header{padding:14px 22px;border-bottom:1px solid var(--line);display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0;font-weight:600}
+  header .meta{color:var(--dim);font-size:12px}
+  #q{flex:1;min-width:220px;background:var(--panel);border:1px solid var(--line);color:var(--txt);
+    border-radius:8px;padding:9px 12px;font-size:14px}
+  #q:focus{outline:none;border-color:var(--accent)}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;padding:10px 22px;border-bottom:1px solid var(--line)}
+  .chip{background:var(--panel);border:1px solid var(--line);color:var(--dim);border-radius:999px;
+    padding:5px 12px;cursor:pointer;font-size:12.5px}
+  .chip.active{color:var(--bg);border-color:transparent}
+  .chip[data-c="all"].active{background:#fff;color:#000}
+  .chip[data-c="app"].active{background:var(--app);color:#0c1a10}
+  .chip[data-c="term-app"].active{background:var(--term);color:#1a1508}
+  .chip[data-c="cli"].active{background:var(--cli);color:#170b20}
+  .chip b{font-weight:600}
+  main{padding:14px 22px 80px;max-width:980px;margin:0 auto}
+  .stub{color:var(--dim);text-align:center;padding:60px 0}
+  .group-h{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);
+    margin:18px 0 8px;display:flex;align-items:center;gap:8px}
+  .group-h .n{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:1px 7px;font-size:11px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 14px;margin-bottom:8px}
+  .card .row1{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .card .name{font-weight:600;font-size:14px}
+  .card .pname{color:var(--dim);font-size:12px}
+  .card .v{color:var(--dim);font-size:12px;border:1px solid var(--line);border-radius:5px;padding:0 6px}
+  .card .desc{color:#c3c6cf;margin-top:3px;font-size:13px}
+  .card .kg{margin-top:6px;font-size:11.5px;color:var(--dim);display:flex;gap:12px;flex-wrap:wrap}
+  .kg .k b{color:var(--txt);font-weight:600}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:1px}
+  .dot.app{background:var(--app)}.dot.term-app{background:var(--term)}.dot.cli{background:var(--cli)}
+  .empty{color:var(--dim);padding:14px 0}
+  #more{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;
+    padding:9px 16px;cursor:pointer;font-size:13px;display:block;margin:16px auto}
+  #more:hover{border-color:var(--accent)}
+  code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>nix-pilot <span style="color:var(--dim);font-weight:400">catalogue index</span></h1>
+  <input id="q" placeholder="Search the catalogue…" autocomplete="off" spellcheck="false">
+  <div class="meta" id="meta">loading catalogue-index.json…</div>
+</header>
+<div class="chips" id="chips"></div>
+<main id="main"><div class="stub" id="stub">Loading the index (~7 MB)…</div></main>
+
+<script>
+// ---- load index -------------------------------------------------------------
+const state = { entries: [], counts: {}, perPage: 80, page: 1, query: '', cat: 'all' };
+const CLASS_LABEL = { app: 'application', 'term-app': 'terminal application', cli: 'command-line tool' };
+const CLASS_COLOR = { app: 'app', 'term-app': 'term-app', cli: 'cli' };
+const $ = (s) => document.querySelector(s);
+
+fetch('results/catalogue-index.json')
+  .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+  .then((idx) => {
+    state.entries = idx.entries;
+    state.counts = idx.counts;
+    $('#meta').textContent =
+      `schema ${idx.schemaVersion} · pin ${(idx.pin || '').slice(0, 12)}… · ` +
+      `${idx.counts.appCandidates} apps · ${idx.counts.terminalApps} terminal apps · ` +
+      `${idx.counts.cliTools} CLI tools`;
+    buildChips();
+    setCat('all');
+  })
+  .catch((e) => {
+    $('#stub').textContent = 'Could not load the index. Serve this folder over HTTP then reload: ' +
+      '`node serve.js` and open http://localhost:8137/view.html — ' + e.message;
+  });
+
+// ---- category chips ---------------------------------------------------------
+function buildChips() {
+  const chips = [['all', `Everything`, state.entries.length],
+    ['app', `Applications`, state.counts.appCandidates],
+    ['term-app', `Terminal apps`, state.counts.terminalApps],
+    ['cli', `Command-line tools`, state.counts.cliTools]];
+  $('#chips').innerHTML = chips
+    .map(([c, label, n]) => `<div class="chip" data-c="${c}">${label} <b>${n.toLocaleString()}</b></div>`)
+    .join('');
+  $('#chips').querySelectorAll('.chip').forEach((el) =>
+    el.addEventListener('click', () => setCat(el.dataset.c)));
+}
+
+// ---- scoring (mirrors search.js) --------------------------------------------
+function toks(q) { return q.toLowerCase().split(/[^a-z0-9.+-]+/).filter(Boolean); }
+function score(r, terms) {
+  const nameT = (r.attr || '').toLowerCase();
+  const pn = (r.pname || '').toLowerCase();
+  const desc = (r.description || '').toLowerCase();
+  let s = 0;
+  for (const t of terms) {
+    if (t.length < 2) continue;
+    if (nameT === t || pn === t) s += 100;
+    else if (nameT.startsWith(t) || pn.startsWith(t)) s += 30;
+    else if (nameT.includes(t) || pn.includes(t)) s += 10;
+    if (desc.includes(t)) s += 3;
+  }
+  return s;
+}
+
+function visible() {
+  let list = state.entries;
+  if (state.cat !== 'all') list = list.filter((e) => e.class === state.cat);
+  if (state.query) {
+    const terms = toks(state.query);
+    list = list.map((e) => [score(e, terms), e]).filter((x) => x[0] > 0)
+      .sort((a, b) => b[0] - a[0] || a[1].attr.localeCompare(b[1].attr)).map((x) => x[1]);
+  } else if (state.cat === 'all') {
+    list = [...list].sort((a, b) => (a.class === 'app' ? 0 : 1) - (b.class === 'app' ? 0 : 1)
+      || a.attr.localeCompare(b.attr));
+  }
+  return list;
+}
+
+function setCat(c) {
+  state.cat = c; state.page = 1;
+  if ($('#q')) $('#q').value = '';
+  state.query = '';
+  $('#chips').querySelectorAll('.chip').forEach((el) => el.classList.toggle('active', el.dataset.c === c));
+  render();
+}
+
+function esc(s) { return String(s).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+function render() {
+  const list = visible();
+  const sliced = list.slice(0, state.page * state.perPage);
+  const main = $('#main');
+  if (!list.length) { main.innerHTML = '<div class="empty">No matches.</div>'; return; }
+
+  // group by class, preserving query order (or category)
+  const order = ['app', 'term-app', 'cli'];
+  const groups = new Map();
+  for (const e of sliced) {
+    const g = groups.get(e.class) || [];
+    g.push(e); groups.set(e.class, g);
+  }
+  let html = '';
+  for (const cls of order) {
+    const g = groups.get(cls);
+    if (!g) continue;
+    html += `<div class="group-h"><span class="dot ${CLASS_COLOR[cls]}"></span>${CLASS_LABEL[cls]}
+      <span class="n">${g.length}${list.length > sliced.length ? ' of ' + Math.min(list.length, state.page * state.perPage) : ''}</span></div>`;
+    for (const e of g) {
+      html += `<div class="card"><div class="row1">
+        <span class="name">${esc(e.pname || e.attr)}</span>
+        ${e.pname && e.pname !== e.attr ? `<span class="pname">∈ ${esc(e.attr)}</span>` : ''}
+        ${e.version ? `<span class="v">${esc(e.version)}</span>` : ''}
+      </div>
+      ${e.description ? `<div class="desc">${esc(e.description)}</div>` : ''}
+      <div class="kg">
+        <span class="k">class <b>${CLASS_LABEL[e.class]}</b></span>
+        <span class="k">tier <b>${e.tier}</b></span>
+        <span class="k">confidence <b>${e.confidence}</b></span>
+        <span class="k">Linux <b>${e.linuxOK ? 'yes' : 'no'}</b></span>
+        <span class="k">main <b>${esc(e.mainProgram || '—')}</b></span>
+        ${e.install ? `<span class="k">install <b>${e.install.scopeDefault}</b></span>` : ''}
+      </div></div>`;
+    }
+  }
+  html += list.length > sliced.length
+    ? `<button id="more">Show more (${Math.max(0, list.length - sliced.length).toLocaleString()} remaining)</button>` : '';
+  main.innerHTML = html;
+  const more = $('#more');
+  if (more) more.addEventListener('click', () => { state.page++; render(); });
+}
+
+// ---- live search -------------------------------------------------------------
+let debounce;
+$('#q').addEventListener('input', (ev) => {
+  clearTimeout(debounce);
+  debounce = setTimeout(() => {
+    state.query = ev.target.value.trim(); state.page = 1;
+    $('#chips').querySelectorAll('.chip').forEach((el) => el.classList.remove('active'));
+    render();
+  }, 140);
+});
+</script>
+</body>
+</html>
