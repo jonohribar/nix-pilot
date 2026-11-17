@@ -22,7 +22,8 @@ Full set (N = 27,271), this machine, the pinned snapshot:
 |---|---|
 | Top-level attributes | 27,271 |
 | Derivations | 24,658 (90.4%) |
-| Non-derivations | 2,613 (9.6%) |
+| Non-derivations (aliases, sets) | 809 (3.0%) |
+| Evaluation-failing attrs | 1,804 (6.6%) |
 | Metadatum export wall-time | 30.2 s (~900 records/s) |
 | Raw output size | ~21 MB (records.json) |
 | Exported without eval error | 24,527 / 24,658 |
@@ -33,6 +34,8 @@ Full set (N = 27,271), this machine, the pinned snapshot:
 | `platforms` present | 100 % |
 | `license` resolvable | 98.7 % |
 | `mainProgram` present | 64.1 % |
+
+The 1,804 evaluation-failing attributes (6.6%, e.g. `AAAAAASomeThingsFailToEvaluate`, which is deliberately self-describing) are the "skipped/evaluation-failing entries" metric from [verification.md](../../docs/design/verification.md); they are excluded from the catalogue.
 
 ## Discovery probe (provisional)
 
@@ -57,6 +60,23 @@ Full set (N = 27,271), this machine, the pinned snapshot:
 ## Unfree gate
 
 Unfree packages (`vscode`, `spotify`, `slack`) are refused by evaluation by default and are not served by the official binary cache. Their metadata/images consequently need the separate binary-cache path (`nix-pilot-9f3.4`); this remains open.
+
+## First searchable catalogue
+
+`search.js` indexes the full-set records and ranks queries against attribute path, pname and description. `node search.js --stats`:
+
+| Metric | Value |
+|---|---|
+| Catalogue documents | 24,658 |
+| Installable on Linux | 23,107 |
+| With description | 24,340 (98.7%) |
+| With licence | 24,333 (98.7%) |
+| With homepage | 23,945 (97.1%) |
+| With mainProgram | 15,801 (64.1%) |
+
+Sample queries return sensible, ranked application results ("browser" → browser-sync/browserpass/browsers; "editor" → 010editor/anvil-editor/…). This is a first, flat index over all derivations; GUI-vs-non-app classification, categories and the consumer ranking are later stages.
+
+Documented limitations: mainProgram coverage is 64%; description quality varies; the index is attribute-name/pname/description text only; no icons or screenshots yet.
 
 ## What this proves
 
