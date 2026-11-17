@@ -48,7 +48,7 @@ A record is classified from evidence and rules, matching the agreed classificati
 |---|---|---|
 | Rich desktop application | AppStream component joined to a package | Normal Store listing, full available metadata |
 | Basic desktop application | Valid `.desktop` entry joined to a package | Normal Store listing, generated or basic details |
-| Uncertain GUI candidate | Heuristic evidence only | Lower-confidence or secondary results; never shown as certain |
+| Unverified application | No confirmatory output evidence (uncertain, too-large, unevidenced; decision [D18](../../research/04-recommendations.md#decision-log)) | A distinct, labelled "Unverified application" search group; never an app tile; **not collapsed into command-line tool** |
 | Command-line tool | CLI signature, no desktop entry | Searchable as a labelled "Command-line tool" group, never an app tile (decision [D16](../../research/04-recommendations.md#decision-log)) |
 | Library or system component | No app evidence | Excluded entirely |
 
