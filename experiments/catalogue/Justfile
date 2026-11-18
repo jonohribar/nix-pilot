@@ -1,10 +1,5 @@
-# Catalogue experiments (Phase 0 study artefacts) — node only, no nix shell
-# needed (`measure` additionally needs nix for the eval).
-# A module of the root justfile (`just experiments <recipe>`; auto-cwd here),
-# or run directly as `just <recipe>` from inside this directory.
+# Catalogue experiments.
 
-# list this module's recipes
-# bare `just experiments` runs this
 default:
     @just --list
 

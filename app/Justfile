@@ -1,11 +1,5 @@
 # nix-pilot desktop client recipes.
-# A module of the root justfile (`just app <recipe>`; auto-cwd = app/), or run
-# directly as `just <recipe>` from inside this directory.
-# Each recipe runs from app/ and self-wraps in the nix dev shell (nix-shell
-# ./shell.nix) unless you are already inside it (cargo already on PATH).
 
-# list this module's recipes
-# bare `just app` runs this
 default:
     @just --list
 
