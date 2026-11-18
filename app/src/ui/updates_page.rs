@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
+use crate::apply;
 use crate::desired_state::DesiredDoc;
 use crate::store::ChangeQueue;
 use crate::updates::{self, TxEvent, TxStep};
@@ -67,7 +68,7 @@ impl UpdatesPage {
         config_expander.set_child(Some(&config_scroll));
         page.append(&config_expander);
 
-        let build_btn = gtk4::Button::with_label("Prepare and check");
+        let build_btn = gtk4::Button::with_label("Prepare and build");
         let apply_btn = gtk4::Button::with_label("Apply changes");
         apply_btn.add_css_class("suggested-action");
         apply_btn.set_sensitive(false);
@@ -212,15 +213,37 @@ impl UpdatesPage {
                     system_wide: p.system_wide,
                 })
                 .collect();
-            let (tx, rx) = std::sync::mpsc::channel::<updates::BuildReport>();
+            // after every item dry-runs clean, build the candidate generation
+            // in a scratch dir (build-only; never activates) so "prepared" is
+            // real: the store closure now contains the exact future system
+            let (tx, rx) =
+                std::sync::mpsc::channel::<(updates::BuildReport, Option<apply::CandidateBuild>)>();
             std::thread::spawn(move || {
                 let rep =
                     updates::verify_queued(&nixp, &changes, std::time::Duration::from_secs(60));
-                let _ = tx.send(rep);
+                let build = if rep.all_ok() && !changes.is_empty() {
+                    let (preserved, hardware) = apply::discover_nixos_sources();
+                    if preserved.is_some() || hardware.is_some() {
+                        let sv =
+                            apply::system_state_version().unwrap_or_else(|| "26.05".to_string());
+                        Some(apply::build_from_desired(
+                            &desired,
+                            &sv,
+                            preserved.as_deref(),
+                            hardware.as_deref(),
+                            std::time::Duration::from_secs(1500),
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let _ = tx.send((rep, build));
             });
             glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
                 match rx.try_recv() {
-                    Ok(rep) => {
+                    Ok((rep, build)) => {
                         while let Some(ch) = results_list.first_child() {
                             results_list.remove(&ch);
                         }
@@ -238,11 +261,41 @@ impl UpdatesPage {
                             row.set_child(Some(&l));
                             results_list.append(&row);
                         }
-                        // Explaining --Prepared--> BuildCheck (or --BuildFailed-->
-                        // BuildFailed): the prepare result advances the transaction
+                        // candidate-build tail + verdict (dim, monospace: it is
+                        // technical detail, one click away)
+                        let mut all_ok = rep.all_ok();
+                        let mut verdict = None;
+                        if let Some(b) = build {
+                            for line in b
+                                .log
+                                .lines()
+                                .rev()
+                                .take(8)
+                                .collect::<Vec<_>>()
+                                .into_iter()
+                                .rev()
+                            {
+                                if line.trim().is_empty() {
+                                    continue;
+                                }
+                                let l = gtk4::Label::new(Some(line));
+                                l.set_xalign(0.0);
+                                l.add_css_class("monospace");
+                                l.add_css_class("dim-label");
+                                let row = gtk4::ListBoxRow::new();
+                                row.set_selectable(false);
+                                row.set_activatable(false);
+                                row.set_child(Some(&l));
+                                results_list.append(&row);
+                            }
+                            verdict = Some(b.note.clone());
+                            if !b.ok {
+                                all_ok = false;
+                            }
+                        }
                         // Explaining --Prepared--> BuildCheck (or --BuildFailed-->
                         // BuildFailed); the prepare result advances the machine
-                        let (ev, fallback) = if rep.all_ok() {
+                        let (ev, fallback) = if all_ok {
                             (TxEvent::Prepared, TxStep::BuildCheck)
                         } else {
                             (TxEvent::BuildFailed, TxStep::BuildFailed)
@@ -250,15 +303,15 @@ impl UpdatesPage {
                         let target = updates::advance(*step.borrow(), ev).unwrap_or(fallback);
                         *step.borrow_mut() = target;
                         step_label.set_text(target.label());
-                        if rep.all_ok() {
-                            results_label.set_text(if rep.items.is_empty() {
-                                "Nothing queued to prepare"
+                        results_label.set_text(&verdict.unwrap_or_else(|| {
+                            if rep.items.is_empty() {
+                                "Nothing queued to prepare".into()
+                            } else if all_ok {
+                                "All changes prepare cleanly".into()
                             } else {
-                                "All changes prepare cleanly"
-                            });
-                        } else {
-                            results_label.set_text("Some changes cannot be built for this system");
-                        }
+                                "Some changes cannot be built for this system".into()
+                            }
+                        }));
                         b.set_sensitive(true);
                         glib::ControlFlow::Break
                     }

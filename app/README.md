@@ -19,8 +19,10 @@ Recovery) are tracked as `nix-pilot-msn.2`; the global-search design is
 Pure logic is split from the UI so it is testable without a window or nix:
 `src/model.rs` (typed catalogue domain), `src/search.rs` (ranking),
 `src/store.rs` (desired-change queue + result rule), `src/install.rs` (nix
-adapter, typed `Outcome`), `src/updates.rs` (safe build-verify of queued
-changes; apply gated until the desired-state layer), `src/desired_state.rs`
+adapter, typed `Outcome`), `src/updates.rs` (transaction machine + safe build-verify of queued
+changes), `src/apply.rs` (builds the candidate generation from the desired
+state with `nixos-rebuild build` — build-only, never activates; verified by
+a live scratch-build test on a NixOS host), `src/desired_state.rs`
 (the persisted desired-state model: versioned JSON at
 `$XDG_DATA_HOME/nix-pilot/desired-state.json`, loaded on launch and rewritten
 on every change, atomic writes), `src/ui/` (the GTK surface:

@@ -107,6 +107,9 @@ impl DesiredDoc {
 
     /// Render the full generated NixOS module (system scope + every account).
     /// This is what the backend would feed `nixos-rebuild`; byte-deterministic.
+    /// Note: per-user entries assume the account already exists (defined by
+    /// the preserved/system config) — the app adds *packages* for existing
+    /// accounts, it never creates accounts.
     pub fn render_module(&self) -> String {
         let mut body = String::new();
         if !self.system.packages.is_empty() {

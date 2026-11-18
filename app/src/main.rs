@@ -5,6 +5,7 @@
 use glib::ExitCode;
 use gtk4::prelude::*;
 
+mod apply;
 mod desired_state;
 mod install;
 mod model;
