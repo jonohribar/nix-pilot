@@ -5,11 +5,14 @@ Stack (decision [D19](../../docs/research/04-recommendations.md#decision-log)): 
 
 Current state: Software Store window that reads the generated catalogue index
 (`experiments/catalogue/results/catalogue-index.json`) and offers ranked grouped
-search, with a detail/install surface per result (user vs system-wide scope, [D9](../../docs/research/04-recommendations.md#decision-log)).
+search from the global header (the v1 whole-app search; catalogue-only until the
+Settings/Updates surfaces land), with a detail/install surface per result (user vs
+system-wide scope, [D9](../../docs/research/04-recommendations.md#decision-log)).
 Ranking mirrors the verified `experiments/catalogue/search.js` scorer (exact /
-prefix / contains on attr+pname, plus a description bonus), so results sort the
-same as the HTML viewer. Layout and the remaining surfaces (Settings, Updates/
-Recovery, global search) are tracked as `nix-pilot-msn.2`.
+prefix / contains on attr+pname, plus a description bonus); results are bucketed
+into the D16/D18 labelled groups. The remaining surfaces (Settings, Updates/
+Recovery) are tracked as `nix-pilot-msn.2`; the global-search design is
+[`docs/design/specifications/global-search.md`](../../docs/design/specifications/global-search.md).
 
 ## Dev shell + run
 

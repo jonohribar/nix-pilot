@@ -113,6 +113,19 @@ fn score(e: &IndexEntry, terms: &[String]) -> i64 {
 /// How many rows the list shows at once (empty query is a bounded browse).
 const MAX_ROWS: usize = 60;
 
+/// Group order for global search results (D16/D18 labelled groups).
+const GROUP_ORDER: [&str; 4] = ["app", "unverified", "term-app", "cli"];
+
+fn class_label(class: &str) -> &'static str {
+    match class {
+        "app" => "Applications",
+        "unverified" => "Unverified applications",
+        "term-app" => "Terminal apps",
+        "cli" => "Command-line tools",
+        _ => "Other",
+    }
+}
+
 // ------- index loading ----------------------------------------------------------
 fn resolve_index_path() -> Option<String> {
     if let Some(p) = std::env::args().nth(1) {
@@ -169,6 +182,26 @@ fn entry_row(e: &IndexEntry) -> gtk4::ListBoxRow {
 
     let row = gtk4::ListBoxRow::new();
     row.set_child(Some(&boxv));
+    row
+}
+
+/// Non-clickable group header row ("Applications · 12 results").
+fn group_header_row(label: &str, count: usize) -> gtk4::ListBoxRow {
+    let s = if count == 1 { "" } else { "s" };
+    let l = gtk4::Label::new(None);
+    l.set_xalign(0.0);
+    l.set_margin_top(12);
+    l.set_margin_start(10);
+    l.set_margin_end(10);
+    l.set_markup(&format!(
+        "<b>{}</b>  <span size='small' color='gray'>{} result{s}</span>",
+        esc(label),
+        count
+    ));
+    let row = gtk4::ListBoxRow::new();
+    row.set_selectable(false);
+    row.set_activatable(false);
+    row.set_child(Some(&l));
     row
 }
 
@@ -342,13 +375,20 @@ impl DetailUi {
 }
 
 // ------- list rebuild (ranks + renders, writes row order into `shown`) ---------
-fn rebuild_list(listbox: &gtk4::ListBox, all: &[IndexEntry], shown: &RefCell<Vec<IndexEntry>>, query: &str) -> usize {
+/// Maps the row order back to entries (None marks a group header) and renders.
+/// Empty query: bounded browse in index order. Search: ranked, bucketed into
+/// the D16/D18 labelled groups, cap MAX_ROWS in total.
+fn rebuild_list(listbox: &gtk4::ListBox, all: &[IndexEntry], shown: &RefCell<Vec<Option<IndexEntry>>>, query: &str) -> usize {
     while let Some(child) = listbox.first_child() {
         listbox.remove(&child);
     }
+    let mut rows: Vec<Option<IndexEntry>> = Vec::new();
     let terms = tokenize(query);
-    let v: Vec<IndexEntry> = if query.trim().is_empty() {
-        all.iter().take(MAX_ROWS).cloned().collect()
+    if query.trim().is_empty() {
+        for e in all.iter().take(MAX_ROWS) {
+            listbox.append(&entry_row(e));
+            rows.push(Some(e.clone()));
+        }
     } else {
         let mut scored: Vec<(i64, &IndexEntry)> = all
             .iter()
@@ -356,17 +396,37 @@ fn rebuild_list(listbox: &gtk4::ListBox, all: &[IndexEntry], shown: &RefCell<Vec
             .filter(|(s, _)| *s > 0)
             .collect();
         scored.sort_by(|a, b| b.0.cmp(&a.0));
-        scored
+        let picked: Vec<&IndexEntry> = scored
             .into_iter()
             .take(MAX_ROWS)
-            .map(|(_, e)| e.clone())
-            .collect()
-    };
-    let n = v.len();
-    for e in &v {
-        listbox.append(&entry_row(e));
+            .map(|(_, e)| e)
+            .collect();
+        let mut groups: Vec<(&str, Vec<&IndexEntry>)> = Vec::new();
+        for c in GROUP_ORDER {
+            let v: Vec<&IndexEntry> = picked.iter().filter(|e| e.class == c).cloned().collect();
+            if !v.is_empty() {
+                groups.push((c, v));
+            }
+        }
+        let others: Vec<&IndexEntry> = picked
+            .iter()
+            .filter(|e| !GROUP_ORDER.contains(&e.class.as_str()))
+            .cloned()
+            .collect();
+        if !others.is_empty() {
+            groups.push(("other", others));
+        }
+        for (c, v) in groups {
+            listbox.append(&group_header_row(class_label(c), v.len()));
+            rows.push(None);
+            for e in v {
+                listbox.append(&entry_row(e));
+                rows.push(Some(e.clone()));
+            }
+        }
     }
-    *shown.borrow_mut() = v;
+    let n = rows.iter().filter(|r| r.is_some()).count();
+    *shown.borrow_mut() = rows;
     n
 }
 
@@ -413,7 +473,7 @@ fn main() -> ExitCode {
             ),
         };
         let all = Rc::new(RefCell::new(all_entries));
-        let shown = Rc::new(RefCell::new(Vec::<IndexEntry>::new()));
+        let shown = Rc::new(RefCell::new(Vec::<Option<IndexEntry>>::new()));
 
         let summary = gtk4::Label::new(None);
         summary.set_xalign(0.0);
@@ -479,14 +539,14 @@ fn main() -> ExitCode {
         listbox.connect_row_activated(move |_, row| {
             let i = row.index();
             if i >= 0 {
-                if let Some(e) = shown_for_row.borrow().get(i as usize).cloned() {
+                if let Some(Some(e)) = shown_for_row.borrow().get(i as usize).cloned() {
                     detail_for_row.populate(&e);
                     stack_for_row.set_visible_child_name("detail");
                 }
             }
         });
 
-        // live search: rerank, return to the list page
+        // live global search: rerank into groups, return to the list page
         let stack_live = stack.clone();
         let summary_live = summary.clone();
         let listbox_live = listbox.clone();
@@ -497,6 +557,31 @@ fn main() -> ExitCode {
             summary_live.set_text(&format!("{} shown", n));
             stack_live.set_visible_child_name("list");
         });
+        // Esc clears the query and shows the browse list again
+        let listbox_esc = listbox.clone();
+        let all_esc = all.clone();
+        let shown_esc = shown.clone();
+        let summary_esc = summary.clone();
+        search.connect_stop_search(move |s| {
+            if !s.text().is_empty() {
+                s.set_text("");
+            } else {
+                let n = rebuild_list(&listbox_esc, &all_esc.borrow(), &shown_esc, "");
+                summary_esc.set_text(&format!("{} shown", n));
+            }
+        });
+        // Ctrl+K focuses the global search
+        let kc = gtk4::EventControllerKey::new();
+        let search_k = search.clone();
+        kc.connect_key_pressed(move |_, key, _, mods| {
+            if key == gtk4::gdk::Key::k && mods.contains(gtk4::gdk::ModifierType::CONTROL_MASK) {
+                search_k.grab_focus();
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        window.add_controller(kc);
 
         // initial browse paint
         rebuild_list(&listbox, &all.borrow(), &shown, &search.text());

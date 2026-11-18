@@ -1,6 +1,6 @@
 # Global Search Surface (design draft)
 
-Status: design draft — not yet decided. The product has four surfaces (Software Store, Settings, Updates, global search); this spec drafts the fourth. The working prototype deliberately carries no header search yet; store-local search lives inside the Store page (see [navigation map](../../../app/wireframes/navigation.md)).
+Status: decided 2026-11-18 — v1 implements the catalogue-only global search (header search, D16/D18 grouped, opens the store detail page); the settings / help / update-action domains join the same broadcast when those surfaces land in the app (tracked nix-pilot-q1w). The product has four surfaces (Software Store, Settings, Updates, global search); store-local search lives inside the Store page (see [navigation map](../../../app/wireframes/navigation.md)).
 
 ## Scope and placement
 
@@ -22,4 +22,4 @@ Full-text search inside settings rows or help documents, ranking signals beyond 
 
 ## Open questions
 
-The architecture's user-interface section lists global search as spanning settings, applications and help (C4); update actions are added here and should be confirmed in the architecture wording. Whether the global box replaces the header title bar in the Store window, or lives in a separate always-present bar, is a layout decision for the msn.2 wireframe pass.
+The architecture's user-interface section lists global search as spanning settings, applications and help (C4); this spec adds update actions to the broadcast, which needs confirming in the architecture wording when the Updates surface lands. Whether the global box stays in the header when the Store window grows Settings/Updates is a layout decision for the msn.2 pass.
