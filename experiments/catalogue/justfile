@@ -9,11 +9,13 @@ search *terms:
 stats:
     node search.js --stats
 
-# rebuild the heuristic catalogue index from records.json
+# rebuild heuristic index from records.json (overwrites catalogue-index.json)
+[confirm]
 generator:
     node generator.js
 
-# overlay evidence tiers on the index; rewrite catalogue-index.json
+# overlay evidence tiers on the index (overwrites catalogue-index.json)
+[confirm]
 reclassify:
     node classify-evidence.js --write
 
@@ -21,11 +23,13 @@ reclassify:
 validate:
     node validate-evidence.js
 
-# resumable evidence pass (limiter first arg; parallel via --bucket/--nbuckets)
+# resumable evidence pass (limiter first arg; parallel via --bucket/--nbuckets; hours of network)
+[confirm]
 evidence *args:
     node evidence-all.js {{args}}
 
-# full-set export (arg = attr count; 27271 = full set)
+# full-set export (arg = attr count; 27271 = full set; overwrites records.json)
+[confirm]
 measure n:
     bash measure.sh {{n}}
 
