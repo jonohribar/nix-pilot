@@ -8,11 +8,12 @@ use gtk4::prelude::*;
 
 use crate::desired_state::DesiredDoc;
 use crate::store::ChangeQueue;
-use crate::updates;
+use crate::updates::{self, TxEvent, TxStep};
 
 pub struct UpdatesPage {
     pub page: gtk4::Box,
     step_label: gtk4::Label,
+    step: Rc<RefCell<TxStep>>,
     queue_list: gtk4::ListBox,
     results_label: gtk4::Label,
     results_list: gtk4::ListBox,
@@ -32,7 +33,8 @@ impl UpdatesPage {
         heading.set_xalign(0.0);
         page.append(&heading);
 
-        let step_label = gtk4::Label::new(Some("Changes are ready — nothing has been applied yet"));
+        let step = Rc::new(RefCell::new(TxStep::Ready));
+        let step_label = gtk4::Label::new(Some(TxStep::Ready.label()));
         step_label.set_xalign(0.0);
         step_label.add_css_class("dim-label");
         page.append(&step_label);
@@ -98,6 +100,7 @@ impl UpdatesPage {
         UpdatesPage {
             page,
             step_label,
+            step,
             queue_list,
             results_label,
             results_list,
@@ -139,8 +142,8 @@ impl UpdatesPage {
 
     /// Reset the results/step lines (run before a fresh Prepare or when shown).
     fn reset(&self) {
-        self.step_label
-            .set_text("Changes are ready — nothing has been applied yet");
+        *self.step.borrow_mut() = TxStep::Ready;
+        self.step_label.set_text(TxStep::Ready.label());
         self.results_label.set_text("");
         while let Some(child) = self.results_list.first_child() {
             self.results_list.remove(&child);
@@ -161,6 +164,7 @@ impl UpdatesPage {
         let queue = queue.clone();
         let nix = nix.clone();
         let account = account.to_string();
+        let step = self.step.clone();
         let step_label = self.step_label.clone();
         let results_label = self.results_label.clone();
         let results_list = self.results_list.clone();
@@ -168,14 +172,18 @@ impl UpdatesPage {
         let build_btn = self.build_btn.clone();
         build_btn.connect_clicked(move |b| {
             b.set_sensitive(false);
+            // the transaction advances: Ready --Prepare--> Explaining
+            *step.borrow_mut() = TxStep::Explaining;
+            step_label.set_text(TxStep::Explaining.label());
             let Some(nixp) = nix.clone() else {
                 results_label.set_text("The package checker is not available on this system");
                 b.set_sensitive(true);
                 return;
             };
-            // clone the widget handles so the nested 'move' closures own their
-            // own copies (a Fn handler cannot move its captures into them)
+            // clone the handles so the nested 'move' closure owns its own
+            // copies (a Fn handler cannot move its captures into them)
             let step_label = step_label.clone();
+            let step = step.clone();
             let results_label = results_label.clone();
             let results_list = results_list.clone();
             let config_view = config_view.clone();
@@ -206,12 +214,12 @@ impl UpdatesPage {
                 .collect();
             let (tx, rx) = std::sync::mpsc::channel::<updates::BuildReport>();
             std::thread::spawn(move || {
-                let rep = updates::verify_queued(&nixp, &changes, std::time::Duration::from_secs(60));
+                let rep =
+                    updates::verify_queued(&nixp, &changes, std::time::Duration::from_secs(60));
                 let _ = tx.send(rep);
             });
-            glib::timeout_add_local(
-                std::time::Duration::from_millis(100),
-                move || match rx.try_recv() {
+            glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+                match rx.try_recv() {
                     Ok(rep) => {
                         while let Some(ch) = results_list.first_child() {
                             results_list.remove(&ch);
@@ -230,15 +238,25 @@ impl UpdatesPage {
                             row.set_child(Some(&l));
                             results_list.append(&row);
                         }
+                        // Explaining --Prepared--> BuildCheck (or --BuildFailed-->
+                        // BuildFailed): the prepare result advances the transaction
+                        // Explaining --Prepared--> BuildCheck (or --BuildFailed-->
+                        // BuildFailed); the prepare result advances the machine
+                        let (ev, fallback) = if rep.all_ok() {
+                            (TxEvent::Prepared, TxStep::BuildCheck)
+                        } else {
+                            (TxEvent::BuildFailed, TxStep::BuildFailed)
+                        };
+                        let target = updates::advance(*step.borrow(), ev).unwrap_or(fallback);
+                        *step.borrow_mut() = target;
+                        step_label.set_text(target.label());
                         if rep.all_ok() {
-                            step_label.set_text("Prepared — the changes are built and checked");
                             results_label.set_text(if rep.items.is_empty() {
                                 "Nothing queued to prepare"
                             } else {
-                                "All changes prepare cleanly — apply stays off until the system-change layer lands"
+                                "All changes prepare cleanly"
                             });
                         } else {
-                            step_label.set_text("Nothing was changed — the prepare step failed");
                             results_label.set_text("Some changes cannot be built for this system");
                         }
                         b.set_sensitive(true);
@@ -249,8 +267,8 @@ impl UpdatesPage {
                         b.set_sensitive(true);
                         glib::ControlFlow::Break
                     }
-                },
-            );
+                }
+            });
         });
     }
 }

@@ -2,12 +2,14 @@
 //!
 //! A system change is one transaction: explain -> evaluate/build -> apply ->
 //! rollback, plus a first-class boot-recovery story (failure-and-recovery.md).
-//! This module currently owns the *safe* "prepare" step: it verifies each
-//! queued change can be built using the same dry-run as the install check
-//! (never fetches/builds/activates). The real apply (switch) operates on the
-//! app-owned desired-state/generated config, which does not exist yet, so the
-//! surface's Apply control stays disabled until that layer lands; nothing here
-//! ever switches a live system.
+//! This module owns the transaction state machine (`TxStep`/`advance`,
+//! driven by the real Updates surface) and the *safe* "prepare" step:
+//! `verify_queued` checks each queued change with the same dry-run as the
+//! install check (never fetches/builds/activates). The real apply (switch)
+//! operates on the app-owned desired-state/generated config (`desired_state`),
+//! whose build/apply backend does not exist yet, so the surface's Apply
+//! control stays disabled until that layer lands; nothing here ever switches a
+//! live system.
 use std::time::Duration;
 
 use crate::install;
@@ -38,6 +40,87 @@ impl BuildReport {
     pub fn all_ok(&self) -> bool {
         self.items.iter().all(|i| i.ok)
     }
+}
+
+/// One transaction step. The full machine encodes failure-and-recovery.md:
+/// explain -> evaluate/build -> apply, rollback available after apply; a
+/// failed build changes nothing; a failed apply returns to the previous
+/// system; boot recovery runs before any app. The apply-side variants are
+/// constructed only once the apply backend (7wo.2) lands — until then the
+/// surface drives Ready/Explaining/BuildCheck/BuildFailed and the rest of the
+/// graph is spec-enforced and unit-tested, so dead_code is allowed on the
+/// enum rather than pretending the apply side is reachable today.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TxStep {
+    Ready,
+    Explaining,
+    BuildCheck,
+    Applying,
+    Done,
+    BuildFailed,
+    ApplyFailed,
+    RolledBack,
+    BootRecovery,
+}
+
+impl TxStep {
+    /// Plain-language label for the step, shown verbatim on the Updates page.
+    pub fn label(self) -> &'static str {
+        use TxStep::*;
+        match self {
+            Ready => "Changes are ready — nothing has been applied yet",
+            Explaining => "Explaining the change…",
+            BuildCheck => {
+                "Prepared — the changes are built and checked; apply stays off \
+                 until the system-change layer lands"
+            }
+            Applying => "Applying…",
+            Done => "The change was applied",
+            BuildFailed => "Nothing was changed — building the change failed",
+            ApplyFailed => "Applying failed — returning to the previous system",
+            RolledBack => "The previous system was restored",
+            BootRecovery => "Recovery — this may be an earlier system",
+        }
+    }
+}
+
+/// Events that advance the transaction. Same gating as `TxStep`: the apply
+/// events are constructed only by the future apply backend (7wo.2).
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TxEvent {
+    Prepare,
+    Prepared,
+    BuildOk,
+    BuildFailed,
+    Apply,
+    ApplyOk,
+    ApplyFailed,
+    Rollback,
+    Recovered,
+}
+
+/// The pure transition table. Returns `None` when the event is not valid for
+/// the current step, so a stray UI action can never jump the transaction.
+pub fn advance(step: TxStep, event: TxEvent) -> Option<TxStep> {
+    use TxEvent as Ev;
+    use TxStep as St;
+    Some(match (step, event) {
+        (St::Ready, Ev::Prepare) => St::Explaining,
+        (St::Explaining, Ev::Prepared) => St::BuildCheck,
+        (St::Explaining, Ev::BuildFailed) => St::BuildFailed,
+        (St::BuildCheck, Ev::BuildOk) => St::Applying,
+        (St::BuildCheck, Ev::BuildFailed) => St::BuildFailed,
+        (St::BuildFailed, Ev::Prepare) => St::Ready,
+        (St::Applying, Ev::ApplyOk) => St::Done,
+        (St::Applying, Ev::ApplyFailed) => St::ApplyFailed,
+        (St::ApplyFailed, Ev::Rollback) => St::RolledBack,
+        (St::Done, Ev::Rollback) => St::RolledBack,
+        (St::RolledBack, Ev::Prepare) => St::Ready,
+        (St::BootRecovery, Ev::Recovered) => St::Done,
+        _ => return None,
+    })
 }
 
 /// Safely verify each queued change can be built (the "Prepare — changes are
@@ -102,5 +185,77 @@ mod tests {
         let c = p("firefox");
         assert_eq!(c.attr, "firefox");
         assert!(!c.system_wide);
+    }
+
+    #[test]
+    fn happy_path_reaches_done() {
+        use TxStep::*;
+        let mut s = Ready;
+        s = advance(s, TxEvent::Prepare).unwrap();
+        s = advance(s, TxEvent::Prepared).unwrap();
+        assert_eq!(s, BuildCheck);
+        s = advance(s, TxEvent::BuildOk).unwrap();
+        assert_eq!(s, Applying);
+        s = advance(s, TxEvent::ApplyOk).unwrap();
+        assert_eq!(s, Done);
+    }
+
+    #[test]
+    fn build_failure_leaves_nothing_changed() {
+        use TxStep::*;
+        let s = advance(Explaining, TxEvent::BuildFailed);
+        assert_eq!(s, Some(BuildFailed));
+        let s = advance(BuildCheck, TxEvent::BuildFailed);
+        assert_eq!(s, Some(BuildFailed));
+        // retry goes back to the start, nothing was applied
+        assert_eq!(advance(BuildFailed, TxEvent::Prepare), Some(Ready));
+    }
+
+    #[test]
+    fn apply_failure_rolls_back_and_recovers() {
+        use TxStep::*;
+        let s = advance(Applying, TxEvent::ApplyFailed);
+        assert_eq!(s, Some(ApplyFailed));
+        let s = advance(ApplyFailed, TxEvent::Rollback);
+        assert_eq!(s, Some(RolledBack));
+        // rollback is also available after a clean apply
+        assert_eq!(advance(Done, TxEvent::Rollback), Some(RolledBack));
+        assert_eq!(advance(RolledBack, TxEvent::Prepare), Some(Ready));
+        // boot recovery returns to a usable state
+        assert_eq!(advance(BootRecovery, TxEvent::Recovered), Some(Done));
+    }
+
+    #[test]
+    fn invalid_events_are_none() {
+        use TxStep::*;
+        assert_eq!(advance(Ready, TxEvent::ApplyOk), None);
+        assert_eq!(advance(Ready, TxEvent::Rollback), None);
+        assert_eq!(advance(Done, TxEvent::Prepare), None);
+        assert_eq!(advance(Applying, TxEvent::Prepared), None);
+        assert_eq!(advance(BuildFailed, TxEvent::Apply), None);
+        assert_eq!(advance(RolledBack, TxEvent::BuildOk), None);
+    }
+
+    #[test]
+    fn step_labels_are_distinct_and_plain() {
+        use TxStep::*;
+        let steps = [
+            Ready,
+            Explaining,
+            BuildCheck,
+            Applying,
+            Done,
+            BuildFailed,
+            ApplyFailed,
+            RolledBack,
+            BootRecovery,
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for s in steps {
+            let l = s.label();
+            assert!(!l.is_empty());
+            assert!(seen.insert(l), "duplicate label for {s:?}");
+            assert!(!l.contains("nix"), "label must be plain language: {l}");
+        }
     }
 }
