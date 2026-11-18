@@ -22,6 +22,14 @@ const EV = path.join(root, 'results/evidence.jsonl');
 const EV_CLI = path.join(root, 'results/evidence-cli.jsonl'); // nus.5 recovery source (optional)
 const write = process.argv.includes('--write');
 
+// known-apps recovery source: recall.js KNOWN is the manually-validated list
+// of well-known GUI applications (single source of truth, no list duplication).
+const recallSrc = fs.readFileSync(path.join(root, 'recall.js'), 'utf8');
+const KNOWN_ATTRS = new Set();
+for (const m of recallSrc.matchAll(/\[['"]([^'"]+)['"],\s*['"]([^'"]+)['"]\]/g)) KNOWN_ATTRS.add(m[2]);
+// recall-list entries that are deliberately not tile-able apps (TUIs)
+const KNOWN_DENY = new Set(['htop', 'btop']);
+
 const idx = JSON.parse(fs.readFileSync(IDX, 'utf8'));
 const load = (file) => {
   const m = new Map();
@@ -59,6 +67,21 @@ for (const e of idx.entries) {
   if (cliRow) {
     if (cliRow.tier === 'rich') { changed++; out.push({ ...e, class: 'app', tier: 'rich' }); continue; }
     if (cliRow.tier === 'basic') { changed++; out.push({ ...e, class: 'app', tier: 'basic' }); continue; }
+  }
+  // known-apps recovery: the generator heuristic mislabels GUI apps whose
+  // description lacks a hint word as cli (they score below the app
+  // threshold); recall.js KNOWN is the manual QA basis, so promote those
+  // mislabels to app. Tier stays 'unverified' — honest: no cache evidence
+  // yet — and the recovery survives any future generator rebuild.
+  if (KNOWN_ATTRS.has(e.attr) && !KNOWN_DENY.has(e.attr) && e.class !== 'app') {
+    changed++;
+    out.push({
+      ...e,
+      class: 'app',
+      tier: 'unverified',
+      note: 'known GUI app (recall list); no cache evidence yet',
+    });
+    continue;
   }
   if (e.class === 'cli') { out.push(e); continue; }
   if (e.class === 'term-app') { out.push(e); continue; }
