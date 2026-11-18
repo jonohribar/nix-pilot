@@ -19,9 +19,11 @@ Recovery) are tracked as `nix-pilot-msn.2`; the global-search design is
 Pure logic is split from the UI so it is testable without a window or nix:
 `src/model.rs` (typed catalogue domain), `src/search.rs` (ranking),
 `src/store.rs` (desired-change queue + result rule), `src/install.rs` (nix
-adapter, typed `Outcome`), and `src/main.rs` (UI surface + startup). See
-`docs/design/coding-style.md`. Run `just app check` (fmt + clippy + tests)
-before committing.
+adapter, typed `Outcome`), `src/updates.rs` (safe build-verify of queued
+changes; apply gated until the desired-state layer), `src/ui/` (the GTK surface:
+shell, detail+install, updates review), and `src/main.rs` (thin startup
+composition). See `docs/design/coding-style.md`. Run `just app check` (fmt +
+clippy + tests) before committing.
 
 ## Install intent (v1)
 

@@ -10,7 +10,9 @@ Code follows the architecture boundaries rather than inventing a second structur
 - `src/search.rs` — ranking (ported 1:1 from the verified `experiments/catalogue/search.js` scorer). Pure.
 - `src/store.rs` — application actions: the desired-change queue and the check-result rule. Pure.
 - `src/install.rs` — the nix adapter: discovers the client, runs the dry-run check, returns a typed `Outcome`. All external I/O lives here.
-- `src/main.rs` — UI surface + startup composition. Thin by intention; further splitting into focused UI components is tracked separately.
+- `src/updates.rs` — the updates backend: safe build-verify of queued changes (dry-run); the apply/rollback path is gated until the desired-state layer exists.
+- `src/ui/` — the GTK surface: `shell.rs` (window/list/search/navigation, the composition point), `detail.rs` (detail page + install-intent state machine), `updates_dialog.rs` (review + prepare), `widgets.rs` (shared row builders).
+- `src/main.rs` — thin startup: initialise, load the index, resolve nix, call `ui::run`. Keep it small; new behaviour goes in a module, not here.
 
 The dependency rule: UI calls application actions; domain and action code do not depend on GTK; adapters own external I/O. That keeps behaviour testable without opening a window or invoking nix.
 

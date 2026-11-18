@@ -54,6 +54,11 @@ impl ChangeQueue {
             .map(|p| (p.name.clone(), p.system_wide))
             .collect()
     }
+
+    /// The queued changes (attr + scope intact).
+    pub fn items(&self) -> &[PendingChange] {
+        &self.changes
+    }
 }
 
 /// Whether a finished availability check still applies to the current
