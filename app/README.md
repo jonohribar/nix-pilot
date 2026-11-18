@@ -20,7 +20,10 @@ Pure logic is split from the UI so it is testable without a window or nix:
 `src/model.rs` (typed catalogue domain), `src/search.rs` (ranking),
 `src/store.rs` (desired-change queue + result rule), `src/install.rs` (nix
 adapter, typed `Outcome`), `src/updates.rs` (safe build-verify of queued
-changes; apply gated until the desired-state layer), `src/ui/` (the GTK surface:
+changes; apply gated until the desired-state layer), `src/desired_state.rs`
+(the persisted desired-state model: versioned JSON at
+`$XDG_DATA_HOME/nix-pilot/desired-state.json`, loaded on launch and rewritten
+on every change, atomic writes), `src/ui/` (the GTK surface:
 shell with sidebar navigation, store, detail+install, updates page), and
 `src/main.rs` (thin startup composition). See `docs/design/coding-style.md`. Run `just app check` (fmt +
 clippy + tests) before committing.
@@ -31,8 +34,9 @@ The detail page's Install button is an *intent flow*, not an imperative
 installer: it checks the attribute against the system's configured nixpkgs
 (`nix build --dry-run`, which never fetches or writes; revision drift surfaces
 as the first-class "unavailable on your system" state, risk R07), reports that
-state when the attr is missing or an alias, and drops the app into an
-in-memory ready-to-change list with its scope (user/system, decision D9). Applying the queued changes is the Updates
+state when the attr is missing or an alias, and drops the app into a
+ready-to-change set with its scope (user/system, decision D9), which is
+persisted to the desired-state file so selections survive a restart. Applying the queued changes is the Updates
 transaction (failure-and-recovery.md), which is the next surface; nothing in
 this flow mutates the system. The check logic lives in `src/install.rs` and is
 covered by unit tests plus live `--ignored` integration tests.

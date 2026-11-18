@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
+use crate::desired_state::DesiredDoc;
 use crate::model::{Class, IndexEntry, SearchText};
 use crate::search;
 use crate::store::ChangeQueue;
@@ -152,9 +153,39 @@ pub fn run(
         "Installs into your user account — no administrator rights needed",
     ));
 
-    // updates page (developer-config diagnostic uses the OS user as the
-    // NixOS account stand-in; the 7wo.2 backend resolves the real one)
+    // desired-state persistence (7wo.2): the app's owned model, stored one
+    // file per running account. The OS user stands in for the NixOS account;
+    // the backend resolves the real one at apply time.
     let account: String = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
+    let wanted_path = crate::desired_state::default_desired_path();
+    let desired = Rc::new(RefCell::new(
+        crate::desired_state::load(&wanted_path).unwrap_or_else(|e| {
+            eprintln!("nix-pilot: {e}, starting with a clean desired state");
+            DesiredDoc::current()
+        }),
+    ));
+
+    // seed the in-app queue from the persisted state so selections survive a
+    // restart (attrs double as display names until re-selected)
+    {
+        let mut q = queue.borrow_mut();
+        let d = desired.borrow();
+        for a in d.system_packages() {
+            q.add(crate::store::PendingChange {
+                attr: a.clone(),
+                name: a.clone(),
+                system_wide: true,
+            });
+        }
+        for a in d.packages_for(&account) {
+            q.add(crate::store::PendingChange {
+                attr: a.clone(),
+                name: a.clone(),
+                system_wide: false,
+            });
+        }
+    }
+
     let updates = Rc::new(updates_page::UpdatesPage::new());
     updates.wire(&queue, &nix, &account);
 
@@ -186,10 +217,49 @@ pub fn run(
             }
         })
     };
-    update_pending_label();
+    // persist after every queue change: rebuild this account's user scope and
+    // the system scope from the queue, keeping other sections already present
+    let persist: Rc<dyn Fn()> = {
+        let queue = queue.clone();
+        let desired = desired.clone();
+        let account = account.clone();
+        let wanted_path = wanted_path.clone();
+        Rc::new(move || {
+            let mut sys = Vec::new();
+            let mut user = Vec::new();
+            for p in queue.borrow().items() {
+                if p.system_wide {
+                    sys.push(p.attr.clone());
+                } else {
+                    user.push(p.attr.clone());
+                }
+            }
+            {
+                let mut d = desired.borrow_mut();
+                d.set_system(sys);
+                d.set_user(&account, user);
+            }
+            let d = desired.borrow();
+            if let Err(e) = crate::desired_state::save(&d, &wanted_path) {
+                eprintln!("nix-pilot: could not save desired state: {e}");
+            }
+        })
+    };
+    // persist the freshly-seeded queue before any user action
+    persist();
+
+    let on_change: Rc<dyn Fn()> = {
+        let label = update_pending_label.clone();
+        let persist = persist.clone();
+        Rc::new(move || {
+            label();
+            persist();
+        })
+    };
 
     // install flow + home button (owns the state machine)
-    detail::wire(&detail, &queue, &nix, &window, update_pending_label.clone());
+    detail::wire(&detail, &queue, &nix, &window, on_change);
+    update_pending_label();
 
     // stack: list <-> detail <-> updates
     let stack = gtk4::Stack::new();

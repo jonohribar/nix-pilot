@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use crate::desired_state::{Account, DesiredState};
+use crate::desired_state::DesiredDoc;
 use crate::store::ChangeQueue;
 use crate::updates;
 
@@ -181,11 +181,19 @@ impl UpdatesPage {
             let config_view = config_view.clone();
             let b = b.clone();
             // render the config the desired-state model would generate
-            let mut desired = DesiredState::default();
+            let mut sys = Vec::new();
+            let mut user = Vec::new();
             for p in queue.borrow().items() {
-                desired.set(p.attr.clone(), p.system_wide);
+                if p.system_wide {
+                    sys.push(p.attr.clone());
+                } else {
+                    user.push(p.attr.clone());
+                }
             }
-            config_view.set_text(&desired.render_module(Account(&account)));
+            let mut desired = DesiredDoc::current();
+            desired.set_system(sys);
+            desired.set_user(&account, user);
+            config_view.set_text(&desired.render_module());
             let changes: Vec<updates::PendingChange> = queue
                 .borrow()
                 .items()

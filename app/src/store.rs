@@ -1,6 +1,7 @@
 //! Application actions: the desired-change queue and the check-result rule.
 //! Pure logic — no GTK, no Nix. The UI translates user actions into these and
-//! renders the outcome; a persistent desired-state model is future work.
+//! renders the outcome; the persistent desired-state model lives in
+//! `desired_state.rs` and is kept in sync with this queue.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingChange {
     pub attr: String,
