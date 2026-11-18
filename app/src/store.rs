@@ -105,6 +105,38 @@ mod tests {
     }
 
     #[test]
+    fn items_round_trip_attr_and_scope() {
+        // underpins the desired-state seed path (shell loads the queue from
+        // the persisted file through items())
+        let mut q = ChangeQueue::new();
+        q.add(PendingChange {
+            attr: "firefox".into(),
+            name: "Firefox".into(),
+            system_wide: false,
+        });
+        q.add(PendingChange {
+            attr: "gimp".into(),
+            name: "GIMP".into(),
+            system_wide: true,
+        });
+        let items = q.items();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].attr, "firefox");
+        assert!(!items[0].system_wide);
+        assert_eq!(items[1].attr, "gimp");
+        assert!(items[1].system_wide);
+        assert!(!q.is_empty());
+    }
+
+    #[test]
+    fn empty_queue_is_empty() {
+        let q = ChangeQueue::new();
+        assert!(q.is_empty());
+        assert_eq!(q.len(), 0);
+        assert!(q.items().is_empty());
+    }
+
+    #[test]
     fn stale_result_does_not_apply() {
         assert!(result_applies("firefox", "firefox"));
         assert!(!result_applies("gimp", "firefox"));

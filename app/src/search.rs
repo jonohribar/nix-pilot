@@ -106,6 +106,27 @@ mod tests {
     }
 
     #[test]
+    fn rank_caps_hard_at_max_when_many_match() {
+        let texts: Vec<SearchText> = (0..200)
+            .map(|i| text(&format!("pkg-{i}"), "", "shared description"))
+            .collect();
+        let got = rank("shared", &texts, 60);
+        assert_eq!(got.len(), 60);
+        // top result is deterministic, not index-order:
+        // all score equally (desc bonus only), then equal scores keep order
+        assert_eq!(got, (0..60).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn rank_no_match_and_single_char_return_empty() {
+        let texts = vec![text("firefox", "", "web browser")];
+        assert!(rank("zzz-no-such-term", &texts, 10).is_empty());
+        // terms under 2 chars are skipped, so nothing ever scores
+        assert!(rank("a", &texts, 10).is_empty());
+        assert!(rank("   ", &texts, 10).is_empty());
+    }
+
+    #[test]
     fn search_text_is_prelowered() {
         let e = IndexEntry {
             attr: "Firefox".into(),

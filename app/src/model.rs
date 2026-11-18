@@ -71,7 +71,8 @@ impl Tier {
             Tier::Basic => "Verified — desktop entry",
             Tier::UnfreeDeferred => "Unfree — listed, no cache evidence",
             Tier::Unverified => "Unverified — no desktop evidence",
-            Tier::Other => "Unknown",
+            // the generator's heuristic tier (and any future unknown) lands
+            Tier::Other => "Heuristic — not cache-verified",
         }
     }
 }
@@ -162,5 +163,15 @@ mod tests {
         let t: Tier = serde_json::from_str("\"unfree-deferred\"").unwrap();
         assert_eq!(t, Tier::UnfreeDeferred);
         assert!(t.label().contains("Unfree"));
+    }
+
+    #[test]
+    fn heuristic_tier_falls_back_to_other_label() {
+        // the index's generator tier 'heuristic' is not a cache-evidence tier;
+        // it must deserialize (fallback) and label honestly
+        let t: Tier = serde_json::from_str("\"heuristic\"").unwrap();
+        assert_eq!(t, Tier::Other);
+        assert!(t.label().contains("Heuristic"));
+        assert!(!t.label().contains("Verified"));
     }
 }
