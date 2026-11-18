@@ -4,6 +4,14 @@ The wireframes are a single clickable prototype (`just app proto`): one window,
 sidebar + stack pages. This map is the at-a-glance route diagram; the PNGs are
 the rendered states.
 
+**Real-app parity (2026-11-19):** the app's live window now matches this layout
+— a sidebar (Home / Settings / Updates) over a stack. Differences: the real
+app's header carries the global search (catalogue-only v1, decided
+2026-11-18), the Updates page's Prepare-and-build runs the real candidate build
+(build-only, store never activated), updates/settings rollback state pages are
+capture-only until 7wo.3, and the Settings page lists the REQ-5 areas with no
+changeable workflow yet (9f3.8).
+
 **Search is store-local:** the search field lives inside the Software Store page
 (home + results), so it reads as "search the store". The header bar currently
 has no search — the app-wide global search is a separate surface in the

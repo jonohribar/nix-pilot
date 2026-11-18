@@ -3,16 +3,22 @@
 The product GUI: **Software Store**, **Settings**, **Updates/Recovery**, global search.
 Stack (decision [D19](../../docs/research/04-recommendations.md#decision-log)): **Rust + GTK4 + libadwaita** (gtk4-rs).
 
-Current state: Software Store window that reads the generated catalogue index
-(`experiments/catalogue/results/catalogue-index.json`) and offers ranked grouped
-search from the global header (the v1 whole-app search; catalogue-only until the
-Settings/Updates surfaces land), with a detail/install surface per result (user vs
-system-wide scope, [D9](../../docs/research/04-recommendations.md#decision-log)).
-Ranking mirrors the verified `experiments/catalogue/search.js` scorer (exact /
-prefix / contains on attr+pname, plus a description bonus); results are bucketed
-into the D16/D18 labelled groups. The remaining surfaces (Settings, Updates/
-Recovery) are tracked as `nix-pilot-msn.2`; the global-search design is
-[`docs/design/specifications/global-search.md`](../../docs/design/specifications/global-search.md).
+Current state: a single window with a sidebar (Home / Settings / Updates) and a
+stack of surfaces that read the generated catalogue index
+(`experiments/catalogue/results/catalogue-index.json`) plus the app-owned
+persisted desired state. The Home surface offers ranked grouped search from the
+global header (the v1 whole-app search, per
+[`global-search.md`](../../docs/design/specifications/global-search.md)), with a
+detail/install surface per result (user vs system-wide scope,
+[D9](../../docs/research/04-recommendations.md#decision-log)). Ranking mirrors
+the verified `experiments/catalogue/search.js` scorer (exact / prefix / contains
+on attr+pname, plus a description bonus); results are bucketed into the D16/D18
+labelled groups. The Updates surface drives the transaction machine: Prepare and
+build dry-runs each change, then *builds* the candidate generation from the
+desired state (`nixos-rebuild build`, store-only — never activates; see
+`src/apply.rs`); activation/rollback stay gated on 7wo.3. The Settings surface
+lists the REQ-5 areas with plain-language wording; setting workflows and the
+settings schema are product work (beads 9f3.8).
 
 ## Code layout + the check gate
 
@@ -38,10 +44,13 @@ installer: it checks the attribute against the system's configured nixpkgs
 as the first-class "unavailable on your system" state, risk R07), reports that
 state when the attr is missing or an alias, and drops the app into a
 ready-to-change set with its scope (user/system, decision D9), which is
-persisted to the desired-state file so selections survive a restart. Applying the queued changes is the Updates
-transaction (failure-and-recovery.md), which is the next surface; nothing in
-this flow mutates the system. The check logic lives in `src/install.rs` and is
-covered by unit tests plus live `--ignored` integration tests.
+persisted to the desired-state file so selections survive a restart. Applying
+the queued changes is the Updates transaction (failure-and-recovery.md):
+Prepare-and-build already *builds* the candidate generation (store-only via
+`nixos-rebuild build`); activating it (switching) and rollback stay gated until
+7wo.3. Nothing in this flow mutates the system. The check logic lives in
+`src/install.rs` and is covered by unit tests plus live `--ignored` integration
+tests.
 
 ## Dev shell + run
 
