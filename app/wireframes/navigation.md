@@ -20,10 +20,18 @@ flowchart LR
     DETAIL -->|"Back"| HOME
     HOME -->|"type in the store search"| RESULTS[Search results · grouped]
     RESULTS -->|"clear search / Back"| HOME
-    START -->|"Updates"| UPD[Updates · transaction flow]
-    UPD -->|"Prepare and install"| UPD2["summary → progress → rollback (spec: failure-and-recovery.md)"]
+    START -->|"Updates"| UPD[Updates · ready]
+    UPD -->|"Prepare and install"| SUM[Update summary]
+    SUM -->|"Apply changes"| APP[Applying]
+    APP -->|"finish"| DONE[Done]
+    DONE -->|"Go back to yesterday's system"| RB[Rollback]
+    RB -->|"finish"| REST[System restored]
+    UPD -.->|"build failure"| BF[Build failure · nothing changed]
+    APP -.->|"apply failure"| AF[Apply failure · nothing half-applied]
+    UPD -.->|"system will not boot"| BOOT[Boot recovery · "Start with yesterday's system"]
+    BOOT -->|"I'm back on an earlier system"| REST
     START -->|"Settings"| SET[Settings · system-only]
-    SET -->|"open a row"| SET2["Network · Display · Sound · Users … (D14)"]
+    SET -->|"open a row"| SET2["Network · Display · Sound · Printers · Users · Power · Remote access (REQ-5, D14)"]
 ```
 
 ## States (rendered)
@@ -36,18 +44,35 @@ flowchart LR
 
 ![Settings](proto-settings.png)
 
-![Updates](proto-updates.png)
+![Updates — ready](proto-updates.png)
+
+![Updates — summary](proto-updates-summary.png)
+
+![Updates — applying](proto-updates-applying.png)
+
+![Updates — done](proto-updates-done.png)
+
+![Updates — build failure](proto-updates-build-fail.png)
+
+![Updates — apply failure](proto-updates-apply-fail.png)
+
+![Updates — rollback](proto-updates-rollback.png)
+
+![Updates — restored](proto-updates-restored.png)
+
+![Updates — boot recovery](proto-updates-boot.png)
 
 ## Decisions the prototype encodes
 
 - Command-line tools appear only as a labelled group in search, never as app tiles (D16).
 - Unconfirmed candidates sit in their own "Unverified" group, never as tiles (D18).
 - Install is per-user by default, system-wide only when chosen (D9).
-- Settings surface is system-only with pointers; recovery lives in Updates (D14).
+- Settings surface is system-only with pointers to the desktop's own tools (D14); it carries the plain-language recovery card that ships before any failure (failure-and-recovery.md).
+- Updates is one transaction: prepare → review summary → apply (atomic) → done, with explicit build-failure ("nothing changed"), apply-failure ("nothing half-applied"), rollback ("go back to yesterday's system") and boot-recovery states (failure-and-recovery.md).
 
 ## Regenerating
 
 ```sh
 just app build
-just app wireframes            # all states, or named ones: `just app wireframes detail`
+just app wireframes            # all states, or named ones: `just app wireframes detail updates-summary`
 ```

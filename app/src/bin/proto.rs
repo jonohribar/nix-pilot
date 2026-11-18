@@ -97,7 +97,10 @@ fn main() {
 
     let page_detail = load_box(&build_dir, "page-detail.ui", "page_detail");
     let page_settings = load_box(&build_dir, "page-settings.ui", "page_settings");
-    let page_updates = load_box(&build_dir, "page-updates.ui", "page_updates");
+    // updates is a transaction stack (ready -> summary -> applying -> done, plus
+    // failure/rollback/boot-recovery states), so load its builder for wiring.
+    let updates_b = gtk4::Builder::from_file(format!("{}/page-updates.ui", build_dir));
+    let page_updates: gtk4::Stack = updates_b.object("page_updates").expect("page_updates");
 
     stack.add_named(&page_home, Some("home"));
     stack.add_named(&page_search, Some("search"));
@@ -184,6 +187,28 @@ fn main() {
     wire_store_search(&store_search_home, &stack, &prev);
     wire_store_search(&store_search_results, &stack, &prev);
 
+    // ---- updates transaction states ------------------------------------------
+    let hook_update = |id: &str, target: &'static str| {
+        if let Some(b) = updates_b.object::<gtk4::Button>(id) {
+            let s = page_updates.clone();
+            b.connect_clicked(move |_| s.set_visible_child_name(target));
+        }
+    };
+    hook_update("btn_apply", "summary");
+    hook_update("btn_summary_back", "ready");
+    hook_update("btn_apply_changes", "applying");
+    hook_update("btn_finish_apply", "done");
+    hook_update("btn_rollback", "rollback");
+    hook_update("btn_close_done", "ready");
+    hook_update("btn_finish_rollback", "restored");
+    hook_update("btn_retry", "ready");
+    hook_update("btn_stay", "ready");
+    hook_update("btn_retry2", "ready");
+    hook_update("btn_stay2", "ready");
+    hook_update("btn_boot_restored", "restored");
+    hook_update("btn_restored_retry", "ready");
+    hook_update("btn_ask_help", "restored");
+
     // ---- back -> previous page ----------------------------------------------
     let stack_b = stack.clone();
     let pc_b = prev.clone();
@@ -199,6 +224,8 @@ fn main() {
     if !detail_name.is_empty() {
         detail_title.set_text(&detail_name);
     }
+    let updates_state = arg("--updates-state").unwrap_or_else(|| "ready".into());
+    page_updates.set_visible_child_name(&updates_state);
     window.set_child(Some(&body));
     stack.set_visible_child_name(&initial);
 

@@ -1,57 +1,213 @@
 using Gtk 4.0;
 using Adw 1;
 
-// Updates / Recovery — system change as a transaction (failure-and-recovery.md):
-// pending items -> plain-language summary -> apply -> progress -> rollback.
-// Structural draft; failure and boot-recovery states come next pass.
-Gtk.Box page_updates {
-    orientation: vertical;
-    margin-start: 28;
-    margin-end: 28;
-    margin-top: 18;
+// Updates / Recovery — system change as a transaction (failure-and-recovery.md).
+// Each state (ready -> summary -> applying -> done, plus build/apply failure,
+// rollback, boot-recovery and restored) is a child of the page stack; the proto
+// binary advances it and --updates-state <name> captures a given state.
+Gtk.Stack page_updates {
+    transition-type: crossfade;
 
-    Gtk.Label h { label: "Updates"; css-classes: [ "title-2" ]; xalign: 0.0; }
-    Gtk.Label s {
-        label: "Changes are prepared first, then applied as one unit — if anything fails, the system stays as it was";
-        css-classes: [ "dim-label" ];
-        xalign: 0.0;
-        wrap: true;
-        margin-bottom: 12;
-    }
+    // ---- ready: pending items, start the transaction -------------------------
+    Gtk.Box {
+        name: "ready";
+        margin-start: 28;
+        margin-end: 28;
+        margin-top: 18;
+        orientation: vertical;
 
-    Gtk.Box card_pending { css-classes: [ "card" ]; orientation: vertical; spacing: 6; margin-bottom: 8;
-        Gtk.Label { label: "Ready to update"; css-classes: [ "heading" ]; xalign: 0.0; }
-        Gtk.Box { orientation: horizontal; spacing: 12;
-            Gtk.Image { icon-name: "software-update-available-symbolic"; pixel-size: 20; }
-            Gtk.Label { label: "Firefox 160.0 · 6 other applications"; xalign: 0.0; hexpand: true; }
-            Gtk.Label { label: "48 MB"; css-classes: [ "dim-label" ]; }
+        Gtk.Label { label: "Updates"; css-classes: [ "title-2" ]; xalign: 0.0; }
+        Gtk.Label s {
+            label: "Changes are prepared first, then applied as one unit — if anything fails, the system stays as it was";
+            css-classes: [ "dim-label" ];
+            xalign: 0.0;
+            wrap: true;
+            margin-bottom: 12;
         }
-        Gtk.Box { orientation: horizontal; spacing: 12;
-            Gtk.Image { icon-name: "system-software-update-symbolic"; pixel-size: 20; }
-            Gtk.Label { label: "System – 1 change (kernel update)"; xalign: 0.0; hexpand: true; }
-            Gtk.Label { label: "310 MB"; css-classes: [ "dim-label" ]; }
+        Gtk.Box card_pending { css-classes: [ "card" ]; orientation: vertical; spacing: 6; margin-bottom: 8;
+            Gtk.Label { label: "Ready to update"; css-classes: [ "heading" ]; xalign: 0.0; }
+            Gtk.Box { orientation: horizontal; spacing: 12;
+                Gtk.Image { icon-name: "software-update-available-symbolic"; pixel-size: 20; }
+                Gtk.Label { label: "Firefox 160.0 · 6 other applications"; xalign: 0.0; hexpand: true; }
+                Gtk.Label { label: "48 MB"; css-classes: [ "dim-label" ]; }
+            }
+            Gtk.Box { orientation: horizontal; spacing: 12;
+                Gtk.Image { icon-name: "system-software-update-symbolic"; pixel-size: 20; }
+                Gtk.Label { label: "System – 1 change (kernel update)"; xalign: 0.0; hexpand: true; }
+                Gtk.Label { label: "310 MB"; css-classes: [ "dim-label" ]; }
+            }
+        }
+        Gtk.Button btn_apply {
+            label: "Prepare and install changes";
+            css-classes: [ "suggested-action" ];
+            halign: start;
+            margin-bottom: 10;
+        }
+        Gtk.Box card_txn { css-classes: [ "card" ]; orientation: vertical; spacing: 2;
+            Gtk.Label { label: "How it works"; css-classes: [ "heading" ]; xalign: 0.0; }
+            Gtk.Label { label: "1. Prepare — changes are built and checked"; css-classes: [ "dim-label" ]; xalign: 0.0; wrap: true; }
+            Gtk.Label { label: "2. Summary — you see what will change, in plain language"; css-classes: [ "dim-label" ]; xalign: 0.0; wrap: true; }
+            Gtk.Label { label: "3. Apply — the system switches over"; css-classes: [ "dim-label" ]; xalign: 0.0; wrap: true; }
+            Gtk.Label { label: "4. If it fails — you can go back to yesterday's system"; css-classes: [ "dim-label" ]; xalign: 0.0; wrap: true; }
         }
     }
 
-    Gtk.Button btn_apply {
-        label: "Prepare and install changes";
-        css-classes: [ "suggested-action" ];
-        halign: start;
-        margin-bottom: 10;
+    // ---- summary: plain-language review before applying (REQ-3) ---------------
+    Gtk.Box {
+        name: "summary";
+        margin-start: 28;
+        margin-end: 28;
+        margin-top: 18;
+        orientation: vertical;
+
+        Gtk.Label { label: "Review changes"; css-classes: [ "title-2" ]; xalign: 0.0; }
+        Gtk.Label {
+            label: "Here is everything that will change. Nothing applies until you confirm.";
+            css-classes: [ "dim-label" ];
+            xalign: 0.0;
+            wrap: true;
+            margin-bottom: 12;
+        }
+        Gtk.Box card_summary { css-classes: [ "card" ]; orientation: vertical; spacing: 6; margin-bottom: 10;
+            Gtk.Box { orientation: horizontal; spacing: 12;
+                Gtk.Image { icon-name: "software-update-available-symbolic"; pixel-size: 20; }
+                Gtk.Label { label: "Firefox and 6 apps update to the newest versions"; xalign: 0.0; hexpand: true; wrap: true; }
+            }
+            Gtk.Box { orientation: horizontal; spacing: 12;
+                Gtk.Image { icon-name: "system-software-update-symbolic"; pixel-size: 20; }
+                Gtk.Label { label: "The system kernel is replaced. Your computer will restart at the end."; xalign: 0.0; hexpand: true; wrap: true; }
+            }
+        }
+        Gtk.Label {
+            label: "If anything goes wrong, you can go back to yesterday's system afterwards.";
+            css-classes: [ "dim-label" ]; xalign: 0.0; wrap: true; margin-bottom: 12;
+        }
+        Gtk.Box { orientation: horizontal; spacing: 10;
+            Gtk.Button btn_summary_back { label: "Go back"; }
+            Gtk.Button btn_apply_changes {
+                label: "Apply changes";
+                css-classes: [ "suggested-action" ];
+            }
+        }
     }
 
-    Gtk.Box card_txn { css-classes: [ "card" ]; orientation: vertical; spacing: 2;
-        Gtk.Label { label: "How it works"; css-classes: [ "heading" ]; xalign: 0.0; }
-        Gtk.Label { label: "1. Prepare — changes are built and checked"; css-classes: [ "dim-label" ]; xalign: 0.0; wrap: true; }
-        Gtk.Label { label: "2. Summary — you see what will change, in plain language"; css-classes: [ "dim-label" ]; xalign: 0.0; wrap: true; }
-        Gtk.Label { label: "3. Apply — the system switches over"; css-classes: [ "dim-label" ]; xalign: 0.0; wrap: true; }
-        Gtk.Label { label: "4. If it fails — you can go back to yesterday's system"; css-classes: [ "dim-label" ]; xalign: 0.0; wrap: true; }
+    // ---- applying: the switch (atomic; no cancel) -----------------------------
+    Gtk.Box {
+        name: "applying";
+        margin-start: 28; margin-end: 28; margin-top: 40;
+        orientation: vertical;
+        halign: center;
+        spacing: 14;
+        Gtk.Spinner { spinning: true; vexpand: true; margin-bottom: 4; }
+        Gtk.Label { label: "Switching over to the new system…"; css-classes: [ "title-2" ]; halign: center; }
+        Gtk.Label {
+            label: "This takes a few minutes and your computer may restart. Do not switch it off.";
+            css-classes: [ "dim-label" ]; halign: center; wrap: true;
+        }
+        Gtk.Button btn_finish_apply { label: "Continue (capture)"; css-classes: [ "flat" ]; halign: center; margin-top: 10; }
     }
 
-    Gtk.Label note {
-        label: "Rollback and boot-time recovery are covered in the failure-handling spec";
-        css-classes: [ "dim-label" ];
-        xalign: 0.0;
-        margin-top: 10;
+    // ---- done: applied, rollback available ------------------------------------
+    Gtk.Box {
+        name: "done";
+        margin-start: 28; margin-end: 28; margin-top: 40;
+        orientation: vertical; halign: center; spacing: 12;
+        Gtk.Image { icon-name: "emblem-default-symbolic"; pixel-size: 48; }
+        Gtk.Label { label: "Updates installed"; css-classes: [ "title-2" ]; halign: center; }
+        Gtk.Label {
+            label: "Your computer is up to date. If you want the way it was before, you can go back to yesterday's system.";
+            css-classes: [ "dim-label" ]; halign: center; wrap: true;
+        }
+        Gtk.Box { orientation: horizontal; spacing: 10; halign: center; margin-top: 8;
+            Gtk.Button btn_rollback { label: "Go back to yesterday's system"; }
+            Gtk.Button btn_close_done { label: "Done"; css-classes: [ "suggested-action" ]; }
+        }
+    }
+
+    // ---- build failure: nothing changed ---------------------------------------
+    Gtk.Box {
+        name: "build-fail";
+        margin-start: 28; margin-end: 28; margin-top: 28;
+        orientation: vertical; spacing: 12;
+        Gtk.Image { icon-name: "dialog-warning-symbolic"; pixel-size: 40; halign: start; }
+        Gtk.Label { label: "The update did not install"; css-classes: [ "title-2" ]; xalign: 0.0; }
+        Gtk.Label {
+            label: "Nothing was changed — your system is exactly as it was before you started.";
+            css-classes: [ "dim-label" ]; xalign: 0.0; wrap: true;
+        }
+        Gtk.Button { label: "Show technical detail"; css-classes: [ "flat", "dim-label" ]; halign: start; }
+        Gtk.Box { orientation: horizontal; spacing: 10; margin-top: 6;
+            Gtk.Button btn_retry { label: "Try again"; }
+            Gtk.Button btn_stay { label: "Stay on current system"; css-classes: [ "suggested-action" ]; }
+        }
+    }
+
+    // ---- apply failure: nothing half-applied ----------------------------------
+    Gtk.Box {
+        name: "apply-fail";
+        margin-start: 28; margin-end: 28; margin-top: 28;
+        orientation: vertical; spacing: 12;
+        Gtk.Image { icon-name: "dialog-warning-symbolic"; pixel-size: 40; halign: start; }
+        Gtk.Label { label: "The change did not finish"; css-classes: [ "title-2" ]; xalign: 0.0; }
+        Gtk.Label {
+            label: "Nothing was left half-applied — your system switched back to the way it was.";
+            css-classes: [ "dim-label" ]; xalign: 0.0; wrap: true;
+        }
+        Gtk.Box { orientation: horizontal; spacing: 10; margin-top: 6;
+            Gtk.Button btn_retry2 { label: "Try again"; }
+            Gtk.Button btn_stay2 { label: "Keep the current system"; css-classes: [ "suggested-action" ]; }
+        }
+    }
+
+    // ---- rollback in progress -------------------------------------------------
+    Gtk.Box {
+        name: "rollback";
+        margin-start: 28; margin-end: 28; margin-top: 40;
+        orientation: vertical; halign: center; spacing: 14;
+        Gtk.Spinner { spinning: true; vexpand: true; margin-bottom: 4; }
+        Gtk.Label { label: "Restoring yesterday's system…"; css-classes: [ "title-2" ]; halign: center; }
+        Gtk.Label {
+            label: "This puts back the way things were before the update. It may take a few minutes.";
+            css-classes: [ "dim-label" ]; halign: center; wrap: true;
+        }
+        Gtk.Button btn_finish_rollback { label: "Continue (capture)"; css-classes: [ "flat" ]; halign: center; margin-top: 10; }
+    }
+
+    // ---- restored after rollback -----------------------------------------------
+    Gtk.Box {
+        name: "restored";
+        margin-start: 28; margin-end: 28; margin-top: 40;
+        orientation: vertical; halign: center; spacing: 12;
+        Gtk.Label { label: "Your system was restored"; css-classes: [ "title-2" ]; halign: center; }
+        Gtk.Label {
+            label: "You are now back on yesterday's system. You can try the update again, or ask for help.";
+            css-classes: [ "dim-label" ]; halign: center; wrap: true;
+        }
+        Gtk.Box { orientation: horizontal; spacing: 10; halign: center; margin-top: 8;
+            Gtk.Button btn_restored_retry { label: "Try the update again"; }
+            Gtk.Button btn_ask_help { label: "Ask for help"; css-classes: [ "suggested-action" ]; }
+        }
+    }
+
+    // ---- boot-recovery: how the boot menu reads when the pc will not start ----
+    Gtk.Box {
+        name: "boot-recovery";
+        margin-start: 28; margin-end: 28; margin-top: 28;
+        orientation: vertical; spacing: 12;
+        Gtk.Image { icon-name: "computer-symbolic"; pixel-size: 40; halign: start; }
+        Gtk.Label { label: "If the computer will not start"; css-classes: [ "title-2" ]; xalign: 0.0; }
+        Gtk.Box card_boot { css-classes: [ "card" ]; orientation: vertical; spacing: 4;
+            Gtk.Label {
+                label: "The start menu offers earlier systems in plain words. Pick:\n    “Start with yesterday's system”\nwhen you want to go back to how things were before the update.";
+                css-classes: [ "dim-label" ]; xalign: 0.0; wrap: true;
+            }
+            Gtk.Label {
+                label: "If no earlier system appears, that is when you ask for help.";
+                css-classes: [ "dim-label" ]; xalign: 0.0; wrap: true; margin-top: 6;
+            }
+        }
+        Gtk.Box { orientation: horizontal; spacing: 10; margin-top: 6;
+            Gtk.Button btn_boot_restored { label: "I'm back on an earlier system"; }
+        }
     }
 }

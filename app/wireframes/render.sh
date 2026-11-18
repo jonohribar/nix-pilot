@@ -28,6 +28,14 @@ declare -A STATES=(
     [detail]="detail --detail GIMP"
     [settings]=settings
     [updates]=updates
+    [updates-summary]="updates --updates-state summary"
+    [updates-applying]="updates --updates-state applying"
+    [updates-done]="updates --updates-state done"
+    [updates-build-fail]="updates --updates-state build-fail"
+    [updates-apply-fail]="updates --updates-state apply-fail"
+    [updates-rollback]="updates --updates-state rollback"
+    [updates-restored]="updates --updates-state restored"
+    [updates-boot]="updates --updates-state boot-recovery"
 )
 
 targets=()

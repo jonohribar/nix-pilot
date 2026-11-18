@@ -1,8 +1,10 @@
 using Gtk 4.0;
 using Adw 1;
 
-// Settings — system-only surface (D14): plain-language (REQ-6), Nix hidden.
-// Structural draft; per-screen detail design is the next pass.
+// Settings — system-only surface (D14), plain language (REQ-6), Nix hidden.
+// Areas follow REQ-5 (network, display, sound, printers, users, power, remote
+// access); items that fail the D14 boundary are pointers, not workflows. The
+// recovery card ships before any failure (failure-and-recovery.md).
 Gtk.Box page_settings {
     orientation: vertical;
     margin-start: 28;
@@ -11,7 +13,7 @@ Gtk.Box page_settings {
 
     Gtk.Label h { label: "Settings"; css-classes: [ "title-2" ]; xalign: 0.0; }
     Gtk.Label s {
-        label: "System settings managed by nix-pilot — everything else is handled by the apps and desktop it belongs to";
+        label: "System settings managed by nix-pilot — everything else lives with your apps or your desktop";
         css-classes: [ "dim-label" ];
         xalign: 0.0;
         wrap: true;
@@ -42,18 +44,60 @@ Gtk.Box page_settings {
         }
         Gtk.Label { label: "›"; css-classes: [ "dim-label" ]; halign: end; hexpand: true; }
     }
+    Gtk.Box card_printers { css-classes: [ "card" ]; orientation: horizontal; spacing: 14; margin-bottom: 6;
+        Gtk.Image { icon-name: "printer-symbolic"; pixel-size: 24; }
+        Gtk.Box { orientation: vertical;
+            Gtk.Label { label: "Printers"; css-classes: [ "title" ]; xalign: 0.0; }
+            Gtk.Label { label: "Add and manage printers"; css-classes: [ "desc" ]; xalign: 0.0; }
+        }
+        Gtk.Label { label: "›"; css-classes: [ "dim-label" ]; halign: end; hexpand: true; }
+    }
     Gtk.Box card_users { css-classes: [ "card" ]; orientation: horizontal; spacing: 14; margin-bottom: 6;
         Gtk.Image { icon-name: "system-users-symbolic"; pixel-size: 24; }
         Gtk.Box { orientation: vertical;
             Gtk.Label { label: "Users"; css-classes: [ "title" ]; xalign: 0.0; }
-            Gtk.Label { label: "Accounts and login"; css-classes: [ "desc" ]; xalign: 0.0; }
+            Gtk.Label { label: "Accounts, passwords and login"; css-classes: [ "desc" ]; xalign: 0.0; }
         }
         Gtk.Label { label: "›"; css-classes: [ "dim-label" ]; halign: end; hexpand: true; }
     }
-    Gtk.Label note {
-        label: "Recovery and system updates live in Updates";
-        css-classes: [ "dim-label" ];
-        xalign: 0.0;
-        margin-top: 10;
+    Gtk.Box card_power { css-classes: [ "card" ]; orientation: horizontal; spacing: 14; margin-bottom: 6;
+        Gtk.Image { icon-name: "battery-full-symbolic"; pixel-size: 24; }
+        Gtk.Box { orientation: vertical;
+            Gtk.Label { label: "Power"; css-classes: [ "title" ]; xalign: 0.0; }
+            Gtk.Label { label: "Sleep, lid behaviour, charging limits"; css-classes: [ "desc" ]; xalign: 0.0; }
+        }
+        Gtk.Label { label: "›"; css-classes: [ "dim-label" ]; halign: end; hexpand: true; }
+    }
+    Gtk.Box card_remote { css-classes: [ "card" ]; orientation: horizontal; spacing: 14; margin-bottom: 6;
+        Gtk.Image { icon-name: "network-transmit-receive-symbolic"; pixel-size: 24; }
+        Gtk.Box { orientation: vertical;
+            Gtk.Label { label: "Remote access"; css-classes: [ "title" ]; xalign: 0.0; }
+            Gtk.Label { label: "Remote desktop and sharing"; css-classes: [ "desc" ]; xalign: 0.0; }
+        }
+        Gtk.Label { label: "›"; css-classes: [ "dim-label" ]; halign: end; hexpand: true; }
+    }
+    Gtk.Box card_desktop { css-classes: [ "card" ]; orientation: horizontal; spacing: 14; margin-bottom: 6;
+        Gtk.Image { icon-name: "preferences-desktop-symbolic"; pixel-size: 24; }
+        Gtk.Box { orientation: vertical;
+            Gtk.Label { label: "Appearance"; css-classes: [ "title" ]; xalign: 0.0; }
+            Gtk.Label { label: "Wallpaper and themes — lives in your desktop's settings"; css-classes: [ "desc" ]; xalign: 0.0; }
+        }
+    }
+
+    Gtk.Label rec_heading { label: "If something goes wrong"; css-classes: [ "heading" ]; xalign: 0.0; margin-top: 12; }
+    Gtk.Box card_recovery { css-classes: [ "card" ]; orientation: vertical; spacing: 4; margin-top: 6;
+        Gtk.Label {
+            label: "Every change keeps a copy of the way things were. If your computer will not start after an update, the start menu offers earlier systems in plain words — pick “Start with yesterday's system”.";
+            css-classes: [ "dim-label" ];
+            xalign: 0.0;
+            wrap: true;
+        }
+        Gtk.Label {
+            label: "If no earlier system appears, ask for help — no technical knowledge needed.";
+            css-classes: [ "dim-label" ];
+            xalign: 0.0;
+            wrap: true;
+            margin-top: 6;
+        }
     }
 }
