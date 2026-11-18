@@ -21,7 +21,8 @@ fn arg(name: &str) -> Option<String> {
 
 fn load_box(build_dir: &str, file: &str, id: &str) -> gtk4::Box {
     let b = gtk4::Builder::from_file(format!("{}/{}", build_dir, file));
-    b.object(id).unwrap_or_else(|| panic!("missing {id} in {file}"))
+    b.object(id)
+        .unwrap_or_else(|| panic!("missing {id} in {file}"))
 }
 
 // Store-local search: any non-empty query shows the grouped results page.
@@ -49,15 +50,17 @@ fn main() {
         std::process::exit(1);
     }
 
-    let build_dir = std::env::var("WIREFRAME_BUILD")
-        .unwrap_or_else(|_| "wireframes/build".into());
-    let css_path = std::env::var("WIREFRAME_CSS")
-        .unwrap_or_else(|_| "wireframes/style.css".into());
+    let build_dir = std::env::var("WIREFRAME_BUILD").unwrap_or_else(|_| "wireframes/build".into());
+    let css_path = std::env::var("WIREFRAME_CSS").unwrap_or_else(|_| "wireframes/style.css".into());
     if let Ok(css) = std::fs::read_to_string(&css_path) {
         let provider = gtk4::CssProvider::new();
         provider.load_from_data(&css);
         if let Some(d) = gtk4::gdk::Display::default() {
-            gtk4::style_context_add_provider_for_display(&d, &provider, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
+            gtk4::style_context_add_provider_for_display(
+                &d,
+                &provider,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
         }
     }
 
@@ -89,13 +92,20 @@ fn main() {
     // home + its store-local search come from one builder (so we wire the entry)
     let home_b = gtk4::Builder::from_file(format!("{}/page-home.ui", build_dir));
     let page_home: gtk4::Box = home_b.object("page_home").expect("page_home");
-    let store_search_home: gtk4::SearchEntry = home_b.object("store_search").expect("store_search in page-home");
+    let store_search_home: gtk4::SearchEntry = home_b
+        .object("store_search")
+        .expect("store_search in page-home");
 
     let search_b = gtk4::Builder::from_file(format!("{}/page-search.ui", build_dir));
     let page_search: gtk4::Box = search_b.object("page_search").expect("page_search");
-    let store_search_results: gtk4::SearchEntry = search_b.object("store_search").expect("store_search in page-search");
+    let store_search_results: gtk4::SearchEntry = search_b
+        .object("store_search")
+        .expect("store_search in page-search");
 
-    let page_detail = load_box(&build_dir, "page-detail.ui", "page_detail");
+    // one builder for the detail page so the title label we update is the
+    // label inside the page that is actually shown (not a detached twin)
+    let detail_b = gtk4::Builder::from_file(format!("{}/page-detail.ui", build_dir));
+    let page_detail: gtk4::Box = detail_b.object("page_detail").expect("page_detail");
     let page_settings = load_box(&build_dir, "page-settings.ui", "page_settings");
     // updates is a transaction stack (ready -> summary -> applying -> done, plus
     // failure/rollback/boot-recovery states), so load its builder for wiring.
@@ -153,10 +163,7 @@ fn main() {
     let prev: Rc<RefCell<String>> = Rc::new(RefCell::new("home".to_string()));
 
     // ---- app cards -> detail ------------------------------------------------
-    let detail_title: gtk4::Label = {
-        let b = gtk4::Builder::from_file(format!("{}/page-detail.ui", build_dir));
-        b.object("detail_title").expect("detail_title")
-    };
+    let detail_title: gtk4::Label = detail_b.object("detail_title").expect("detail_title");
     let detail_title_c = detail_title.clone();
     let stack_c = stack.clone();
     let pc2 = prev.clone();

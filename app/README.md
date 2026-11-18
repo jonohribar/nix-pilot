@@ -14,6 +14,27 @@ into the D16/D18 labelled groups. The remaining surfaces (Settings, Updates/
 Recovery) are tracked as `nix-pilot-msn.2`; the global-search design is
 [`docs/design/specifications/global-search.md`](../../docs/design/specifications/global-search.md).
 
+## Code layout + the check gate
+
+Pure logic is split from the UI so it is testable without a window or nix:
+`src/model.rs` (typed catalogue domain), `src/search.rs` (ranking),
+`src/store.rs` (desired-change queue + result rule), `src/install.rs` (nix
+adapter, typed `Outcome`), and `src/main.rs` (UI surface + startup). See
+`docs/design/coding-style.md`. Run `just app check` (fmt + clippy + tests)
+before committing.
+
+## Install intent (v1)
+
+The detail page's Install button is an *intent flow*, not an imperative
+installer: it checks the attribute against the system's configured nixpkgs
+(`nix build --dry-run`, which never fetches or writes; revision drift surfaces
+as the first-class "unavailable on your system" state, risk R07), reports that
+state when the attr is missing or an alias, and drops the app into an
+in-memory ready-to-change list with its scope (user/system, decision D9). Applying the queued changes is the Updates
+transaction (failure-and-recovery.md), which is the next surface; nothing in
+this flow mutates the system. The check logic lives in `src/install.rs` and is
+covered by unit tests plus live `--ignored` integration tests.
+
 ## Dev shell + run
 
 ```sh

@@ -35,12 +35,18 @@ fn main() {
     let provider = gtk4::CssProvider::new();
     provider.load_from_data(&css_text);
     if let Some(d) = gtk4::gdk::Display::default() {
-        gtk4::style_context_add_provider_for_display(&d, &provider, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        gtk4::style_context_add_provider_for_display(
+            &d,
+            &provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
     }
 
     // window from blueprint-compiled ui
     let builder = gtk4::Builder::from_file(ui);
-    let window: gtk4::Window = builder.object("window").expect("ui must define a widget id `window`");
+    let window: gtk4::Window = builder
+        .object("window")
+        .expect("ui must define a widget id `window`");
     window.present();
 
     glib::MainLoop::new(None, false).run();
