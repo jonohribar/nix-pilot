@@ -1,0 +1,34 @@
+# Phase 0 catalogue experiments (node only — no nix shell needed; `measure`
+# additionally needs nix for the eval).
+
+# search the catalogue index
+search *terms:
+    node search.js {{terms}}
+
+# index stats
+stats:
+    node search.js --stats
+
+# rebuild the heuristic catalogue index from records.json
+generator:
+    node generator.js
+
+# overlay evidence tiers onto the index (reads results/evidence*.jsonl)
+reclassify:
+    node classify-evidence.js --write
+
+# post-evidence known-apps sanity check
+validate:
+    node validate-evidence.js
+
+# resumable evidence pass (limiter first arg; parallel via --bucket/--nbuckets)
+evidence *args:
+    node evidence-all.js {{args}}
+
+# full-set metadata export (first arg = attr count, 27271 for the full set)
+measure n:
+    bash measure.sh {{n}}
+
+# serve the browsable catalogue viewer (http://localhost:8137/view.html)
+viewer:
+    node serve.js

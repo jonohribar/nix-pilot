@@ -1,0 +1,23 @@
+# nix-pilot desktop client recipes.
+# Run inside the dev shell (`just app-shell` from the repo root), or via the
+# root `just app-*` recipes which wrap the shell for you.
+
+# compile the client
+build:
+    cargo build
+
+# run the Software Store app
+run: build
+    cargo run
+
+# run the clickable wireframe prototype
+proto: build
+    cargo run --bin proto
+
+# render wireframe states to PNGs (all, or named: detail search …)
+wireframes *states: build
+    ./wireframes/render.sh {{states}}
+
+# headless smoke test of the app window (xvfb; 5 s run)
+smoke: build
+    xvfb-run -a bash -c './target/debug/nix-pilot-app & p=$$!; sleep 5; kill $$p 2>/dev/null; wait $$p 2>/dev/null; true'
