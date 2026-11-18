@@ -1,8 +1,11 @@
-default:
-    @just --list
+# nix-pilot command hub.
 
-# Desktop client (app/Justfile)
-mod app 'app/Justfile'
+# List all recipes with their descriptions
+help:
+    @just --list --unsorted 
 
-# Catalogue experiments (experiments/catalogue/Justfile)
-mod experiments 'experiments/catalogue/Justfile'
+# Desktop client (app/justfile)
+mod app 'app/justfile'
+
+# Catalogue experiments (experiments/catalogue/justfile)
+mod experiments 'experiments/catalogue/justfile'

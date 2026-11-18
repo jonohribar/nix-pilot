@@ -1,16 +1,20 @@
-default:
+# List all recipes with their descriptions
+help:
     @just --list
 
 # interactive dev shell (cargo + GTK4 + libadwaita + wireframe tools)
 shell:
     nix-shell ./shell.nix
 
+# compile the GTK4 + libadwaita Rust client
 build:
     @if command -v cargo >/dev/null 2>&1; then cargo build; else nix-shell ./shell.nix --run 'cargo build'; fi
 
+# run the store client against the local catalogue index
 run: build
     @if command -v cargo >/dev/null 2>&1; then cargo run; else nix-shell ./shell.nix --run 'cargo run'; fi
 
+# run the clickable wireframe prototype (page-*.blp shell)
 proto: build
     @if command -v cargo >/dev/null 2>&1; then cargo run --bin proto; else nix-shell ./shell.nix --run 'cargo run --bin proto'; fi
 

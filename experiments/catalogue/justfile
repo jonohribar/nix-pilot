@@ -1,18 +1,23 @@
-default:
+help:
     @just --list
 
+# ranked grouped search; args are the query terms
 search *terms:
     node search.js {{terms}}
 
+# distribution of index entries by class/tier
 stats:
     node search.js --stats
 
+# rebuild the heuristic catalogue index from records.json
 generator:
     node generator.js
 
+# overlay evidence tiers on the index; rewrite catalogue-index.json
 reclassify:
     node classify-evidence.js --write
 
+# spot-check known apps against the reclassified index
 validate:
     node validate-evidence.js
 
@@ -24,5 +29,6 @@ evidence *args:
 measure n:
     bash measure.sh {{n}}
 
+# serve the browsable catalogue at localhost:8137
 viewer:
     node serve.js
