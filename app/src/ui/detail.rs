@@ -226,9 +226,7 @@ impl DetailUi {
         if queued {
             *self.state.borrow_mut() = InstallState::Added;
             self.btn_install.set_label("Remove from changes");
-            self.status.set_text(
-                "Added to your ready-to-change list — installs apply through Updates (next surface)",
-            );
+            self.status.set_text(ADDED_TEXT);
         }
     }
 }

@@ -1,6 +1,6 @@
-//! App shell: window, header, store list + search, and navigation. This is the
-//! UI composition point; the detail/install flow and the updates dialog are in
-//! `detail` and `updates_dialog`. Pure ranking lives in crate::search.
+//! App shell: sidebar + stack of surfaces (Store list, detail, Updates). This
+//! is the UI composition point; the detail/install flow is in `detail`, the
+//! updates page in `updates_page`. Pure ranking lives in crate::search.
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -9,7 +9,7 @@ use gtk4::prelude::*;
 use crate::model::{Class, IndexEntry, SearchText};
 use crate::search;
 use crate::store::ChangeQueue;
-use crate::ui::{detail, updates_dialog, widgets};
+use crate::ui::{detail, updates_page, widgets};
 
 /// How many rows the list shows at once (empty query is a bounded browse).
 const MAX_ROWS: usize = 60;
@@ -70,6 +70,26 @@ fn rebuild_list(
     n
 }
 
+/// A sidebar nav button that switches the stack and (for Updates) refreshes it.
+fn nav_button(
+    label: &str,
+    page: &'static str,
+    stack: &gtk4::Stack,
+    on_show: Option<Rc<dyn Fn()>>,
+) -> gtk4::Button {
+    let b = gtk4::Button::with_label(label);
+    b.add_css_class("flat");
+    b.add_css_class("nav-item");
+    let stack = stack.clone();
+    b.connect_clicked(move |_| {
+        if let Some(f) = on_show.as_ref() {
+            f();
+        }
+        stack.set_visible_child_name(page);
+    });
+    b
+}
+
 /// Build and present the window for a loaded catalogue.
 pub fn run(
     app: &gtk4::Application,
@@ -79,9 +99,9 @@ pub fn run(
 ) {
     let window = gtk4::ApplicationWindow::builder()
         .application(app)
-        .title("nix-pilot — Software Store")
-        .default_width(1020)
-        .default_height(720)
+        .title("nix-pilot")
+        .default_width(1180)
+        .default_height(840)
         .build();
 
     // header: back (detail only), pending-changes, global search
@@ -132,8 +152,11 @@ pub fn run(
         "Installs into your user account — no administrator rights needed",
     ));
 
-    // pending-changes header label -> opens the Updates review
-    let retained_wins: Rc<RefCell<Vec<gtk4::Window>>> = Rc::new(RefCell::new(Vec::new()));
+    // updates page
+    let updates = Rc::new(updates_page::UpdatesPage::new());
+    updates.wire(&queue, &nix);
+
+    // pending-changes header button -> Updates page (refresh on show)
     let update_pending_label: Rc<dyn Fn()> = {
         let queue = queue.clone();
         let label = pending_btn.clone();
@@ -162,29 +185,50 @@ pub fn run(
         })
     };
     update_pending_label();
-    {
-        let queue = queue.clone();
-        let nix = nix.clone();
-        let wins = retained_wins.clone();
-        let win_parent = window.clone();
-        pending_btn.connect_clicked(move |_| {
-            updates_dialog::open_updates_dialog(&win_parent, &queue, &nix, &wins)
-        });
-    }
 
     // install flow + home button (owns the state machine)
     detail::wire(&detail, &queue, &nix, &window, update_pending_label.clone());
 
-    // stack: list <-> detail
+    // stack: list <-> detail <-> updates
     let stack = gtk4::Stack::new();
+    stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
     stack.add_named(&list_page, Some("list"));
     stack.add_named(&detail.page, Some("detail"));
+    stack.add_named(&updates.page, Some("updates"));
     stack.set_visible_child_name("list");
-    window.set_child(Some(&stack));
+
+    // sidebar nav
+    let sidebar = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    sidebar.set_width_request(220);
+    sidebar.append(&nav_button("Home", "list", &stack, None));
+    {
+        let updates = updates.clone();
+        let queue = queue.clone();
+        let show = Rc::new(move || updates.refresh(&queue));
+        sidebar.append(&nav_button("Updates", "updates", &stack, Some(show)));
+    }
+
+    let body = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    body.append(&sidebar);
+    body.append(&stack);
+    window.set_child(Some(&body));
+
+    // pending button -> Updates
+    {
+        let stack = stack.clone();
+        let updates = updates.clone();
+        let queue = queue.clone();
+        pending_btn.connect_clicked(move |_| {
+            updates.refresh(&queue);
+            stack.set_visible_child_name("updates");
+        });
+    }
 
     let back2 = back.clone();
+    let stack_note = stack.clone();
     stack.connect_visible_child_name_notify(move |s| {
         back2.set_visible(s.visible_child_name().as_deref() == Some("detail"));
+        let _ = stack_note;
     });
     let stack_back = stack.clone();
     back.connect_clicked(move |_| stack_back.set_visible_child_name("list"));

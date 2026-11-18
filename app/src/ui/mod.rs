@@ -3,7 +3,7 @@
 //! the nix adapter live in the sibling non-UI modules; this layer translates
 //! user actions into store/updates/install actions and renders their outcomes.
 pub mod detail;
-pub mod updates_dialog;
+pub mod updates_page;
 pub mod widgets;
 
 mod shell;
