@@ -12,7 +12,7 @@ build:
 
 # run the store client against the local catalogue index
 run: build
-    @if command -v cargo >/dev/null 2>&1; then cargo run; else nix-shell ./shell.nix --run 'cargo run'; fi
+    @if command -v cargo >/dev/null 2>&1; then cargo run --bin nix-pilot-app; else nix-shell ./shell.nix --run 'cargo run --bin nix-pilot-app'; fi
 
 # run the clickable wireframe prototype (page-*.blp shell)
 proto: build
