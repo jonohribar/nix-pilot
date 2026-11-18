@@ -1,0 +1,72 @@
+using Gtk 4.0;
+
+// Software Store — search results page (grouped by class, D16/D18).
+Gtk.Box page_search {
+    orientation: vertical;
+    margin-start: 28;
+    margin-end: 28;
+    margin-top: 14;
+
+    Gtk.Label q { xalign: 0.0; css-classes: [ "title-2" ]; label: "Results for “docker”"; }
+    Gtk.Label q_sub {
+        xalign: 0.0;
+        css-classes: [ "dim-label" ];
+        label: "4 matches · grouped by class — command-line tools are never shown as app tiles";
+    }
+
+    Gtk.Label g1 { label: "COMMAND-LINE TOOLS"; css-classes: [ "group-header" ]; }
+    Gtk.Button row_docker { css-classes: [ "flat", "card" ]; halign: start;
+        child: Gtk.Box {
+            orientation: horizontal;
+            spacing: 14;
+            Gtk.Box { css-classes: [ "app-icon", "class-cli" ]; halign: start; valign: center;
+                Gtk.Image { icon-name: "utilities-terminal-symbolic"; pixel-size: 24; }
+            }
+            Gtk.Box { orientation: vertical; valign: center;
+                Gtk.Label { label: "docker"; css-classes: [ "title" ]; xalign: 0.0; }
+                Gtk.Label { label: "Pack, ship and run any application as a lightweight container"; css-classes: [ "desc" ]; xalign: 0.0; }
+            }
+        };
+    }
+    Gtk.Button row_docker_buildx { css-classes: [ "flat", "card" ]; halign: start;
+        child: Gtk.Box {
+            orientation: horizontal;
+            spacing: 14;
+            Gtk.Box { css-classes: [ "app-icon", "class-cli" ]; halign: start; valign: center;
+                Gtk.Image { icon-name: "utilities-terminal-symbolic"; pixel-size: 24; }
+            }
+            Gtk.Box { orientation: vertical; valign: center;
+                Gtk.Label { label: "docker-buildx"; css-classes: [ "title" ]; xalign: 0.0; }
+                Gtk.Label { label: "Docker CLI plugin for extended build capabilities"; css-classes: [ "desc" ]; xalign: 0.0; }
+            }
+        };
+    }
+    Gtk.Button row_docker_compose { css-classes: [ "flat", "card" ]; halign: start;
+        child: Gtk.Box {
+            orientation: horizontal;
+            spacing: 14;
+            Gtk.Box { css-classes: [ "app-icon", "class-cli" ]; halign: start; valign: center;
+                Gtk.Image { icon-name: "utilities-terminal-symbolic"; pixel-size: 24; }
+            }
+            Gtk.Box { orientation: vertical; valign: center;
+                Gtk.Label { label: "docker-compose"; css-classes: [ "title" ]; xalign: 0.0; }
+                Gtk.Label { label: "Define and run multi-container applications"; css-classes: [ "desc" ]; xalign: 0.0; }
+            }
+        };
+    }
+
+    Gtk.Label g2 { label: "UNVERIFIED APPLICATION"; css-classes: [ "group-header" ]; }
+    Gtk.Button row_dockstation { css-classes: [ "flat", "card" ]; halign: start;
+        child: Gtk.Box {
+            orientation: horizontal;
+            spacing: 14;
+            Gtk.Box { css-classes: [ "app-icon", "class-unverified" ]; halign: start; valign: center;
+                Gtk.Image { icon-name: "applications-science-symbolic"; pixel-size: 24; }
+            }
+            Gtk.Box { orientation: vertical; valign: center;
+                Gtk.Label { label: "dockstation"; css-classes: [ "title" ]; xalign: 0.0; }
+                Gtk.Label { label: "Docker management UI — no desktop entry confirmed yet"; css-classes: [ "desc" ]; xalign: 0.0; }
+            }
+        };
+    }
+}

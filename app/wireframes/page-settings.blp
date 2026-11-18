@@ -1,0 +1,59 @@
+using Gtk 4.0;
+using Adw 1;
+
+// Settings — system-only surface (D14): plain-language (REQ-6), Nix hidden.
+// Structural draft; per-screen detail design is the next pass.
+Gtk.Box page_settings {
+    orientation: vertical;
+    margin-start: 28;
+    margin-end: 28;
+    margin-top: 18;
+
+    Gtk.Label h { label: "Settings"; css-classes: [ "title-2" ]; xalign: 0.0; }
+    Gtk.Label s {
+        label: "System settings managed by nix-pilot — everything else is handled by the apps and desktop it belongs to";
+        css-classes: [ "dim-label" ];
+        xalign: 0.0;
+        wrap: true;
+        margin-bottom: 12;
+    }
+
+    Gtk.Box card_network { css-classes: [ "card" ]; orientation: horizontal; spacing: 14; margin-bottom: 6;
+        Gtk.Image { icon-name: "network-wireless-symbolic"; pixel-size: 24; }
+        Gtk.Box { orientation: vertical;
+            Gtk.Label { label: "Network"; css-classes: [ "title" ]; xalign: 0.0; }
+            Gtk.Label { label: "Connections, Wi-Fi, hostname"; css-classes: [ "desc" ]; xalign: 0.0; }
+        }
+        Gtk.Label { label: "›"; css-classes: [ "dim-label" ]; halign: end; hexpand: true; }
+    }
+    Gtk.Box card_display { css-classes: [ "card" ]; orientation: horizontal; spacing: 14; margin-bottom: 6;
+        Gtk.Image { icon-name: "video-display-symbolic"; pixel-size: 24; }
+        Gtk.Box { orientation: vertical;
+            Gtk.Label { label: "Display"; css-classes: [ "title" ]; xalign: 0.0; }
+            Gtk.Label { label: "Resolution, scaling, night light"; css-classes: [ "desc" ]; xalign: 0.0; }
+        }
+        Gtk.Label { label: "›"; css-classes: [ "dim-label" ]; halign: end; hexpand: true; }
+    }
+    Gtk.Box card_sound { css-classes: [ "card" ]; orientation: horizontal; spacing: 14; margin-bottom: 6;
+        Gtk.Image { icon-name: "audio-volume-high-symbolic"; pixel-size: 24; }
+        Gtk.Box { orientation: vertical;
+            Gtk.Label { label: "Sound"; css-classes: [ "title" ]; xalign: 0.0; }
+            Gtk.Label { label: "Output, input, volume levels"; css-classes: [ "desc" ]; xalign: 0.0; }
+        }
+        Gtk.Label { label: "›"; css-classes: [ "dim-label" ]; halign: end; hexpand: true; }
+    }
+    Gtk.Box card_users { css-classes: [ "card" ]; orientation: horizontal; spacing: 14; margin-bottom: 6;
+        Gtk.Image { icon-name: "system-users-symbolic"; pixel-size: 24; }
+        Gtk.Box { orientation: vertical;
+            Gtk.Label { label: "Users"; css-classes: [ "title" ]; xalign: 0.0; }
+            Gtk.Label { label: "Accounts and login"; css-classes: [ "desc" ]; xalign: 0.0; }
+        }
+        Gtk.Label { label: "›"; css-classes: [ "dim-label" ]; halign: end; hexpand: true; }
+    }
+    Gtk.Label note {
+        label: "Recovery and system updates live in Updates";
+        css-classes: [ "dim-label" ];
+        xalign: 0.0;
+        margin-top: 10;
+    }
+}

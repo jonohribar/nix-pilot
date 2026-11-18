@@ -1,0 +1,90 @@
+using Gtk 4.0;
+using Adw 1;
+
+// Software Store — application detail page (install + per-user scope, D9).
+Gtk.Box page_detail {
+    orientation: vertical;
+    margin-start: 42;
+    margin-end: 42;
+    margin-top: 24;
+
+    Gtk.Box head {
+        orientation: horizontal;
+        spacing: 22;
+        Gtk.Box {
+            css-classes: [ "app-icon", "detail-icon", "class-app" ];
+            halign: start;
+            valign: start;
+            Gtk.Image icon_big { icon-name: "applications-internet-symbolic"; pixel-size: 48; }
+        }
+        Gtk.Box {
+            orientation: vertical;
+            valign: center;
+            spacing: 2;
+            Gtk.Label detail_title { label: "Firefox"; css-classes: [ "title-1" ]; xalign: 0.0; }
+            Gtk.Label detail_desc { label: "Web browser built from the Firefox source tree"; css-classes: [ "dim-label" ]; xalign: 0.0; wrap: true; }
+            Gtk.Box {
+                orientation: horizontal;
+                spacing: 8;
+                margin-top: 8;
+                Gtk.Label { label: "Application"; css-classes: [ "caption", "class-app" ]; }
+                Gtk.Label { label: "version 160.0"; css-classes: [ "caption" ]; }
+                Gtk.Label { label: "free licence"; css-classes: [ "caption" ]; }
+            }
+        }
+    }
+
+    Gtk.Separator { margin-top: 22; margin-bottom: 14; }
+
+    Gtk.Box install_area {
+        css-classes: [ "card" ];
+        orientation: vertical;
+        spacing: 6;
+        Gtk.Box {
+            orientation: horizontal;
+            spacing: 16;
+            Gtk.Button btn_install {
+                label: "Install for me";
+                css-classes: [ "suggested-action" ];
+                valign: center;
+            }
+            Gtk.Label {
+                label: "Installs into your user account — no administrator rights needed";
+                css-classes: [ "dim-label" ];
+                wrap: true;
+            }
+        }
+        Adw.SwitchRow scope_switch {
+            title: "Install for everyone on this computer";
+            subtitle: "Choose this only if you administer the system (system-wide installation)";
+        }
+    }
+
+    Gtk.Label sec_meta { label: "More information"; css-classes: [ "heading" ]; xalign: 0.0; margin-top: 20; }
+    Gtk.Box meta {
+        css-classes: [ "card" ];
+        orientation: vertical;
+        spacing: 2;
+        Gtk.Box {
+            css-classes: [ "meta-row" ];
+            orientation: horizontal;
+            spacing: 16;
+            Gtk.Label { label: "Category"; width-chars: 14; xalign: 0.0; css-classes: [ "dim-label" ]; }
+            Gtk.Label { label: "Internet / Browsers"; xalign: 0.0; }
+        }
+        Gtk.Box {
+            css-classes: [ "meta-row" ];
+            orientation: horizontal;
+            spacing: 16;
+            Gtk.Label { label: "Licence"; width-chars: 14; xalign: 0.0; css-classes: [ "dim-label" ]; }
+            Gtk.Label { label: "MPL-2.0 (free)"; xalign: 0.0; }
+        }
+        Gtk.Box {
+            css-classes: [ "meta-row" ];
+            orientation: horizontal;
+            spacing: 16;
+            Gtk.Label { label: "Available for"; width-chars: 14; xalign: 0.0; css-classes: [ "dim-label" ]; }
+            Gtk.Label { label: "x86_64-linux · aarch64-linux"; xalign: 0.0; }
+        }
+    }
+}
