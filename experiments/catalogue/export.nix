@@ -24,7 +24,11 @@
     in if r.success then r.value else null;
 
   one = name: let
-    d = pkgs.${name};
+    # Guard the attribute access itself: a renamed/removed attr yields a
+    # non-derivation record instead of aborting the whole export run (this
+    # aborted full runs before — one missing name sank the list).
+    got = builtins.tryEval (pkgs.${name} or null);
+    d = if got.success then got.value else null;
     isDrv = builtins.isAttrs d && (d ? type) && d.type == "derivation";
     pname = if isDrv then scalar (d.pname or null) else null;
     version = if isDrv then scalar (d.version or null) else null;
