@@ -21,6 +21,11 @@ pkgs.mkShell {
     glib
     gdk-pixbuf
     xvfb-run # headless smoke tests (no display needed)
+    openbox # minimal WM so GTK4 frame clock ticks under Xvfb (wireframe captures)
+    blueprint-compiler # wireframe source (.blp) -> GTK .ui
+    imagemagick # capture Xvfb screenshots of wireframes
+    xorg.xwininfo # diagnose which X windows are mapped
+    xorg.xwd # raster dump of an X window
   ];
 
   # gtk4-rs builds need to find the C libraries via pkg-config; nixpkgs'
