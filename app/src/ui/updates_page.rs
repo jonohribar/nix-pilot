@@ -59,6 +59,23 @@ impl UpdatesPage {
         buttons.append(&apply_btn);
         page.append(&buttons);
 
+        // boot-recovery help (failure-and-recovery.md): ships before any failure
+        let recover_card = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+        recover_card.add_css_class("card");
+        recover_card.set_margin_top(10);
+        let rec_heading = gtk4::Label::new(Some("If your computer will not start after a change"));
+        rec_heading.add_css_class("heading");
+        rec_heading.set_xalign(0.0);
+        let rec_body = gtk4::Label::new(Some(
+            "Every change keeps a copy of the way things were. If the computer will not start, the start menu offers earlier systems in plain words — pick \u{201c}Start with yesterday's system\u{201d}. If no earlier system appears, ask for help.",
+        ));
+        rec_body.set_xalign(0.0);
+        rec_body.set_wrap(true);
+        rec_body.add_css_class("dim-label");
+        recover_card.append(&rec_heading);
+        recover_card.append(&rec_body);
+        page.append(&recover_card);
+
         UpdatesPage {
             page,
             step_label,
