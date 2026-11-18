@@ -10,7 +10,7 @@ use crate::desired_state::DesiredDoc;
 use crate::model::{Class, IndexEntry, SearchText};
 use crate::search;
 use crate::store::ChangeQueue;
-use crate::ui::{detail, updates_page, widgets};
+use crate::ui::{detail, settings_page, updates_page, widgets};
 
 /// How many rows the list shows at once (empty query is a bounded browse).
 const MAX_ROWS: usize = 60;
@@ -189,6 +189,9 @@ pub fn run(
     let updates = Rc::new(updates_page::UpdatesPage::new());
     updates.wire(&queue, &nix, &account);
 
+    // settings page (product-authored surface; no changeable workflows yet)
+    let settings = Rc::new(settings_page::SettingsPage::new());
+
     // pending-changes header button -> Updates page (refresh on show)
     let update_pending_label: Rc<dyn Fn()> = {
         let queue = queue.clone();
@@ -267,12 +270,14 @@ pub fn run(
     stack.add_named(&list_page, Some("list"));
     stack.add_named(&detail.page, Some("detail"));
     stack.add_named(&updates.page, Some("updates"));
+    stack.add_named(&settings.page, Some("settings"));
     stack.set_visible_child_name("list");
 
     // sidebar nav
     let sidebar = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     sidebar.set_width_request(220);
     sidebar.append(&nav_button("Home", "list", &stack, None));
+    sidebar.append(&nav_button("Settings", "settings", &stack, None));
     {
         let updates = updates.clone();
         let queue = queue.clone();
