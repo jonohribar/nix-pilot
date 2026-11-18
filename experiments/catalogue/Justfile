@@ -1,8 +1,10 @@
-# Phase 0 catalogue experiments (node only — no nix shell needed; `measure`
-# additionally needs nix for the eval).
-# Reachable from the repo root as `just phase0 <recipe>`.
+# Catalogue experiments (Phase 0 study artefacts) — node only, no nix shell
+# needed (`measure` additionally needs nix for the eval).
+# A module of the root justfile (`just experiments <recipe>`; auto-cwd here),
+# or run directly as `just <recipe>` from inside this directory.
 
-# list all catalogue recipes
+# list this module's recipes
+# bare `just experiments` runs this
 default:
     @just --list
 

@@ -196,8 +196,8 @@ Big finding: **the count-calibrated heuristic app class (3,181) is only ~1/3 evi
 ## Run
 
 ```sh
-./phase0/measure.sh 300     # scoped sample
-./phase0/measure.sh 27271   # full top-level set
+./measure.sh 300     # scoped sample
+./measure.sh 27271   # full top-level set
 ```
 
 ## Pipeline runbook (reproducible order)

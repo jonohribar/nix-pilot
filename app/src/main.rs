@@ -1,7 +1,7 @@
 // nix-pilot desktop client — first scaffold (D19: Rust + GTK4 + libadwaita).
 //
 // A Software Store window that reads the generated catalogue index
-// (experiments/phase0/results/catalogue-index.json) and lists the app
+// (experiments/catalogue/results/catalogue-index.json) and lists the app
 // universe with live search, grouped-labelled like the CLI search probe.
 // This is deliberately the smallest real UI proving the stack: a header bar
 // with a search entry and a scrollable list of entries, each labelled by its
@@ -56,9 +56,9 @@ fn resolve_index_path() -> Option<String> {
         return Some(p);
     }
     for cand in [
-        "experiments/phase0/results/catalogue-index.json", // repo root cwd
+        "experiments/catalogue/results/catalogue-index.json", // repo root cwd
         "results/catalogue-index.json",                    // phase0 cwd
-        "../experiments/phase0/results/catalogue-index.json",
+        "../experiments/catalogue/results/catalogue-index.json",
     ] {
         if std::path::Path::new(cand).exists() {
             return Some(cand.to_string());

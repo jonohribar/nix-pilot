@@ -62,7 +62,7 @@ A record is classified from evidence and rules, matching the agreed classificati
 ## Unfree packages
 
 - Unfree applications are listed by default (decision [D1](../../research/04-recommendations.md#decision-log)); an optional user filter may hide them later.
-- Enrichment is interim: unfree apps are listed with the metadata evaluation provides (name, description), icons and screenshots are deferred, and installing one builds it locally with honest progress (decision [D17](../../research/04-recommendations.md#decision-log)). Hydra does not build unfree packages and no public cache serves their outputs (measured, `experiments/phase0`), so a separate cache route is the future upgrade path.
+- Enrichment is interim: unfree apps are listed with the metadata evaluation provides (name, description), icons and screenshots are deferred, and installing one builds it locally with honest progress (decision [D17](../../research/04-recommendations.md#decision-log)). Hydra does not build unfree packages and no public cache serves their outputs (measured, `experiments/catalogue`), so a separate cache route is the future upgrade path.
 
 ## Relationship to measurement
 

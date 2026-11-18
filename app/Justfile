@@ -1,27 +1,30 @@
 # nix-pilot desktop client recipes.
-# Reachable from the repo root as `just app <recipe>` (wraps the dev shell), or
-# directly when you are inside the shell in app/.
+# A module of the root justfile (`just app <recipe>`; auto-cwd = app/), or run
+# directly as `just <recipe>` from inside this directory.
+# Each recipe runs from app/ and self-wraps in the nix dev shell (nix-shell
+# ./shell.nix) unless you are already inside it (cargo already on PATH).
 
-# list all app recipes
+# list this module's recipes
+# bare `just app` runs this
 default:
     @just --list
 
 # compile the client
 build:
-    cargo build
+    @if command -v cargo >/dev/null 2>&1; then cargo build; else nix-shell ./shell.nix --run 'cargo build'; fi
 
 # run the Software Store app
 run: build
-    cargo run
+    @if command -v cargo >/dev/null 2>&1; then cargo run; else nix-shell ./shell.nix --run 'cargo run'; fi
 
 # run the clickable wireframe prototype
 proto: build
-    cargo run --bin proto
+    @if command -v cargo >/dev/null 2>&1; then cargo run --bin proto; else nix-shell ./shell.nix --run 'cargo run --bin proto'; fi
 
 # render wireframe states to PNGs (all, or named: detail search …)
 wireframes *states: build
-    ./wireframes/render.sh {{states}}
+    @if command -v blueprint-compiler >/dev/null 2>&1; then ./wireframes/render.sh {{states}}; else nix-shell ./shell.nix --run './wireframes/render.sh {{states}}'; fi
 
-# headless smoke test of the app window (xvfb; 5 s run)
+# headless smoke test of the app window (xvfb; ~5 s run)
 smoke: build
-    xvfb-run -a bash -c './target/debug/nix-pilot-app & p=$$!; sleep 5; kill $$p 2>/dev/null; wait $$p 2>/dev/null; true'
+    @if command -v xvfb-run >/dev/null 2>&1; then ./scripts/smoke.sh; else nix-shell ./shell.nix --run './scripts/smoke.sh'; fi

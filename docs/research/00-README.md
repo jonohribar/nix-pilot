@@ -14,7 +14,7 @@ This folder records research done before implementation begins. It exists to pre
 | `04-recommendations.md` | Recommendations and an open-decision log | Decision makers |
 | `05-phase0-findings.md` | Measured Phase 0 result: catalogue generation proven with caveats | Engineers starting the generator build |
 
-`05` is the measured outcome of the Phase 0 prototypes in `../design/../experiments/` (the instruments live in `experiments/phase0/`); it supersedes the open question in `02` with numbers.
+`05` is the measured outcome of the Phase 0 prototypes in `../design/../experiments/` (the instruments live in `experiments/catalogue/`); it supersedes the open question in `02` with numbers.
 
 Living project artifacts live in `../design/` — navigation hub `../design/plan.md` (plan structure, destination map, epic links), risk register `../design/risks.md`, architecture, specifications and verification. Requirement statements live in `../requirements/`. This folder holds stable research findings only.
 

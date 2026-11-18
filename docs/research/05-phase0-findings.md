@@ -1,6 +1,6 @@
 # Phase 0 Findings — Catalogue Generation
 
-> Research note · 2026-11-17 · Status: current Measured outcome of the catalogue-generation wager against one pinned Nixpkgs snapshot (narHash `sha256-qXFIqA6FCcx7XeDzw0ZNlkDT9UiCzrNDwK8RuU8RcHM=`). Instrument and run details: `experiments/phase0/` (README and scripts). The study's open questions map to [02-catalogue-feasibility.md](02-catalogue-feasibility.md) and the acceptance floors in [verification.md](../design/verification.md).
+> Research note · 2026-11-17 · Status: current Measured outcome of the catalogue-generation wager against one pinned Nixpkgs snapshot (narHash `sha256-qXFIqA6FCcx7XeDzw0ZNlkDT9UiCzrNDwK8RuU8RcHM=`). Instrument and run details: `experiments/catalogue/` (README and scripts). The study's open questions map to [02-catalogue-feasibility.md](02-catalogue-feasibility.md) and the acceptance floors in [verification.md](../design/verification.md).
 
 ## In one paragraph
 
