@@ -20,9 +20,10 @@ default:
 app-shell:
     nix-shell app/shell.nix
 
-# app recipes — `just app` to list; wrapped in the nix dev shell
+# app recipes — `just app` lists them (no shell needed); actual recipe runs
+# are wrapped in the nix dev shell so cargo/GTK4 are available
 app *args:
-    nix-shell app/shell.nix --run 'cd app && just {{args}}'
+    @if [ -n "{{args}}" ]; then nix-shell app/shell.nix --run 'cd app && just {{args}}'; else cd app && just; fi
 
 # catalogue recipes — `just phase0` to list; node only (measure needs nix)
 phase0 *args:
