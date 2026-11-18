@@ -3,10 +3,13 @@
 The product GUI: **Software Store**, **Settings**, **Updates/Recovery**, global search.
 Stack (decision [D19](../../docs/research/04-recommendations.md#decision-log)): **Rust + GTK4 + libadwaita** (gtk4-rs).
 
-Current state: minimal Software Store window that reads the generated catalogue
-index (`experiments/catalogue/results/catalogue-index.json`) and lists entries with
-live grouped search. This is a stack-validation scaffold; wireframes and layout
-are tracked as `nix-pilot-msn.2`.
+Current state: Software Store window that reads the generated catalogue index
+(`experiments/catalogue/results/catalogue-index.json`) and offers ranked grouped
+search, with a detail/install surface per result (user vs system-wide scope, [D9](../../docs/research/04-recommendations.md#decision-log)).
+Ranking mirrors the verified `experiments/catalogue/search.js` scorer (exact /
+prefix / contains on attr+pname, plus a description bonus), so results sort the
+same as the HTML viewer. Layout and the remaining surfaces (Settings, Updates/
+Recovery, global search) are tracked as `nix-pilot-msn.2`.
 
 ## Dev shell + run
 
