@@ -67,6 +67,8 @@ for (const e of idx.entries) {
   if (cliRow) {
     if (cliRow.tier === 'rich') { changed++; out.push({ ...e, class: 'app', tier: 'rich' }); continue; }
     if (cliRow.tier === 'basic') { changed++; out.push({ ...e, class: 'app', tier: 'basic' }); continue; }
+    // D17: an unfree app in the recovery pool is listed, not tile-hidden
+    if (cliRow.tier === 'unfree-deferred') { changed++; out.push({ ...e, class: 'app', tier: 'unfree-deferred' }); continue; }
   }
   // known-apps recovery: the generator heuristic mislabels GUI apps whose
   // description lacks a hint word as cli (they score below the app
