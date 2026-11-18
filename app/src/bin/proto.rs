@@ -1,9 +1,12 @@
 // Navigable wireframe prototype: the page .blp files (compiled to .ui) become
 // Gtk.Stack pages inside one shell with a sidebar, so navigation is clickable:
-//   sidebar -> top-level pages; app card -> detail; search -> results; back.
+//   sidebar -> top-level pages; app card -> detail; store search -> results; back.
+//
+// Search is store-local: the SearchEntry lives INSIDE the store page (home +
+// results), not in the header — the header global search is a separate surface.
 //
 // Screenshot-driven rendering: --page <home|search|detail|settings|updates>
-// sets the initial page, --search <text> pre-fills the search entry, and
+// sets the initial page, --search <text> pre-fills the store search, and
 // --detail <name> sets the detail page title (for captures).
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -19,6 +22,21 @@ fn arg(name: &str) -> Option<String> {
 fn load_box(build_dir: &str, file: &str, id: &str) -> gtk4::Box {
     let b = gtk4::Builder::from_file(format!("{}/{}", build_dir, file));
     b.object(id).unwrap_or_else(|| panic!("missing {id} in {file}"))
+}
+
+// Store-local search: any non-empty query shows the grouped results page.
+fn wire_store_search(entry: &gtk4::SearchEntry, stack: &gtk4::Stack, prev: &Rc<RefCell<String>>) {
+    let stack = stack.clone();
+    let prev = prev.clone();
+    entry.connect_search_changed(move |s| {
+        let q = s.text();
+        if q.is_empty() {
+            stack.set_visible_child_name("home");
+        } else if stack.visible_child_name().as_deref() != Some("search") {
+            *prev.borrow_mut() = stack.visible_child_name().unwrap_or_default().to_string();
+            stack.set_visible_child_name("search");
+        }
+    });
 }
 
 fn main() {
@@ -42,11 +60,12 @@ fn main() {
             gtk4::style_context_add_provider_for_display(&d, &provider, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
         }
     }
+
     let initial = arg("--page").unwrap_or_else(|| "home".into());
     let search_text = arg("--search").unwrap_or_default();
     let detail_name = arg("--detail").unwrap_or_default();
 
-    // ---- shell window ---------------------------------------------------
+    // ---- window chrome (no global search here — that is a separate surface) ----
     let window = gtk4::Window::builder()
         .title("nix-pilot — wireframe prototype")
         .default_width(1180)
@@ -59,20 +78,23 @@ fn main() {
     back.set_tooltip_text(Some("Back"));
     let title = gtk4::Label::new(Some("nix-pilot"));
     title.add_css_class("title");
-    let search = gtk4::SearchEntry::new();
-    search.set_placeholder_text(Some("Search applications…"));
-    search.set_width_chars(36);
     header.pack_start(&back);
     header.set_title_widget(Some(&title));
-    header.pack_end(&search);
     window.set_titlebar(Some(&header));
 
-    // ---- pages -----------------------------------------------------------
+    // ---- pages ------------------------------------------------------------
     let stack = gtk4::Stack::new();
     stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
 
-    let page_home = load_box(&build_dir, "page-home.ui", "page_home");
-    let page_search = load_box(&build_dir, "page-search.ui", "page_search");
+    // home + its store-local search come from one builder (so we wire the entry)
+    let home_b = gtk4::Builder::from_file(format!("{}/page-home.ui", build_dir));
+    let page_home: gtk4::Box = home_b.object("page_home").expect("page_home");
+    let store_search_home: gtk4::SearchEntry = home_b.object("store_search").expect("store_search in page-home");
+
+    let search_b = gtk4::Builder::from_file(format!("{}/page-search.ui", build_dir));
+    let page_search: gtk4::Box = search_b.object("page_search").expect("page_search");
+    let store_search_results: gtk4::SearchEntry = search_b.object("store_search").expect("store_search in page-search");
+
     let page_detail = load_box(&build_dir, "page-detail.ui", "page_detail");
     let page_settings = load_box(&build_dir, "page-settings.ui", "page_settings");
     let page_updates = load_box(&build_dir, "page-updates.ui", "page_updates");
@@ -85,7 +107,7 @@ fn main() {
     stack.set_vexpand(true);
     stack.set_hexpand(true);
 
-    // ---- sidebar (nav switches top-level pages) --------------------------
+    // ---- sidebar -----------------------------------------------------------
     let sidebar = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     sidebar.add_css_class("nav");
     sidebar.set_width_request(236);
@@ -124,10 +146,10 @@ fn main() {
     body.append(&sidebar);
     body.append(&stack);
 
-    // ---- navigation wiring ----------------------------------------------
+    // ---- prev-page tracking for Back ---------------------------------------
     let prev: Rc<RefCell<String>> = Rc::new(RefCell::new("home".to_string()));
 
-    // app cards -> detail (clicking sets the detail title)
+    // ---- app cards -> detail ------------------------------------------------
     let detail_title: gtk4::Label = {
         let b = gtk4::Builder::from_file(format!("{}/page-detail.ui", build_dir));
         b.object("detail_title").expect("detail_title")
@@ -144,10 +166,8 @@ fn main() {
         }
         let _ = btn;
     };
-
     let hook_card = |id: &str, name: &str| {
-        let b = gtk4::Builder::from_file(format!("{}/page-home.ui", build_dir));
-        if let Some(btn) = b.object::<gtk4::Button>(id) {
+        if let Some(btn) = home_b.object::<gtk4::Button>(id) {
             let card_click = card_click.clone();
             let name = name.to_string();
             btn.connect_clicked(move |b| card_click(b, &name));
@@ -160,20 +180,11 @@ fn main() {
     hook_card("card_bork", "Bork");
     hook_card("card_astroterm", "Astroterm");
 
-    // search -> results page while typing
-    let stack_s = stack.clone();
-    let pc_s = prev.clone();
-    search.connect_search_changed(move |s| {
-        let q = s.text();
-        if q.is_empty() {
-            stack_s.set_visible_child_name("home");
-        } else if stack_s.visible_child_name().as_deref() != Some("search") {
-            *pc_s.borrow_mut() = stack_s.visible_child_name().unwrap_or_default().to_string();
-            stack_s.set_visible_child_name("search");
-        }
-    });
+    // ---- store-local search (home and results entries) -----------------------
+    wire_store_search(&store_search_home, &stack, &prev);
+    wire_store_search(&store_search_results, &stack, &prev);
 
-    // back -> previous page
+    // ---- back -> previous page ----------------------------------------------
     let stack_b = stack.clone();
     let pc_b = prev.clone();
     back.connect_clicked(move |_| {
@@ -181,9 +192,9 @@ fn main() {
         stack_b.set_visible_child_name(&to);
     });
 
-    // ---- initial state for captures --------------------------------------
+    // ---- initial state for captures ------------------------------------------
     if !search_text.is_empty() {
-        search.set_text(&search_text);
+        store_search_home.set_text(&search_text);
     }
     if !detail_name.is_empty() {
         detail_title.set_text(&detail_name);

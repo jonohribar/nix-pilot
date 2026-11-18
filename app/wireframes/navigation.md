@@ -1,8 +1,15 @@
 # Wireframe navigation map
 
-The wireframes are a single clickable prototype (`cargo run --bin proto` in the
-dev shell): one window, sidebar + stack pages. This map is the at-a-glance
-route diagram; the PNGs are the rendered states.
+The wireframes are a single clickable prototype (`just app proto`): one window,
+sidebar + stack pages. This map is the at-a-glance route diagram; the PNGs are
+the rendered states.
+
+**Search is store-local:** the search field lives inside the Software Store page
+(home + results), so it reads as "search the store". The header bar currently
+has no search — the app-wide global search is a separate surface in the
+architecture and is designed later.
+
+Note: `just app` lists the app recipes; `just app proto` opens the prototype.
 
 ## Routes
 
@@ -11,7 +18,7 @@ flowchart LR
     START([Sidebar navigation]) --> HOME[Software Store · home]
     HOME -->|"click an app card"| DETAIL[Application detail]
     DETAIL -->|"Back"| HOME
-    HOME -->|"type in search"| RESULTS[Search results · grouped]
+    HOME -->|"type in the store search"| RESULTS[Search results · grouped]
     RESULTS -->|"clear search / Back"| HOME
     START -->|"Updates"| UPD[Updates · transaction flow]
     UPD -->|"Prepare and install"| UPD2["summary → progress → rollback (spec: failure-and-recovery.md)"]
@@ -41,7 +48,6 @@ flowchart LR
 ## Regenerating
 
 ```sh
-cd app
-cargo build --bin proto
-./wireframes/render.sh          # some or all states
+just app build
+just app wireframes            # all states, or named ones: `just app wireframes detail`
 ```

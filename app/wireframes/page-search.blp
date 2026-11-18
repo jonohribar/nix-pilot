@@ -7,6 +7,13 @@ Gtk.Box page_search {
     margin-end: 28;
     margin-top: 14;
 
+    // store-local search persists into the results page
+    Gtk.SearchEntry store_search {
+        hexpand: true;
+        margin-bottom: 16;
+        placeholder-text: "Search applications…";
+    }
+
     Gtk.Label q { xalign: 0.0; css-classes: [ "title-2" ]; label: "Results for “docker”"; }
     Gtk.Label q_sub {
         xalign: 0.0;

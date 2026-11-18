@@ -1,8 +1,18 @@
-# nix-pilot — project command hub
-# Requires: `just` (installed via `nix profile install nixpkgs#just`) and node.
-# App recipes wrap the nix dev shell (app/shell.nix); catalogue recipes run node.
+# nix-pilot — command hub, organised by folder.
+#
+#   just app                   # list the app/Justfile recipes
+#   just app proto             # run the clickable wireframe prototype
+#   just app build|run|wireframes|smoke …
+#
+#   just phase0                # list the experiments/phase0/Justfile recipes
+#   just phase0 stats          # catalogue index stats
+#   just phase0 search …       # search the catalogue
+#   just phase0 measure 300    # full-set export (needs nix)
+#
+# Requires: just (`nix profile install nixpkgs#just`) and node.
+# App recipes are wrapped in the nix dev shell (app/shell.nix).
 
-# list all recipes
+# list all root recipes
 default:
     just --list
 
@@ -10,52 +20,10 @@ default:
 app-shell:
     nix-shell app/shell.nix
 
-# build the desktop client
-app-build:
-    nix-shell app/shell.nix --run 'cd app && just build'
+# app recipes — `just app` to list; wrapped in the nix dev shell
+app *args:
+    nix-shell app/shell.nix --run 'cd app && just {{args}}'
 
-# run the Software Store app against the generated catalogue index
-app-run:
-    nix-shell app/shell.nix --run 'cd app && just run'
-
-# run the clickable wireframe prototype (test navigation)
-app-proto:
-    nix-shell app/shell.nix --run 'cd app && just proto'
-
-# render wireframe states to PNGs (all, or named: detail search …)
-app-wireframes *states:
-    nix-shell app/shell.nix --run 'cd app && just wireframes {{states}}'
-
-# headless smoke test of the app window
-app-smoke:
-    nix-shell app/shell.nix --run 'cd app && just smoke'
-
-# --- catalogue helpers (node) ---
-
-# search the catalogue index
-search *terms:
-    cd experiments/phase0 && just search {{terms}}
-
-# index stats
-stats:
-    cd experiments/phase0 && just stats
-
-# rebuild the heuristic catalogue index from records.json
-generator:
-    cd experiments/phase0 && just generator
-
-# overlay evidence tiers onto the index (reads results/evidence*.jsonl)
-reclassify:
-    cd experiments/phase0 && just reclassify
-
-# post-evidence known-apps sanity check
-validate:
-    cd experiments/phase0 && just validate
-
-# full-set metadata export (measure.sh, needs nix)
-measure n:
-    cd experiments/phase0 && just measure {{n}}
-
-# serve the browsable catalogue viewer (http://localhost:8137/view.html)
-viewer:
-    cd experiments/phase0 && just viewer
+# catalogue recipes — `just phase0` to list; node only (measure needs nix)
+phase0 *args:
+    cd experiments/phase0 && just {{args}}

@@ -9,6 +9,13 @@ Gtk.Box page_home {
     margin-top: 18;
     margin-bottom: 24;
 
+    // store-local search (the header global search is a separate surface)
+    Gtk.SearchEntry store_search {
+        hexpand: true;
+        margin-bottom: 18;
+        placeholder-text: "Search applications…";
+    }
+
     Gtk.Label hero {
         xalign: 0.0;
         css-classes: [ "title-2" ];

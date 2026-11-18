@@ -1,6 +1,10 @@
 # nix-pilot desktop client recipes.
-# Run inside the dev shell (`just app-shell` from the repo root), or via the
-# root `just app-*` recipes which wrap the shell for you.
+# Reachable from the repo root as `just app <recipe>` (wraps the dev shell), or
+# directly when you are inside the shell in app/.
+
+# list all app recipes
+default:
+    @just --list
 
 # compile the client
 build:

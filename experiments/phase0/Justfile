@@ -1,5 +1,10 @@
 # Phase 0 catalogue experiments (node only — no nix shell needed; `measure`
 # additionally needs nix for the eval).
+# Reachable from the repo root as `just phase0 <recipe>`.
+
+# list all catalogue recipes
+default:
+    @just --list
 
 # search the catalogue index
 search *terms:
