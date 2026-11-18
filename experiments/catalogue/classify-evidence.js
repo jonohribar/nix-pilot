@@ -53,16 +53,14 @@ let dropped = 0;
 let changed = 0;
 const out = [];
 for (const e of idx.entries) {
-  // nus.5: recover real apps wrongly sitting in the cli pool (evidence-rich/basic -> app)
-  if (e.class === 'cli') {
-    const r = evCli.get(e.attr);
-    if (r) {
-      if (r.tier === 'rich') { changed++; out.push({ ...e, class: 'app', tier: 'rich' }); continue; }
-      if (r.tier === 'basic') { changed++; out.push({ ...e, class: 'app', tier: 'basic' }); continue; }
-    }
-    out.push(e);
-    continue;
+  // nus.5: recover real apps that carry fetched desktop evidence in the cli-recovery
+  // pool, regardless of their heuristic class (rich/basic -> app)
+  const cliRow = evCli.get(e.attr);
+  if (cliRow) {
+    if (cliRow.tier === 'rich') { changed++; out.push({ ...e, class: 'app', tier: 'rich' }); continue; }
+    if (cliRow.tier === 'basic') { changed++; out.push({ ...e, class: 'app', tier: 'basic' }); continue; }
   }
+  if (e.class === 'cli') { out.push(e); continue; }
   if (e.class === 'term-app') { out.push(e); continue; }
   const row = ev.get(e.attr);
   let cls = e.class, tier = e.tier, note = e.note;
