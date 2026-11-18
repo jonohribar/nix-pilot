@@ -152,9 +152,11 @@ pub fn run(
         "Installs into your user account — no administrator rights needed",
     ));
 
-    // updates page
+    // updates page (developer-config diagnostic uses the OS user as the
+    // NixOS account stand-in; the 7wo.2 backend resolves the real one)
+    let account: String = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
     let updates = Rc::new(updates_page::UpdatesPage::new());
-    updates.wire(&queue, &nix);
+    updates.wire(&queue, &nix, &account);
 
     // pending-changes header button -> Updates page (refresh on show)
     let update_pending_label: Rc<dyn Fn()> = {

@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
+use crate::desired_state::{Account, DesiredState};
 use crate::store::ChangeQueue;
 use crate::updates;
 
@@ -15,6 +16,7 @@ pub struct UpdatesPage {
     queue_list: gtk4::ListBox,
     results_label: gtk4::Label,
     results_list: gtk4::ListBox,
+    config_view: gtk4::Label,
     build_btn: gtk4::Button,
 }
 
@@ -45,6 +47,23 @@ impl UpdatesPage {
 
         let results_list = gtk4::ListBox::new();
         page.append(&results_list);
+
+        // developer diagnostic (constraint C8): the config the desired-state
+        // renderer would hand to nixos-rebuild. Hidden until prepared.
+        let config_expander = gtk4::Expander::new(Some("Generated configuration (developer)"));
+        config_expander.set_vexpand(false);
+        let config_view = gtk4::Label::new(None);
+        config_view.set_xalign(0.0);
+        config_view.set_wrap(false);
+        config_view.add_css_class("monospace");
+        config_view.add_css_class("dim-label");
+        let config_scroll = gtk4::ScrolledWindow::builder()
+            .child(&config_view)
+            .min_content_height(120)
+            .propagate_natural_height(true)
+            .build();
+        config_expander.set_child(Some(&config_scroll));
+        page.append(&config_expander);
 
         let build_btn = gtk4::Button::with_label("Prepare and check");
         let apply_btn = gtk4::Button::with_label("Apply changes");
@@ -82,6 +101,7 @@ impl UpdatesPage {
             queue_list,
             results_label,
             results_list,
+            config_view,
             build_btn,
         }
     }
@@ -129,12 +149,22 @@ impl UpdatesPage {
 
     /// Wire Prepare (safe dry-run build-verify on a thread) + the gated Apply.
     /// The button reads the queue at click time, so it reflects the latest adds.
-    pub fn wire(&self, queue: &Rc<RefCell<ChangeQueue>>, nix: &Option<std::path::PathBuf>) {
+    /// `account` names the NixOS user whose per-user packages the generated
+    /// config targets (developer diagnostic only; the real account resolution
+    /// belongs to the 7wo.2 backend).
+    pub fn wire(
+        &self,
+        queue: &Rc<RefCell<ChangeQueue>>,
+        nix: &Option<std::path::PathBuf>,
+        account: &str,
+    ) {
         let queue = queue.clone();
         let nix = nix.clone();
+        let account = account.to_string();
         let step_label = self.step_label.clone();
         let results_label = self.results_label.clone();
         let results_list = self.results_list.clone();
+        let config_view = self.config_view.clone();
         let build_btn = self.build_btn.clone();
         build_btn.connect_clicked(move |b| {
             b.set_sensitive(false);
@@ -148,7 +178,14 @@ impl UpdatesPage {
             let step_label = step_label.clone();
             let results_label = results_label.clone();
             let results_list = results_list.clone();
+            let config_view = config_view.clone();
             let b = b.clone();
+            // render the config the desired-state model would generate
+            let mut desired = DesiredState::default();
+            for p in queue.borrow().items() {
+                desired.set(p.attr.clone(), p.system_wide);
+            }
+            config_view.set_text(&desired.render_module(Account(&account)));
             let changes: Vec<updates::PendingChange> = queue
                 .borrow()
                 .items()
