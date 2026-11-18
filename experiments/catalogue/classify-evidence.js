@@ -61,6 +61,23 @@ let dropped = 0;
 let changed = 0;
 const out = [];
 for (const e of idx.entries) {
+  // known-apps (recall.js KNOWN = manual QA basis) are dominant: promote
+  // mislabels out of cli/term-app/unverified, and never let a weak evidence
+  // row demote an already-app entry back to unverified (idempotent).
+  if (KNOWN_ATTRS.has(e.attr) && !KNOWN_DENY.has(e.attr)) {
+    if (e.class !== 'app') {
+      changed++;
+      out.push({
+        ...e,
+        class: 'app',
+        tier: 'unverified',
+        note: 'known GUI app (recall list); no cache evidence yet',
+      });
+    } else {
+      out.push(e);
+    }
+    continue;
+  }
   // nus.5: recover real apps that carry fetched desktop evidence in the cli-recovery
   // pool, regardless of their heuristic class (rich/basic -> app)
   const cliRow = evCli.get(e.attr);
@@ -69,21 +86,6 @@ for (const e of idx.entries) {
     if (cliRow.tier === 'basic') { changed++; out.push({ ...e, class: 'app', tier: 'basic' }); continue; }
     // D17: an unfree app in the recovery pool is listed, not tile-hidden
     if (cliRow.tier === 'unfree-deferred') { changed++; out.push({ ...e, class: 'app', tier: 'unfree-deferred' }); continue; }
-  }
-  // known-apps recovery: the generator heuristic mislabels GUI apps whose
-  // description lacks a hint word as cli (they score below the app
-  // threshold); recall.js KNOWN is the manual QA basis, so promote those
-  // mislabels to app. Tier stays 'unverified' — honest: no cache evidence
-  // yet — and the recovery survives any future generator rebuild.
-  if (KNOWN_ATTRS.has(e.attr) && !KNOWN_DENY.has(e.attr) && e.class !== 'app') {
-    changed++;
-    out.push({
-      ...e,
-      class: 'app',
-      tier: 'unverified',
-      note: 'known GUI app (recall list); no cache evidence yet',
-    });
-    continue;
   }
   if (e.class === 'cli') { out.push(e); continue; }
   if (e.class === 'term-app') { out.push(e); continue; }
