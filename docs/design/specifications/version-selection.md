@@ -70,8 +70,16 @@ the catalogue-service body (`7wo.4`).
   a newer version exists; B also needs the D23 principle revisited. Until
   that decision is made, nothing is shipped.
 
-## Decision request
+## Decision (D27, 2026-11-19)
 
-Adopt option A, or revisit D23 to allow per-app unstable (option B)? The
-recommendation is **A**: whole-system channel switch, per-app override
-out of scope for v1. Tracked as beads `9f3.9`.
+**Per-app override (option B)**, chosen: at install the user picks stable
+(default, current version highlighted) or bleeding-edge for that app; the app
+resolves the app against a per-app channel (unstable). This is a scoped,
+controlled exception to the "never impose a pin" reading of D23 — the app
+imposes its own nixpkgs pin *for one named app only*, never the whole system.
+
+Implementation is gated on per-channel catalogue infra (`7wo.4`) so the app
+knows whether a newer version exists and can source the unstable channel.
+Free-form custom version strings stay out (no per-package version matrix in
+nixpkgs). UX stays as described above: opt-in advanced surface, current
+version always highlighted, plain words. Tracked as beads `9f3.9`.
