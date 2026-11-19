@@ -26,11 +26,15 @@ wireframes *states: build
 smoke: build
     @if command -v xvfb-run >/dev/null 2>&1; then ./scripts/smoke.sh; else nix-shell ./shell.nix --run './scripts/smoke.sh'; fi
 
-# 7wo.3 activation harness: boot a minimal test VM under KVM and probe ssh
-# (builds a scratch VM; never touches the host config or system; qemu stays
-# out of the main dev shell so it is not pulled by every `just app` recipe)
+# 7wo.3 activation harness: prove switch+rollback in an isolated QEMU VM
+# (uses the NixOS test driver; never touches the host config or system; qemu
+# stays out of the main dev shell)
 vm-probe:
     @if command -v qemu-system-x86_64 >/dev/null 2>&1; then ./scripts/vm-activation-test.sh; else nix-shell -p qemu openssh --run './scripts/vm-activation-test.sh'; fi
+
+# 7wo.3 packaging check: the nix-pilot NixOS module must evaluate when enabled
+module-check:
+    @if command -v nix-instantiate >/dev/null 2>&1; then ./scripts/module-check.sh; else nix-shell ./shell.nix --run './scripts/module-check.sh'; fi
 
 # fmt + clippy + tests gate (run before committing)
 check:
