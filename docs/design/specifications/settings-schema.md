@@ -29,8 +29,8 @@ Each setting workflow is versioned record with the following fields:
 ## Currency and migration
 
 - The schema is versioned and ships a documented migration path, so a Nixpkgs option rename never silently breaks a user's setting (decision [D6](../../research/04-recommendations.md#decision-log); risk [R04](../risks.md#r04)).
-- When a setting's backing option no longer applies (renamed, removed or moved), the UI tells the user "this setting no longer applies" instead of generating stale configuration ([architecture.md, Settings surface](../architecture.md#settings-surface)).
-- A version change is additive and migration-bearing; old versions of a setting record remain readable so installed state can be upgraded rather than dropped.
+- When a setting's backing option no longer applies (renamed, removed or moved), the UI tells the user "this setting no longer applies" instead of generating stale configuration ([architecture.md, Settings surface](../architecture.md#settings-surface)).  *(Shipped 2026-11-20: the current-value read-out classifies a missing-attribute eval failure as NoSuchOption and the Settings page shows this exact message.)*
+- A version change is additive and migration-bearing; old versions of a setting record remain readable so installed state can be upgraded rather than dropped.  *(The versioned migration *map* itself is added when a backing option actually renames; none of the shipped workflows has renamed in the pinned snapshot yet.)*
 
 ## Initial surface
 

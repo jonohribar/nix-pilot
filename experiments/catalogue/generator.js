@@ -101,5 +101,9 @@ const index = {
 };
 
 fs.writeFileSync(path.join(root, 'results/catalogue-index.json'), JSON.stringify(index));
+// sha256 sidecar so consumers can verify the index bytes (app: catalogue.rs)
+const crypto = require('crypto');
+const digest = crypto.createHash('sha256').update(JSON.stringify(index)).digest('hex');
+fs.writeFileSync(path.join(root, 'results/catalogue-index.json.sha256'), digest + '\n');
 console.log(JSON.stringify(index.counts, null, 2));
-console.log(`index: results/catalogue-index.json (${(fs.statSync(path.join(root, 'results/catalogue-index.json')).size / 1048576).toFixed(1)} MB)`);
+console.log(`index: results/catalogue-index.json (${(fs.statSync(path.join(root, 'results/catalogue-index.json')).size / 1048576).toFixed(1)} MB, sha256 ${digest.slice(0, 12)}...)`);
