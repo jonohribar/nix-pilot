@@ -413,6 +413,11 @@ mod tests {
         } else {
             doc.set_user(&account, vec!["hello".into()]);
         }
+        // a user-set setting must render as a valid app-wins override
+        doc.settings.insert(
+            "networking.hostName".into(),
+            crate::desired_state::SettingValue::Str("nix-pilot-scratch".into()),
+        );
         let dir = std::env::temp_dir().join(format!("np-live-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let outer = write_generation(&dir, &doc, &sv, cfg.as_deref(), hw.as_deref()).unwrap();

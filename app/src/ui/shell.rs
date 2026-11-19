@@ -186,10 +186,11 @@ pub fn run(
         }
     }
 
+    // updates page (builds/reviews from the persisted desired doc)
     let updates = Rc::new(updates_page::UpdatesPage::new());
-    updates.wire(&queue, &nix, &account);
+    updates.wire(&queue, &desired, &nix);
 
-    // settings page (product-authored surface; no changeable workflows yet)
+    // settings page (editable workflows)
     let settings = Rc::new(settings_page::SettingsPage::new());
 
     // pending-changes header button -> Updates page (refresh on show)
@@ -250,6 +251,10 @@ pub fn run(
     };
     // persist the freshly-seeded queue before any user action
     persist();
+
+    // settings edits write back through the same persist (they touch only the
+    // settings map; the system/users rebuild from the queue stays untouched)
+    settings.wire(&desired, persist.clone());
 
     let on_change: Rc<dyn Fn()> = {
         let label = update_pending_label.clone();

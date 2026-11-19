@@ -33,6 +33,15 @@ pub const CURRENT_SCHEMA: u8 = 1;
 /// The NixOS account that owns a per-user package selection.
 pub type Account = String;
 
+/// A user-set setting value (settings surface v1: strings and booleans).
+/// Stored only for settings the user actively changed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SettingValue {
+    Str(String),
+    Bool(bool),
+}
+
 /// Which per-user package mechanism the render targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UserBackend {
@@ -70,6 +79,10 @@ pub struct DesiredDoc {
     pub system: Packages,
     #[serde(default)]
     pub users: BTreeMap<Account, Packages>,
+    /// User-set settings (key = NixOS option path; settings surface, D14).
+    /// Additive and optional, so pre-existing v1 files parse unchanged.
+    #[serde(default)]
+    pub settings: BTreeMap<String, SettingValue>,
 }
 
 impl Default for DesiredDoc {
@@ -78,6 +91,7 @@ impl Default for DesiredDoc {
             schema_version: CURRENT_SCHEMA,
             system: Packages::default(),
             users: BTreeMap::new(),
+            settings: BTreeMap::new(),
         }
     }
 }
@@ -148,10 +162,11 @@ impl DesiredDoc {
                 )),
             }
         }
+        body.push_str(&crate::settings::render_block(&self.settings));
         if body.is_empty() {
             body.push_str("  # no packages selected\n");
         }
-        format!("{{ config, pkgs, ... }}:\n\n{{\n{body}}}\n")
+        format!("{{ config, pkgs, lib, ... }}:\n\n{{\n{body}}}\n")
     }
 }
 
@@ -278,7 +293,7 @@ mod tests {
         let d = doc_with(&["gimp"], &[("alice", &["firefox"]), ("bob", &["vscode"])]);
         assert_eq!(
             d.render_module(UserBackend::NixUsers),
-            "{ config, pkgs, ... }:\n\n{\n  environment.systemPackages = with pkgs; [ gimp ];\n  users.users.alice = {\n    packages = with pkgs; [ firefox ];\n  };\n  users.users.bob = {\n    packages = with pkgs; [ vscode ];\n  };\n}\n"
+            "{ config, pkgs, lib, ... }:\n\n{\n  environment.systemPackages = with pkgs; [ gimp ];\n  users.users.alice = {\n    packages = with pkgs; [ firefox ];\n  };\n  users.users.bob = {\n    packages = with pkgs; [ vscode ];\n  };\n}\n"
         );
     }
 
@@ -287,7 +302,7 @@ mod tests {
         let d = doc_with(&["gimp"], &[("alice", &["firefox"])]);
         assert_eq!(
             d.render_module(UserBackend::HomeManager),
-            "{ config, pkgs, ... }:\n\n{\n  environment.systemPackages = with pkgs; [ gimp ];\n  home-manager.users.alice.home.packages = with pkgs; [ firefox ];\n}\n"
+            "{ config, pkgs, lib, ... }:\n\n{\n  environment.systemPackages = with pkgs; [ gimp ];\n  home-manager.users.alice.home.packages = with pkgs; [ firefox ];\n}\n"
         );
     }
 
@@ -295,7 +310,7 @@ mod tests {
     fn render_empty_is_comment() {
         assert_eq!(
             DesiredDoc::current().render_module(UserBackend::NixUsers),
-            "{ config, pkgs, ... }:\n\n{\n  # no packages selected\n}\n"
+            "{ config, pkgs, lib, ... }:\n\n{\n  # no packages selected\n}\n"
         );
     }
 
@@ -357,6 +372,29 @@ mod tests {
         std::fs::write(&dir, "{\"schema_version\":0}").unwrap();
         assert_eq!(load(&dir).unwrap().schema_version, CURRENT_SCHEMA);
         let _ = std::fs::remove_file(&dir);
+    }
+
+    #[test]
+    fn settings_round_trip_and_render() {
+        let mut d = DesiredDoc::current();
+        d.settings.insert(
+            "networking.hostName".into(),
+            SettingValue::Str("myhost".into()),
+        );
+        d.settings
+            .insert("services.openssh.enable".into(), SettingValue::Bool(true));
+
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("nix-pilot-settings-{}.json", std::process::id()));
+        save(&d, &dir).unwrap();
+        let loaded = load(&dir).unwrap();
+        assert_eq!(loaded.settings, d.settings);
+        let _ = std::fs::remove_file(&dir);
+
+        // rendered into the generated module with app-wins priority
+        let nix = d.render_module(crate::desired_state::UserBackend::NixUsers);
+        assert!(nix.contains(&"networking.hostName = lib.mkOverride 10 \"myhost\";".to_string()));
+        assert!(nix.contains("services.openssh.enable = lib.mkOverride 10 true;"));
     }
 
     #[test]

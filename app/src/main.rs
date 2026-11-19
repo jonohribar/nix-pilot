@@ -10,6 +10,7 @@ mod desired_state;
 mod install;
 mod model;
 mod search;
+mod settings;
 mod store;
 mod ui;
 mod updates;

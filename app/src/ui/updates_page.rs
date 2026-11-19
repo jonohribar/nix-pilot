@@ -159,12 +159,12 @@ impl UpdatesPage {
     pub fn wire(
         &self,
         queue: &Rc<RefCell<ChangeQueue>>,
+        desired: &Rc<RefCell<DesiredDoc>>,
         nix: &Option<std::path::PathBuf>,
-        account: &str,
     ) {
         let queue = queue.clone();
+        let desired = desired.clone();
         let nix = nix.clone();
-        let account = account.to_string();
         let step = self.step.clone();
         let step_label = self.step_label.clone();
         let results_label = self.results_label.clone();
@@ -189,20 +189,10 @@ impl UpdatesPage {
             let results_list = results_list.clone();
             let config_view = config_view.clone();
             let b = b.clone();
-            // render the config the desired-state model would generate
-            let mut sys = Vec::new();
-            let mut user = Vec::new();
-            for p in queue.borrow().items() {
-                if p.system_wide {
-                    sys.push(p.attr.clone());
-                } else {
-                    user.push(p.attr.clone());
-                }
-            }
-            let mut desired = DesiredDoc::current();
-            desired.set_system(sys);
-            desired.set_user(&account, user);
-            config_view.set_text(&desired.render_module(apply::detect_user_backend()));
+            // render the config the desired-state model would generate (the
+            // persisted doc: system + per-user packages + any app settings)
+            let doc = desired.borrow().clone();
+            config_view.set_text(&doc.render_module(apply::detect_user_backend()));
             let changes: Vec<updates::PendingChange> = queue
                 .borrow()
                 .items()
@@ -227,7 +217,7 @@ impl UpdatesPage {
                         let sv =
                             apply::system_state_version().unwrap_or_else(|| "26.05".to_string());
                         Some(apply::build_from_desired(
-                            &desired,
+                            &doc,
                             &sv,
                             preserved.as_deref(),
                             hardware.as_deref(),
