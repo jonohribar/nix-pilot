@@ -75,40 +75,26 @@ pub fn system_state_version() -> Option<String> {
     parse_state_version(&String::from_utf8_lossy(&out.stdout))
 }
 
-/// Resolve the pre-existing config the generated config should import.
-/// `configuration.nix` is NOT a fixed name: NixOS resolves `NIXOS_CONFIG`
-/// first, then falls back to `/etc/nixos/configuration.nix` (the same rule
-/// the legacy `nixos` module uses). Returns the existing file, or None.
-fn resolve_config_path(env_val: Option<std::ffi::OsString>) -> Option<PathBuf> {
-    if let Some(p) = env_val.map(PathBuf::from).filter(|p| p.exists()) {
-        return Some(p);
-    }
-    let d = PathBuf::from("/etc/nixos/configuration.nix");
-    d.exists().then_some(d)
-}
-
 /// The pre-existing NixOS config files; the outer generated config imports
 /// the live configuration.nix by pointer, which itself imports the machine's
-/// hardware-configuration.nix. Returns (configuration.nix,
-/// hardware-configuration.nix); both None if not NixOS.
+/// hardware-configuration.nix. Opinionated: this looks only at the standard
+/// `/etc/nixos` layout — we deliberately do not chase `NIXOS_CONFIG` env (the
+/// app targets the conventional install, not Nix-hobbyist layouts). Returns
+/// (configuration.nix, hardware-configuration.nix); both None if not NixOS
+/// (or a flake-managed dir, which this app does not touch).
 pub fn discover_nixos_sources() -> (Option<PathBuf>, Option<PathBuf>) {
-    // a flake-based install has no configuration.nix — not yet supported
-    if PathBuf::from("/etc/nixos/flake.nix").exists()
-        && !PathBuf::from("/etc/nixos/configuration.nix").exists()
-    {
+    let base = PathBuf::from("/etc/nixos");
+    if !base.is_dir() {
         return (None, None);
     }
-    let cfg = resolve_config_path(std::env::var_os("NIXOS_CONFIG"));
-    // hardware-configuration.nix normally sits beside the config; otherwise
-    // fall back to the default location
-    let hw = cfg.as_ref().and_then(|c| {
-        let sib = c.with_file_name("hardware-configuration.nix");
-        (sib.exists()).then_some(sib).or_else(|| {
-            let d = PathBuf::from("/etc/nixos/hardware-configuration.nix");
-            d.exists().then_some(d)
-        })
-    });
-    (cfg, hw)
+    let cfg = base.join("configuration.nix");
+    if !cfg.exists() {
+        // flake-managed (flake.nix present, no configuration.nix): refuse
+        // rather than guess — never build a bare config over one
+        return (None, None);
+    }
+    let hw = base.join("hardware-configuration.nix");
+    (Some(cfg), hw.exists().then_some(hw))
 }
 
 /// Write the generated configuration into `dir` (an explicit generation
@@ -216,9 +202,9 @@ pub fn build_candidate(
     let timeout = timeout.max(Duration::from_secs(5));
 
     let mut cmd = std::process::Command::new(&parts[0]);
-    // force the exact config path on the child: NIXOS_CONFIG env would
-    // otherwise take precedence over `-I nixos-config=` and the wrong file
-    // could be evaluated (a wrong build now, a wrong switch later)
+    // deterministic: always evaluate exactly this config file, no matter what
+    // the ambient environment says (a no-op when NIXOS_CONFIG is unset; a
+    // guarantee we can never accidentally build a different file)
     cmd.env("NIXOS_CONFIG", config.as_os_str())
         .args(&parts[1..])
         .stdout(std::process::Stdio::piped())
@@ -325,24 +311,6 @@ mod tests {
         assert_eq!(parse_state_version("26.05"), Some("26.05".into()));
         assert_eq!(parse_state_version(""), None);
         assert_eq!(parse_state_version("not-a-version"), None);
-    }
-
-    #[test]
-    fn config_name_is_not_hardcoded_but_resolved() {
-        // a NIXOS_CONFIG env value redirects the config to an arbitrary file
-        // (the name is not fixed); choosing that existing file is the rule
-        let dir = std::env::temp_dir().join(format!("np-cfg-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let custom = dir.join("my-config.nix");
-        std::fs::write(&custom, "{}").unwrap();
-        assert_eq!(
-            resolve_config_path(Some(custom.as_os_str().to_owned())),
-            Some(custom.clone())
-        );
-        // a non-existent env target must not be trusted; fall back to default
-        assert!(!PathBuf::from("/tmp/nix-pilot-definitely-missing.nix").exists());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
