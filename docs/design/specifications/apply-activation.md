@@ -44,10 +44,12 @@ The app owns a root-owned directory, `nix-pilot`'s generated configuration:
   root, so a single controlled elevation boundary covers both write and
   activate. The dev/test path writes the identical layout into a scratch dir
   (as today) and never elevates.
-- The preserved `user-configuration.nix` is produced once by the migration
-  that first moves the pre-existing `/etc/nixos/configuration.nix` content
-  into the app-owned area; it is not rewritten by the app afterwards (the
-  settings surface owns authored changes to it later, D14).
+- The pre-existing config is **imported live by pointer, never copied (D21):**
+  the outer file imports `/etc/nixos/configuration.nix` by absolute path, so
+  the user's own hand-edits are picked up on every build and the app never
+  writes that file. `system.stateVersion` and the hardware import are therefore
+  owned by the live config; the generated outer emits `stateVersion` only when
+  there is no pre-existing config (fresh / non-NixOS case).
 
 ## Transaction wiring
 

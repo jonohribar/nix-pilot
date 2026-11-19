@@ -6,21 +6,19 @@
 //! rollback stay behind the transaction machine (`updates::TxStep`) and are
 //! the remaining 7wo.2 work; nothing here can change the running system.
 //!
-//! Generated-config shape (v1): the app owns the outer generated
-//! `configuration.nix` — it imports the machine's `hardware-configuration.nix`
-//! and a preserved copy of the pre-existing `configuration.nix` (so nothing
-//! the user already has is dropped), sets `system.stateVersion`, and imports
-//! the desired-state module (`desired_state::DesiredDoc::render_module`)
-//! verbatim. The settings surface will own baseline options (boot, network,
-//! …) later; the shape is recorded on the 7wo.2 beads task.
+//! Generated-config shape (v1, revised by D21): the app owns the outer
+//! generated `configuration.nix`, which *imports the live pre-existing
+//! `configuration.nix` by absolute path* (never a copy — hand-edits are
+//! picked up on every build) plus the desired-state module verbatim.
+//! `system.stateVersion` is emitted only when there is no pre-existing
+//! config to own it. The settings surface will own baseline options (boot,
+//! network, …) later; the shape is recorded on the 7wo.3 beads task.
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::desired_state::DesiredDoc;
 
 /// Names of the files the generated configuration owns inside `dir`.
-pub const HW_CONFIG_NAME: &str = "hardware-configuration.nix";
-pub const PRESERVED_CONFIG_NAME: &str = "user-configuration.nix";
 pub const DESIRED_MODULE_NAME: &str = "generated-desired.nix";
 pub const OUTER_CONFIG_NAME: &str = "configuration.nix";
 
@@ -77,9 +75,10 @@ pub fn system_state_version() -> Option<String> {
     parse_state_version(&String::from_utf8_lossy(&out.stdout))
 }
 
-/// The pre-existing NixOS config files (`/etc/nixos`); the apply backend
-/// preserves and imports them into the generated configuration. Returns
-/// (configuration.nix, hardware-configuration.nix); both None if not NixOS.
+/// The pre-existing NixOS config files (`/etc/nixos`); the outer generated
+/// config imports the live configuration.nix by pointer, which itself imports
+/// the machine's hardware-configuration.nix. Returns (configuration.nix,
+/// hardware-configuration.nix); both None if not NixOS.
 pub fn discover_nixos_sources() -> (Option<PathBuf>, Option<PathBuf>) {
     let base = PathBuf::from("/etc/nixos");
     if !base.is_dir() {
@@ -91,9 +90,11 @@ pub fn discover_nixos_sources() -> (Option<PathBuf>, Option<PathBuf>) {
 }
 
 /// Write the generated configuration into `dir` (an explicit generation
-/// directory — scratch-only). Copies are taken of the preserved config and
-/// the hardware config so the candidate builds identically wherever it is
-/// written. Returns the path to the outer configuration.nix.
+/// directory — scratch-only). The outer file imports the LIVE pre-existing
+/// configuration.nix by absolute path (D21: pointer, never a copy) plus the
+/// desired-state module; `state_version` is emitted only when there is no
+/// pre-existing config to own it. Returns the path to the outer
+/// configuration.nix.
 pub fn write_generation(
     dir: &Path,
     doc: &DesiredDoc,
@@ -105,13 +106,10 @@ pub fn write_generation(
     std::fs::write(dir.join(DESIRED_MODULE_NAME), doc.render_module())?;
 
     let mut imports = Vec::new();
-    if let Some(hw) = hardware_config {
-        std::fs::copy(hw, dir.join(HW_CONFIG_NAME))?;
-        imports.push(format!("./{HW_CONFIG_NAME}"));
-    }
     if let Some(user_cfg) = preserved_config {
-        std::fs::copy(user_cfg, dir.join(PRESERVED_CONFIG_NAME))?;
-        imports.push(format!("./{PRESERVED_CONFIG_NAME}"));
+        imports.push(format!("{}", user_cfg.display()));
+    } else if let Some(hw) = hardware_config {
+        imports.push(format!("{}", hw.display()));
     }
     imports.push(format!("./{DESIRED_MODULE_NAME}"));
     let list = imports
@@ -119,8 +117,14 @@ pub fn write_generation(
         .map(|i| format!("    {i}"))
         .collect::<Vec<_>>()
         .join("\n");
-    let body =
-        format!("  imports = [\n{list}\n  ];\n  system.stateVersion = \"{state_version}\";\n");
+    // with a live user config present it owns stateVersion; emit it only
+    // when there is nothing to inherit it from (fresh / non-NixOS case)
+    let version = if preserved_config.is_none() {
+        format!("  system.stateVersion = \"{state_version}\";\n")
+    } else {
+        String::new()
+    };
+    let body = format!("  imports = [\n{list}\n  ];\n{version}");
 
     let outer = format!("{{ config, pkgs, lib, ... }}:\n\n{{\n{body}}}\n");
     let outer_path = dir.join(OUTER_CONFIG_NAME);
@@ -319,9 +323,12 @@ mod tests {
         assert_eq!(outer, gen.join("configuration.nix"));
 
         let outer_text = std::fs::read_to_string(&outer).unwrap();
-        assert!(outer_text.contains("system.stateVersion = \"26.05\";"));
-        assert!(outer_text.contains("./hardware-configuration.nix"));
-        assert!(outer_text.contains("./user-configuration.nix"));
+        // D21: the live config is imported by pointer (absolute path), and a
+        // present user config owns stateVersion (so no duplicate line here)
+        assert!(outer_text.contains(&cfg.display().to_string()));
+        assert!(!outer_text.contains("system.stateVersion"));
+        assert!(!outer_text.contains("hardware-configuration.nix"));
+        assert!(!outer_text.contains("user-configuration.nix"));
         assert!(outer_text.contains("./generated-desired.nix"));
         // the desired module is written verbatim (byte for byte identical to
         // the renderer, so the build matches what the UI shows)
@@ -329,9 +336,9 @@ mod tests {
             std::fs::read_to_string(gen.join("generated-desired.nix")).unwrap(),
             doc.render_module()
         );
-        // preserved + hardware configs are copied
-        assert!(gen.join("user-configuration.nix").exists());
-        assert!(gen.join("hardware-configuration.nix").exists());
+        // nothing is copied into the generation dir
+        assert!(!gen.join("user-configuration.nix").exists());
+        assert!(!gen.join("hardware-configuration.nix").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -342,9 +349,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let outer = write_generation(&dir, &doc, "26.05", None, None).unwrap();
         let text = std::fs::read_to_string(&outer).unwrap();
+        // fresh / non-NixOS: only the desired module, and stateVersion is ours
         assert!(!text.contains("user-configuration.nix"));
         assert!(!text.contains("hardware-configuration.nix"));
-        assert!(text.contains("generated-desired.nix"));
+        assert!(text.contains("./generated-desired.nix"));
+        assert!(text.contains("system.stateVersion = \"26.05\";"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
