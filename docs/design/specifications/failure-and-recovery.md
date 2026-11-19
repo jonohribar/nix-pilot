@@ -49,14 +49,16 @@ Recovery runs before any application starts, so it cannot be in-app:
 
 ## Per-user installs on a home-manager system
 
-Per-user installs on a system whose config enables the home-manager module
-(decision D22) roll back as **home-manager generations**, not system
-generations: lighter, activated on the user session, and with no boot-menu
-stakes — a bad per-user change at worst breaks the user environment, never the
-system boot. Everything above (one transaction, build failure changes nothing,
-apply failure returns to the previous state) still applies within that lighter
-scope. System-wide changes always ride the system generation with boot-menu
-recovery.
+Per-user installs **default to home-manager** (decisions D22/D23) on any
+system whose config enables the home-manager module, and roll back as
+**home-manager generations**, not system generations: lighter, activated on
+the user session, and with no boot-menu stakes — a bad per-user change at
+worst breaks the user environment, never the system boot. Everything above
+(one transaction, build failure changes nothing, apply failure returns to the
+previous state) still applies within that lighter scope. On systems that do
+not enable home-manager, per-user installs fall back to NixOS-native
+`users.users.<name>.packages` and ride the system generation. System-wide
+changes always ride the system generation with boot-menu recovery.
 
 ## Rolling back
 

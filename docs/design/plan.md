@@ -99,6 +99,7 @@ All product decisions D1–D15 are resolved; their outcomes are maintained in on
 ## Status (current)
 
 - Research complete: `docs/research/00-README.md` through `04-recommendations.md`.
+- Per-user install backend decided (D22/D23): home-manager is the default per-user method when the target config enables it, NixOS `users.users` is the fallback; implementation lands with the flake-module integration and the prepare probe.
 - Risk register live: `docs/design/risks.md`, 12 risks, review log opened.
 - Six epics and 17 tasks filed in beads; the decision tasks were resolved by the 2026-11-16 decision round (D1–D15). Validation intentionally without an epic.
 - All destinations under `docs/` are written except `validation.md` (planned placeholder; its epic is created when content exists). The destination map above records the beads task that produced each.
