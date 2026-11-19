@@ -470,7 +470,7 @@ pub fn run(
     ));
     let updates = Rc::new(updates_page::UpdatesPage::new());
     updates.wire(&queue, &desired, &nix);
-    let settings = Rc::new(settings_page::SettingsPage::new());
+    let settings = Rc::new(settings_page::SettingsPage::new(&account));
 
     let persist_desired_state = wire_desired_state_persistence(
         &queue,

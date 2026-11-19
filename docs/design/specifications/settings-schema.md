@@ -49,6 +49,7 @@ Shipped in `app/src/settings.rs` (single-value overrides, verified against the p
 | Printing | `services.printing.enable` | boolean | start the printing service |
 | Power management | `powerManagement.enable` | boolean | suspend and power-saving features |
 | Remote access (SSH) | `services.openssh.enable` | boolean | allow connecting to this computer remotely |
+| Remote access keys (SSH) | `users.users.<name>.openssh.authorizedKeys.keys` | list of strings (per user) | the public keys allowed to log into this computer, one per line (add/remove) |
 
 Pending first-release candidates that need a per-workflow design (structural / safety-sensitive, not a plain value): user accounts (`users.users.<name>`, add/edit/remove workflow), printer queues (runtime CUPS state, a pointer not an option), idle/sleep timeouts (live in the desktop, no cross-desktop option).
 

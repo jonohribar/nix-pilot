@@ -86,6 +86,12 @@ pub struct DesiredDoc {
     /// Additive and optional, so pre-existing v1 files parse unchanged.
     #[serde(default)]
     pub settings: BTreeMap<String, SettingValue>,
+    /// Per-account SSH authorized public keys (remote-access workflow in the
+    /// Settings surface, D14 scoped): renders as
+    /// `users.users.<name>.openssh.authorizedKeys.keys`. Additive and
+    /// optional; pre-existing v1 files parse unchanged.
+    #[serde(default)]
+    pub authorized_keys: BTreeMap<Account, Vec<String>>,
 }
 
 impl Default for DesiredDoc {
@@ -95,6 +101,7 @@ impl Default for DesiredDoc {
             system: Packages::default(),
             users: BTreeMap::new(),
             settings: BTreeMap::new(),
+            authorized_keys: BTreeMap::new(),
         }
     }
 }
@@ -134,6 +141,31 @@ impl DesiredDoc {
         }
     }
 
+    /// The given account's authorized SSH public keys (empty if absent).
+    pub fn authorized_keys_for(&self, account: &str) -> &[String] {
+        self.authorized_keys
+            .get(account)
+            .map(|k| k.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Replace one account's authorized SSH public keys; an empty set removes
+    /// the entry so the file stays free of empty sections.
+    pub fn set_authorized_keys(&mut self, account: &str, keys: Vec<String>) {
+        let mut keys: Vec<String> = keys
+            .into_iter()
+            .map(|k| k.trim().to_string())
+            .filter(|k| !k.is_empty())
+            .collect();
+        keys.sort();
+        keys.dedup();
+        if keys.is_empty() {
+            self.authorized_keys.remove(account);
+        } else {
+            self.authorized_keys.insert(account.to_string(), keys);
+        }
+    }
+
     /// Validate every value that will be inserted into generated Nix syntax.
     pub fn validate(&self) -> Result<(), StateValidationError> {
         for attr in &self.system.packages {
@@ -145,6 +177,19 @@ impl DesiredDoc {
             }
             for attr in &packages.packages {
                 validate_package_attr(attr)?;
+            }
+        }
+        for (account, keys) in &self.authorized_keys {
+            if !is_nix_identifier(account) {
+                return Err(StateValidationError::Account(account.clone()));
+            }
+            for key in keys {
+                if key.contains('\n') {
+                    return Err(StateValidationError::Setting {
+                        key: format!("users.{account}.openssh.authorizedKeys.keys"),
+                        reason: "a key must be a single line".into(),
+                    });
+                }
             }
         }
         for (key, value) in &self.settings {
@@ -173,21 +218,51 @@ impl DesiredDoc {
                 render_package_list(&self.system.packages)
             ));
         }
-        for (account, pkgs) in &self.users {
-            if pkgs.packages.is_empty() {
+        // Per-account installs; authorized SSH keys are NixOS-native only
+        // (home-manager has no equivalent in this scope).
+        // Per-account installs and authorized SSH keys (NixOS-native only;
+        // home-manager has no authorized-key equivalent in this scope).
+        // Accounts come from the union of package users and key users, sorted.
+        let mut accounts: Vec<&String> = self
+            .users
+            .keys()
+            .chain(self.authorized_keys.keys())
+            .collect();
+        accounts.sort();
+        accounts.dedup();
+        for account in accounts {
+            let pkgs = self.users.get(account).cloned().unwrap_or_default();
+            let keys = self.authorized_keys_for(account);
+            if pkgs.packages.is_empty() && keys.is_empty() {
                 continue;
             }
             match backend {
-                UserBackend::NixUsers => body.push_str(&format!(
-                    "  users.users.\"{}\" = {{\n    packages = [ {} ];\n  }};\n",
-                    account,
-                    render_package_list(&pkgs.packages)
-                )),
-                UserBackend::HomeManager => body.push_str(&format!(
-                    "  home-manager.users.\"{}\".home.packages = [ {} ];\n",
-                    account,
-                    render_package_list(&pkgs.packages)
-                )),
+                UserBackend::NixUsers => {
+                    let mut lines = vec![format!("  users.users.\"{account}\" = {{")];
+                    if !pkgs.packages.is_empty() {
+                        lines.push(format!(
+                            "    packages = [ {} ];",
+                            render_package_list(&pkgs.packages)
+                        ));
+                    }
+                    if !keys.is_empty() {
+                        lines.push(format!(
+                            "    openssh.authorizedKeys.keys = [ {} ];",
+                            render_key_list(keys)
+                        ));
+                    }
+                    lines.push("  };".into());
+                    body.push_str(&lines.join("\n"));
+                    body.push('\n');
+                }
+                UserBackend::HomeManager => {
+                    if !pkgs.packages.is_empty() {
+                        body.push_str(&format!(
+                            "  home-manager.users.\"{account}\".home.packages = [ {} ];\n",
+                            render_package_list(&pkgs.packages)
+                        ));
+                    }
+                }
             }
         }
         body.push_str(&crate::settings::render_block(&self.settings));
@@ -215,6 +290,24 @@ fn render_package_list(packages: &[String]) -> String {
                 .join(".");
             format!("pkgs.{path}")
         })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Escape a value for embedding inside a Nix double-quoted string (so no
+/// accepted value can ever become Nix code: quotes, backslashes and the `$`
+/// interpolation marker are all neutralised).
+fn escape_nix_str(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('$', r#"${"$"}"#)
+}
+
+/// Render an SSH authorized-keys list as quoted, escaped Nix strings.
+fn render_key_list(keys: &[String]) -> String {
+    keys.iter()
+        .map(|k| format!("\"{}\"", escape_nix_str(k)))
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -481,6 +574,56 @@ mod tests {
             d.render_module(UserBackend::NixUsers).unwrap(),
             "{ config, pkgs, lib, ... }:\n\n{\n  environment.systemPackages = [ pkgs.\"gimp\" ];\n  users.users.\"alice\" = {\n    packages = [ pkgs.\"firefox\" ];\n  };\n  users.users.\"bob\" = {\n    packages = [ pkgs.\"vscode\" ];\n  };\n}\n"
         );
+    }
+
+    #[test]
+    fn render_authorized_keys_alongside_packages_and_alone() {
+        // a user with packages + keys emits both inside one users.users block
+        let mut d = DesiredDoc::current();
+        d.set_user("alice", vec!["firefox".into()]);
+        d.set_authorized_keys("alice", vec!["ssh-rsa AAAA...".into()]);
+        assert_eq!(
+            d.render_module(UserBackend::NixUsers).unwrap(),
+            "{ config, pkgs, lib, ... }:\n\n{\n  users.users.\"alice\" = {\n    packages = [ pkgs.\"firefox\" ];\n    openssh.authorizedKeys.keys = [ \"ssh-rsa AAAA...\" ];\n  };\n}\n"
+        );
+        // a user with keys but no packages still renders (not skipped)
+        let mut d = DesiredDoc::current();
+        d.set_authorized_keys("bob", vec!["k1".into(), "k1".into(), "k0".into()]);
+        assert_eq!(
+            d.render_module(UserBackend::NixUsers).unwrap(),
+            "{ config, pkgs, lib, ... }:\n\n{\n  users.users.\"bob\" = {\n    openssh.authorizedKeys.keys = [ \"k0\" \"k1\" ];\n  };\n}\n"
+        );
+    }
+
+    #[test]
+    fn authorized_keys_sort_dedup_and_empty_removes() {
+        let mut d = DesiredDoc::current();
+        d.set_authorized_keys(
+            "alice",
+            vec!["c".into(), "a".into(), "a".into(), "b".into()],
+        );
+        assert_eq!(
+            d.authorized_keys_for("alice"),
+            &["a".to_string(), "b".to_string(), "c".to_string()]
+        );
+        d.set_authorized_keys("alice", vec![]);
+        assert!(d.authorized_keys.is_empty());
+    }
+
+    #[test]
+    fn authorized_keys_reject_embedded_newline() {
+        let mut d = DesiredDoc::current();
+        d.set_authorized_keys("alice", vec!["a\nb".into()]);
+        assert!(d.validate().is_err());
+    }
+
+    #[test]
+    fn authorized_keys_roundtrip_json() {
+        let mut d = DesiredDoc::current();
+        d.set_authorized_keys("alice", vec!["pk".into()]);
+        let json = serde_json::to_string(&d).unwrap();
+        let back: DesiredDoc = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.authorized_keys_for("alice"), &["pk".to_string()]);
     }
 
     #[test]

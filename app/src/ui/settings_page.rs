@@ -40,10 +40,14 @@ pub struct SettingsPage {
     pub page: gtk4::Box,
     /// Row data in SPECS order.
     rows: Vec<RowData>,
+    /// The system account the per-user workflows operate on.
+    account: String,
+    /// Buffer backing the SSH authorized-keys editor.
+    keys_buffer: gtk4::TextBuffer,
 }
 
 impl SettingsPage {
-    pub fn new() -> SettingsPage {
+    pub fn new(account: &str) -> SettingsPage {
         let page = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
         page.set_margin_top(18);
         page.set_margin_start(28);
@@ -110,6 +114,37 @@ impl SettingsPage {
             page.append(&card);
         }
 
+        // Users area: SSH authorized keys (structural per-user workflow).
+        let user_heading = gtk4::Label::new(Some("Users"));
+        user_heading.add_css_class("title-3");
+        user_heading.set_xalign(0.0);
+        user_heading.set_margin_top(14);
+        page.append(&user_heading);
+
+        let keys_card = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+        keys_card.add_css_class("card");
+        keys_card.set_margin_top(6);
+        let keys_label = gtk4::Label::new(Some("Remote access keys (SSH)"));
+        keys_label.add_css_class("heading");
+        keys_label.set_xalign(0.0);
+        let keys_blurb = gtk4::Label::new(Some(
+            "The public keys allowed to log into this computer remotely, one per \
+             line. Removing a key stops that computer from connecting.",
+        ));
+        keys_blurb.set_xalign(0.0);
+        keys_blurb.set_wrap(true);
+        keys_blurb.add_css_class("dim-label");
+        let buffer = gtk4::TextBuffer::new(None);
+        let view = gtk4::TextView::with_buffer(&buffer);
+        view.set_wrap_mode(gtk4::WrapMode::WordChar);
+        view.set_height_request(96);
+        view.set_margin_top(4);
+        view.add_css_class("card");
+        keys_card.append(&keys_label);
+        keys_card.append(&keys_blurb);
+        keys_card.append(&view);
+        page.append(&keys_card);
+
         // D14 pointer: desktop chrome is owned by the desktop, never the app
         let pointer = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
         pointer.add_css_class("card");
@@ -129,7 +164,12 @@ impl SettingsPage {
         page.append(&pointer);
 
         page.set_vexpand(true);
-        SettingsPage { page, rows }
+        SettingsPage {
+            page,
+            rows,
+            account: account.to_string(),
+            keys_buffer: buffer,
+        }
     }
 
     /// Populate from the desired state and wire edits back through `save`.
@@ -195,6 +235,42 @@ impl SettingsPage {
                 }
             }
         }
+
+        // SSH authorized keys: debounced save of the multi-line editor.
+        let account = self.account.clone();
+        let buffer = self.keys_buffer.clone();
+        let current = desired.borrow().authorized_keys_for(&account).join("\n");
+        buffer.set_text(&current);
+        let desired = desired.clone();
+        let save = save.clone();
+        let debounce = std::rc::Rc::new(std::cell::Cell::new(None::<glib::SourceId>));
+        buffer.connect_changed(move |buffer| {
+            // Re-arm the debounce: a fresh timeout replaces the pending one.
+            if let Some(id) = debounce.take() {
+                id.remove();
+            }
+            let buffer = buffer.clone();
+            let desired = desired.clone();
+            let save = save.clone();
+            let account = account.clone();
+            let pending = debounce.clone();
+            pending.set(Some(glib::timeout_add_local(
+                std::time::Duration::from_millis(800),
+                move || {
+                    let (start, end) = buffer.bounds();
+                    let keys: Vec<String> = buffer
+                        .text(&start, &end, true)
+                        .to_string()
+                        .lines()
+                        .map(|l| l.trim().to_string())
+                        .filter(|l| !l.is_empty())
+                        .collect();
+                    desired.borrow_mut().set_authorized_keys(&account, keys);
+                    save();
+                    glib::ControlFlow::Break
+                },
+            )));
+        });
     }
 
     /// Load and display current config values from the live NixOS configuration.
