@@ -27,6 +27,9 @@ pub enum ConfigValueError {
     NoNixInstantiate,
     /// The nix-instantiate evaluation failed.
     EvalFailed(String),
+    /// The evaluated option does not exist in this NixOS/nixpkgs — removed
+    /// or renamed since the setting was authored (currency, settings-schema).
+    NoSuchOption(String),
     /// The option path is invalid (empty or malformed).
     InvalidOptionPath(String),
 }
@@ -154,7 +157,7 @@ pub fn read_config_value(option_path: &str) -> Result<ConfigValue, ConfigValueEr
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        return Err(ConfigValueError::EvalFailed(stderr));
+        return Err(classify_eval_failure(&stderr));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -167,9 +170,43 @@ pub fn is_available() -> bool {
     discover_nixos_sources().0.is_some() && which::which("nix-instantiate").is_ok()
 }
 
+/// Decide whether an eval failure means the option no longer exists (removed
+/// or renamed) versus any other evaluation problem. Removed options surface
+/// as "attribute '...' missing" / "does not exist" in the eval error.
+fn classify_eval_failure(stderr: &str) -> ConfigValueError {
+    let lower = stderr.to_lowercase();
+    if lower.contains("missing")
+        || lower.contains("does not exist")
+        || lower.contains("attribute name '")
+    {
+        ConfigValueError::NoSuchOption(stderr.to_owned())
+    } else {
+        ConfigValueError::EvalFailed(stderr.to_owned())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eval_failure_classifies_removed_option() {
+        // a removed/renamed option surfaces as an "attribute ... missing" error
+        assert_eq!(
+            classify_eval_failure("error: attribute 'timeZone' missing"),
+            ConfigValueError::NoSuchOption("error: attribute 'timeZone' missing".into())
+        );
+        assert_eq!(
+            classify_eval_failure("error: The option 'networking.nameservers' does not exist"),
+            ConfigValueError::NoSuchOption(
+                "error: The option 'networking.nameservers' does not exist".into()
+            )
+        );
+        assert_eq!(
+            classify_eval_failure("error: infinite recursion encountered"),
+            ConfigValueError::EvalFailed("error: infinite recursion encountered".into())
+        );
+    }
 
     #[test]
     fn parse_boolean_true() {
@@ -285,6 +322,7 @@ mod tests {
                 Err(ConfigValueError::NoLiveConfig)
                 | Err(ConfigValueError::NoNixInstantiate)
                 | Err(ConfigValueError::EvalFailed(_))
+                | Err(ConfigValueError::NoSuchOption(_))
                 | Ok(_) => {} // all acceptable
             }
         }

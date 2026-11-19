@@ -11,7 +11,7 @@ use std::sync::mpsc;
 use glib::MainContext;
 use gtk4::prelude::*;
 
-use crate::config_value::{read_config_value, ConfigValue};
+use crate::config_value::{read_config_value, ConfigValue, ConfigValueError};
 use crate::desired_state::{AccountProfile, DesiredDoc, SettingValue};
 use crate::settings::{self, ValueKind};
 
@@ -399,6 +399,11 @@ impl SettingsPage {
                         format!("currently: {}", if b { "on" } else { "off" })
                     }
                     Ok(ConfigValue::Unparsed(u)) => format!("currently: {}", u),
+                    Err(ConfigValueError::NoSuchOption(_)) => {
+                        "this setting no longer applies — the option was removed or \
+                         renamed in a newer NixOS"
+                            .to_string()
+                    }
                     Err(_) => "could not read value".to_string(),
                 };
                 let _ = tx.send((key.to_string(), text));
