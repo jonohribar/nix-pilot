@@ -6,9 +6,12 @@
 //! the generated config. Out-of-scope desktop chrome stays a pointer.
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::mpsc;
 
+use glib::MainContext;
 use gtk4::prelude::*;
 
+use crate::config_value::{read_config_value, ConfigValue};
 use crate::desired_state::{DesiredDoc, SettingValue};
 use crate::settings::{self, ValueKind};
 
@@ -17,10 +20,26 @@ enum Control {
     Switch(gtk4::Switch),
 }
 
+impl Clone for Control {
+    fn clone(&self) -> Self {
+        match self {
+            Control::Entry(e) => Control::Entry(e.clone()),
+            Control::Switch(s) => Control::Switch(s.clone()),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct RowData {
+    key: &'static str,
+    control: Control,
+    current_label: gtk4::Label,
+}
+
 pub struct SettingsPage {
     pub page: gtk4::Box,
-    /// (spec key, widget) in SPECS order.
-    rows: Vec<(&'static str, Control)>,
+    /// Row data in SPECS order.
+    rows: Vec<RowData>,
 }
 
 impl SettingsPage {
@@ -74,7 +93,20 @@ impl SettingsPage {
                 card.append(&entry);
                 Control::Entry(entry)
             };
-            rows.push((spec.key, control));
+
+            // Current value label (dim, shown under the control)
+            let current_label = gtk4::Label::new(None);
+            current_label.set_xalign(0.0);
+            current_label.add_css_class("dim-label");
+            current_label.set_margin_top(4);
+            current_label.set_visible(false);
+            card.append(&current_label);
+
+            rows.push(RowData {
+                key: spec.key,
+                control,
+                current_label,
+            });
             page.append(&card);
         }
 
@@ -104,10 +136,9 @@ impl SettingsPage {
     /// A valid change stores/removes the value; an invalid one is flagged on
     /// the control and left out of the desired state.
     pub fn wire(&self, desired: &Rc<RefCell<DesiredDoc>>, save: Rc<dyn Fn()>) {
-        for (key, control) in &self.rows {
-            // copy the &'static str so the move-closures aren't borrowing self
-            let key: &'static str = key;
-            match control {
+        for row in &self.rows {
+            let key: &'static str = row.key;
+            match &row.control {
                 Control::Entry(entry) => {
                     let current = desired.borrow().settings.get(key).cloned();
                     if let Some(SettingValue::Str(s)) = current {
@@ -150,8 +181,6 @@ impl SettingsPage {
                     let save = save.clone();
                     let sw = sw.clone();
                     sw.connect_state_set(move |_, active| {
-                        // a switch represents an explicit enable; off removes
-                        // the app's override so the system default returns
                         if active {
                             desired
                                 .borrow_mut()
@@ -166,5 +195,57 @@ impl SettingsPage {
                 }
             }
         }
+    }
+
+    /// Load and display current config values from the live NixOS configuration.
+    /// Non-blocking: runs on background threads and updates the UI via the
+    /// main context. Only attempts to read if NixOS config is available.
+    pub fn load_current_values(&self) {
+        // Check availability heuristic (cheap, non-blocking)
+        if !crate::config_value::is_available() {
+            for row in &self.rows {
+                row.current_label
+                    .set_text("could not read value (not on NixOS or nix unavailable)");
+                row.current_label.set_visible(true);
+            }
+            return;
+        }
+
+        // Create a channel to receive results from background threads
+        let (tx, rx) = mpsc::channel::<(String, String)>();
+
+        // Spawn a thread for each option
+        for row in &self.rows {
+            let key = row.key;
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                let result = read_config_value(key);
+                let text = match result {
+                    Ok(ConfigValue::Str(s)) => format!("currently: {}", s),
+                    Ok(ConfigValue::Bool(b)) => {
+                        format!("currently: {}", if b { "on" } else { "off" })
+                    }
+                    Ok(ConfigValue::Unparsed(u)) => format!("currently: {}", u),
+                    Err(_) => "could not read value".to_string(),
+                };
+                let _ = tx.send((key.to_string(), text));
+            });
+        }
+
+        // Drop the original sender so the receiver knows when all senders are done
+        drop(tx);
+
+        // Poll the receiver on the main context
+        let ctx = MainContext::default();
+        let rows = self.rows.clone();
+        ctx.spawn_local(async move {
+            for (key, text) in rx {
+                // Find the row for this key and update its label
+                if let Some(row) = rows.iter().find(|r| r.key == key) {
+                    row.current_label.set_text(&text);
+                    row.current_label.set_visible(true);
+                }
+            }
+        });
     }
 }

@@ -506,6 +506,14 @@ pub fn run(
     stack.add_named(&settings.page, Some("settings"));
     stack.set_visible_child_name("list");
 
+    // Load current config values when Settings page becomes visible (lazy, non-blocking)
+    let settings_for_load = settings.clone();
+    stack.connect_visible_child_name_notify(move |s| {
+        if s.visible_child_name().as_deref() == Some("settings") {
+            settings_for_load.load_current_values();
+        }
+    });
+
     let sidebar = build_sidebar(&stack, &updates, &queue);
     let body = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     body.append(&sidebar);

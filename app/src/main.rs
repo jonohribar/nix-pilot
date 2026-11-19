@@ -8,6 +8,7 @@ use std::fmt;
 use std::path::Path;
 
 mod apply;
+mod config_value;
 mod desired_state;
 mod install;
 mod model;
