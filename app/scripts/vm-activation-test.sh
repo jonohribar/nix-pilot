@@ -1,71 +1,83 @@
 #!/usr/bin/env bash
-# 7wo.3 activation harness: proves switch/rollback in an isolated QEMU VM.
+# 7wo.3 activation harness: prove switch + rollback of an app-built candidate
+# generation, using the NixOS test driver (an isolated QEMU VM).
 #
-# The VM is a MINIMAL TEST SYSTEM built from the same pinned nixpkgs — it is
-# never the host's real config and never touches /etc/nixos or the live
-# system. The app's candidate generation (built on the host by apply.rs) is
-# activated inside the VM through the shared host store, so the real
-# nixos-rebuild switch/rollback invocation is exercised without any host
-# risk (the same "explicit scratch dir / never switch a live system" rule).
+# Never touches the host: the VM is a minimal test system from the same
+# pinned nixpkgs, and the candidate generation is built on the host (build
+# only) then registered into the VM's store via virtualisation.pathsInNixDB.
+# The test then exercises the real activation primitives the app will drive:
+#   nix-env -p /nix/var/nix/profiles/system --set <candidate>
+#   switch-to-configuration switch
+#   nix-env -p /nix/var/nix/profiles/system --rollback + switch
 #
-# Current scope (first iteration): build + boot the minimal VM under KVM and
-# prove SSH reachability. Switch/rollback assertions land next within 7wo.3.
-#
-# Usage: ./vm-activation-test.sh
+# Usage: ./vm-activation-test.sh   (just app vm-probe)
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
 TMP=$(mktemp -d /tmp/nix-pilot-vm-XXXX)
 trap 'rm -rf "$TMP"' EXIT
-cat > "$TMP/config.nix" <<EOF
+
+# candidate config: minimal system + one extra package (hello). Importing the
+# qemu-vm module gives it the root fs/loader a standalone toplevel needs.
+cat > "$TMP/candidate.nix" <<'EOF'
 { config, pkgs, lib, ... }:
 {
+  imports = [ <nixpkgs/nixos/modules/virtualisation/qemu-vm.nix> ];
   system.stateVersion = "26.05";
-  users.users.test = {
-    isNormalUser = true;
-    openssh.authorizedKeys.keys = [ "$(cat ~/.ssh/id_ed25519.pub 2>/dev/null || cat ~/.ssh/id_rsa.pub 2>/dev/null || echo '')" ];
-  };
-  users.users.root.openssh.authorizedKeys.keys = [ "$(cat ~/.ssh/id_ed25519.pub 2>/dev/null || cat ~/.ssh/id_rsa.pub 2>/dev/null || echo '')" ];
-  services.openssh.enable = true;
-  services.openssh.settings.PermitRootLogin = "yes";
-  # VM-only options live under vmVariant (applied only to the build-vm eval)
-  virtualisation.vmVariant = {
-    virtualisation.forwardPorts = [ { host.port = 2222; guest.port = 22; } ];
-    virtualisation.memorySize = 1536;
-  };
+  environment.systemPackages = [ pkgs.hello ];
 }
 EOF
-echo "== building minimal test VM (this can take a few minutes)"
-timeout 1800 nixos-rebuild build-vm -I "nixos-config=$TMP/config.nix" --no-link 2>&1 | tail -3 || { echo "VM build failed"; exit 1; }
-# build-vm --no-link prints the result dir on the last line when -v; find it
-RESULT=$(ls -td /nix/store/*-nixos-vm 2>/dev/null | head -1)
-[ -n "$RESULT" ] || { echo "no vm result found"; exit 1; }
-RUNNER=$(ls "$RESULT"/bin/run-*-vm 2>/dev/null | head -1)
-echo "VM built: $RESULT"
-echo "runner: $RUNNER"
-echo "== booting VM under KVM (headless, ssh on :2222)"
-# forwardPorts in the config already wires hostfwd :2222->22; passing any
-# QEMU_NET_OPTS here would add a second -netdev and qemu would refuse it
-QEMU_OPTS="-enable-kvm -m 1536" \
-  timeout 300 "$RUNNER" -nographic >"$TMP/vm.log" 2>&1 &
-VM_PID=$!
-echo "== waiting for ssh (up to 5 min)"
-ok=0
-for i in $(seq 1 60); do
-  sleep 5
-  if timeout 5 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=3 -p 2222 root@localhost 'echo vm-ssh-ok; nixos-version' 2>/dev/null | grep -q vm-ssh-ok; then
-    ok=1
-    echo "VM reachable via ssh (attempt $i)"
-    break
-  fi
-  kill -0 "$VM_PID" 2>/dev/null || { echo "VM process died early"; break; }
-done
-kill "$VM_PID" 2>/dev/null || true
-wait "$VM_PID" 2>/dev/null || true
-if [ "$ok" = 1 ]; then
-  echo "HARNESS OK: minimal test VM booted, ssh reached, KVM working"
+
+echo "== building candidate toplevel (build only)"
+T1=$(timeout 1500 nix-build '<nixpkgs/nixos>' -A system \
+  -I "nixos-config=$TMP/candidate.nix" --no-out-link 2>/dev/null | tail -1)
+[ -n "$T1" ] && [ -e "$T1" ] || { echo "candidate build failed"; exit 1; }
+echo "candidate: $T1"
+
+cat > "$TMP/test.nix" <<EOF
+let
+  pkgs = import <nixpkgs> {};
+  candidate = builtins.storePath "$T1";
+in
+pkgs.testers.runNixOSTest {
+  name = "nix-pilot-activation";
+  # tiny machine; the candidate is registered into its store so nix-env can
+  # adopt it as a generation without any network inside the VM
+  nodes.machine = { ... }: {
+    system.stateVersion = "26.05";
+    virtualisation.pathsInNixDB = [ candidate ];
+    virtualisation.memorySize = 1536;
+  };
+  testScript = ''
+    machine.start()
+    machine.wait_for_unit("multi-user.target")
+
+    # baseline: the candidate's package is absent
+    machine.fail("command -v hello")
+
+    # switch: adopt the candidate as a new system generation and activate it
+    machine.succeed("nix-env -p /nix/var/nix/profiles/system --set ${T1}")
+    machine.succeed("nix-env -p /nix/var/nix/profiles/system --list-generations")
+    machine.succeed("${T1}/bin/switch-to-configuration switch")
+    machine.succeed("command -v hello")
+    machine.succeed("test \"\$(readlink -f /run/current-system)\" = \"\$(readlink -f ${T1})\"")
+
+    # rollback: step back a generation and activate it again
+    machine.succeed("nix-env -p /nix/var/nix/profiles/system --rollback")
+    machine.succeed("/nix/var/nix/profiles/system/bin/switch-to-configuration switch")
+    machine.fail("command -v hello")
+    machine.succeed("test \"\$(readlink -f /run/current-system)\" != \"\$(readlink -f ${T1})\"")
+  '';
+}
+EOF
+
+echo "== running NixOS test driver (isolated QEMU VM)"
+if timeout 2400 nix-build "$TMP/test.nix" -A driver --no-out-link >"$TMP/test.log" 2>&1; then
+  echo "HARNESS OK: switch + rollback proven in isolation"
+  grep -E "^(machine|subtest).*(#|$)|passed|ok" "$TMP/test.log" | tail -10 || true
   exit 0
 else
-  echo "HARNESS FAILED: VM did not become ssh-reachable"
-  tail -40 "$TMP/vm.log" || true
+  echo "HARNESS FAILED"
+  tail -60 "$TMP/test.log" || true
   exit 1
 fi
