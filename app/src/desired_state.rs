@@ -73,6 +73,26 @@ impl Packages {
     }
 }
 
+/// An account profile the app owns (user-accounts workflow). The app owns
+/// only the accounts it creates; accounts defined by the live config are
+/// shown read-only, never here (settings-schema.md, user-accounts design).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AccountProfile {
+    /// Full/display name (`description`), empty when unset.
+    #[serde(default)]
+    pub full_name: String,
+    /// Wheel membership (admin rights).
+    #[serde(default)]
+    pub admin: bool,
+}
+
+impl AccountProfile {
+    pub fn new(full_name: String, admin: bool) -> AccountProfile {
+        AccountProfile { full_name, admin }
+    }
+}
+
 /// The persisted desired-state document: the app-owned source of truth.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -92,6 +112,10 @@ pub struct DesiredDoc {
     /// optional; pre-existing v1 files parse unchanged.
     #[serde(default)]
     pub authorized_keys: BTreeMap<Account, Vec<String>>,
+    /// Accounts the app owns (user-accounts workflow). Additive and optional;
+    /// pre-existing v1 files parse unchanged.
+    #[serde(default)]
+    pub accounts: BTreeMap<Account, AccountProfile>,
 }
 
 impl Default for DesiredDoc {
@@ -102,6 +126,7 @@ impl Default for DesiredDoc {
             users: BTreeMap::new(),
             settings: BTreeMap::new(),
             authorized_keys: BTreeMap::new(),
+            accounts: BTreeMap::new(),
         }
     }
 }
@@ -166,6 +191,22 @@ impl DesiredDoc {
         }
     }
 
+    /// App-owned account profiles, by name (empty if none).
+    pub fn accounts(&self) -> impl Iterator<Item = (&str, &AccountProfile)> {
+        self.accounts.iter().map(|(a, p)| (a.as_str(), p))
+    }
+
+    /// Create/update an app-owned account profile.
+    pub fn set_account(&mut self, name: &str, profile: AccountProfile) {
+        self.accounts.insert(name.to_string(), profile);
+    }
+
+    /// Remove an app-owned account (cleanly un-creates it in the generated
+    /// config, since the app owns the definition — settings-schema.md).
+    pub fn remove_account(&mut self, name: &str) {
+        self.accounts.remove(name);
+    }
+
     /// Validate every value that will be inserted into generated Nix syntax.
     pub fn validate(&self) -> Result<(), StateValidationError> {
         for attr in &self.system.packages {
@@ -190,6 +231,17 @@ impl DesiredDoc {
                         reason: "a key must be a single line".into(),
                     });
                 }
+            }
+        }
+        for (account, profile) in &self.accounts {
+            if !is_nix_identifier(account) {
+                return Err(StateValidationError::Account(account.clone()));
+            }
+            if profile.full_name.contains('\n') {
+                return Err(StateValidationError::Setting {
+                    key: format!("users.{account}.description"),
+                    reason: "the full name must be a single line".into(),
+                });
             }
         }
         for (key, value) in &self.settings {
@@ -264,6 +316,25 @@ impl DesiredDoc {
                     }
                 }
             }
+        }
+        // App-owned accounts (NixOS-native; no home-manager equivalent in this
+        // scope). The app owns these definitions, so removing one cleanly
+        // un-creates it.
+        for (account, profile) in &self.accounts {
+            let mut lines = vec![format!("  users.users.\"{account}\" = {{")];
+            lines.push("    isNormalUser = true;".into());
+            if !profile.full_name.is_empty() {
+                lines.push(format!(
+                    "    description = \"{}\";",
+                    escape_nix_str(&profile.full_name)
+                ));
+            }
+            if profile.admin {
+                lines.push("    extraGroups = [ \"wheel\" ];".into());
+            }
+            lines.push("  };".into());
+            body.push_str(&lines.join("\n"));
+            body.push('\n');
         }
         body.push_str(&crate::settings::render_block(&self.settings));
         if body.is_empty() {
@@ -624,6 +695,28 @@ mod tests {
         let json = serde_json::to_string(&d).unwrap();
         let back: DesiredDoc = serde_json::from_str(&json).unwrap();
         assert_eq!(back.authorized_keys_for("alice"), &["pk".to_string()]);
+    }
+
+    #[test]
+    fn render_app_owned_account_profiles() {
+        let mut d = DesiredDoc::current();
+        d.set_account("alice", AccountProfile::new("Alice A".into(), true));
+        d.set_account("bob", AccountProfile::new(String::new(), false));
+        assert_eq!(
+            d.render_module(UserBackend::NixUsers).unwrap(),
+            "{ config, pkgs, lib, ... }:\n\n{\n  users.users.\"alice\" = {\n    isNormalUser = true;\n    description = \"Alice A\";\n    extraGroups = [ \"wheel\" ];\n  };\n  users.users.\"bob\" = {\n    isNormalUser = true;\n  };\n}\n"
+        );
+    }
+
+    #[test]
+    fn accounts_roundtrip_json_and_removal() {
+        let mut d = DesiredDoc::current();
+        d.set_account("alice", AccountProfile::new("A".into(), false));
+        let back: DesiredDoc = serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap();
+        assert_eq!(back.accounts().count(), 1);
+        d.remove_account("alice");
+        assert!(d.accounts.is_empty());
+        assert!(d.validate().is_ok());
     }
 
     #[test]

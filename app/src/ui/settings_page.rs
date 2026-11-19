@@ -12,7 +12,7 @@ use glib::MainContext;
 use gtk4::prelude::*;
 
 use crate::config_value::{read_config_value, ConfigValue};
-use crate::desired_state::{DesiredDoc, SettingValue};
+use crate::desired_state::{AccountProfile, DesiredDoc, SettingValue};
 use crate::settings::{self, ValueKind};
 
 enum Control {
@@ -44,6 +44,13 @@ pub struct SettingsPage {
     account: String,
     /// Buffer backing the SSH authorized-keys editor.
     keys_buffer: gtk4::TextBuffer,
+    /// Accounts list container (app-owned user accounts).
+    accounts_box: gtk4::Box,
+    add_name: gtk4::Entry,
+    add_full: gtk4::Entry,
+    add_admin: gtk4::Switch,
+    add_btn: gtk4::Button,
+    accounts_status: gtk4::Label,
 }
 
 impl SettingsPage {
@@ -145,6 +152,51 @@ impl SettingsPage {
         keys_card.append(&view);
         page.append(&keys_card);
 
+        // App-owned user accounts (user-accounts workflow). The app owns only
+        // the accounts it creates; system accounts are never edited here.
+        let accounts_card = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+        accounts_card.add_css_class("card");
+        accounts_card.set_margin_top(6);
+        let accounts_label = gtk4::Label::new(Some("User accounts"));
+        accounts_label.add_css_class("heading");
+        accounts_label.set_xalign(0.0);
+        let accounts_blurb = gtk4::Label::new(Some(
+            "Accounts you create here. Accounts set up by the system stay as they are — \
+             this app never changes those.",
+        ));
+        accounts_blurb.set_xalign(0.0);
+        accounts_blurb.set_wrap(true);
+        accounts_blurb.add_css_class("dim-label");
+        let accounts_box = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+        accounts_box.set_margin_top(6);
+
+        let add_name = gtk4::Entry::new();
+        add_name.set_placeholder_text(Some("account name"));
+        add_name.set_hexpand(true);
+        let add_full = gtk4::Entry::new();
+        add_full.set_placeholder_text(Some("full name"));
+        add_full.set_hexpand(true);
+        let add_admin = gtk4::Switch::new();
+        add_admin.set_halign(gtk4::Align::Start);
+        add_admin.set_tooltip_text(Some("administrator rights"));
+        let add_btn = gtk4::Button::with_label("Add account");
+        let add_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+        add_row.append(&add_name);
+        add_row.append(&add_full);
+        add_row.append(&add_admin);
+        add_row.append(&add_btn);
+        let accounts_status = gtk4::Label::new(None);
+        accounts_status.set_xalign(0.0);
+        accounts_status.set_wrap(true);
+        accounts_status.add_css_class("dim-label");
+        accounts_status.set_visible(false);
+        accounts_card.append(&accounts_label);
+        accounts_card.append(&accounts_blurb);
+        accounts_card.append(&accounts_box);
+        accounts_card.append(&add_row);
+        accounts_card.append(&accounts_status);
+        page.append(&accounts_card);
+
         // D14 pointer: desktop chrome is owned by the desktop, never the app
         let pointer = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
         pointer.add_css_class("card");
@@ -169,6 +221,12 @@ impl SettingsPage {
             rows,
             account: account.to_string(),
             keys_buffer: buffer,
+            accounts_box,
+            add_name,
+            add_full,
+            add_admin,
+            add_btn,
+            accounts_status,
         }
     }
 
@@ -243,6 +301,8 @@ impl SettingsPage {
         buffer.set_text(&current);
         let desired = desired.clone();
         let save = save.clone();
+        let accounts_desired = desired.clone();
+        let accounts_save = save.clone();
         let debounce = std::rc::Rc::new(std::cell::Cell::new(None::<glib::SourceId>));
         buffer.connect_changed(move |buffer| {
             // Re-arm the debounce: a fresh timeout replaces the pending one.
@@ -270,6 +330,43 @@ impl SettingsPage {
                     glib::ControlFlow::Break
                 },
             )));
+        });
+
+        // App-owned accounts: list + add (collision-refusing) + confirmed remove.
+        let accounts_box = self.accounts_box.clone();
+        let accounts_status = self.accounts_status.clone();
+        let add_name = self.add_name.clone();
+        let add_full = self.add_full.clone();
+        let add_admin = self.add_admin.clone();
+        let add_btn = self.add_btn.clone();
+        refresh_accounts(&accounts_box, &accounts_desired, accounts_save.clone());
+        add_btn.connect_clicked(move |_| {
+            let name = add_name.text().to_string().trim().to_string();
+            let full = add_full.text().to_string();
+            if name.is_empty() {
+                accounts_status.set_text("Enter an account name first");
+                accounts_status.set_visible(true);
+                return;
+            }
+            // The app can own only accounts it creates: refuse names the live
+            // system already defines (read-only collision check).
+            let already_owned = accounts_desired.borrow().accounts.contains_key(&name);
+            if !already_owned && account_exists(&name) {
+                accounts_status.set_text(&format!(
+                    "\u{201c}{name}\u{201d} already exists on this system — the app cannot own it."
+                ));
+                accounts_status.set_visible(true);
+                return;
+            }
+            accounts_desired
+                .borrow_mut()
+                .set_account(&name, AccountProfile::new(full, add_admin.is_active()));
+            accounts_save();
+            add_name.set_text("");
+            add_full.set_text("");
+            add_admin.set_active(false);
+            accounts_status.set_visible(false);
+            refresh_accounts(&accounts_box, &accounts_desired, accounts_save.clone());
         });
     }
 
@@ -323,5 +420,73 @@ impl SettingsPage {
                 }
             }
         });
+    }
+}
+
+/// Whether an account name already exists on this system (read-only collision
+/// check). The app can own only accounts it creates: a name the live system
+/// already defines cannot be cleanly owned (settings-schema.md design).
+fn account_exists(name: &str) -> bool {
+    std::process::Command::new("id")
+        .arg("-u")
+        .arg(name)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Re-render the app-owned accounts list (name · full name · administrator),
+/// each row with a two-step confirmed Remove.
+fn refresh_accounts(container: &gtk4::Box, desired: &Rc<RefCell<DesiredDoc>>, save: Rc<dyn Fn()>) {
+    while let Some(child) = container.first_child() {
+        container.remove(&child);
+    }
+    for (name, profile) in desired.borrow().accounts() {
+        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+        let mut text = name.to_string();
+        if !profile.full_name.is_empty() {
+            text.push_str(&format!(" — {}", profile.full_name));
+        }
+        if profile.admin {
+            text.push_str(" (administrator)");
+        }
+        let label = gtk4::Label::new(Some(&text));
+        label.set_hexpand(true);
+        label.set_xalign(0.0);
+        let remove = gtk4::Button::with_label("Remove");
+        remove.add_css_class("destructive-action");
+        let confirmed = Rc::new(std::cell::Cell::new(false));
+        let confirmed2 = confirmed.clone();
+        let name2 = name.to_string();
+        let cap_container = container.clone();
+        let cap_desired = desired.clone();
+        let cap_save = save.clone();
+        remove.connect_clicked(move |btn| {
+            if !confirmed2.replace(true) {
+                // First click: ask in plain words (REQ-3). Resets after 5 s.
+                btn.set_label("Confirm removal");
+                btn.set_tooltip_text(Some(
+                    "Removing stops this account from logging in on the next update; \
+                     this app cannot undo a removal.",
+                ));
+                let btn = btn.clone();
+                let confirmed = confirmed2.clone();
+                glib::timeout_add_local(std::time::Duration::from_secs(5), move || {
+                    btn.set_label("Remove");
+                    confirmed.set(false);
+                    glib::ControlFlow::Break
+                });
+                return;
+            }
+            cap_desired.borrow_mut().remove_account(&name2);
+            cap_save();
+            confirmed.set(false);
+            refresh_accounts(&cap_container, &cap_desired, cap_save.clone());
+        });
+        row.append(&label);
+        row.append(&remove);
+        container.append(&row);
     }
 }

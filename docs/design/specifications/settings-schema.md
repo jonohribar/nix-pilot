@@ -53,6 +53,33 @@ Shipped in `app/src/settings.rs` (single-value overrides, verified against the p
 
 Pending first-release candidates that need a per-workflow design (structural / safety-sensitive, not a plain value): user accounts (`users.users.<name>`, add/edit/remove workflow), printer queues (runtime CUPS state, a pointer not an option), idle/sleep timeouts (live in the desktop, no cross-desktop option).
 
+### User-accounts workflow (design, 2026-11-19)
+
+The module the app contributes is **additive** (D21 pointer import): it merges
+`users.users.<name>` definitions over the live system config. That decides
+what "create / edit / remove an account" can honestly mean:
+
+- **The app owns the accounts it creates.** Add = emit
+  `users.users.<name> = { isNormalUser = true; description = ...; }` in the
+  desired-state module; remove = drop that definition. Because the app owns
+  the definition, removing it cleanly un-creates the account on the next
+  generation.
+- **The app does not own live-config accounts.** Removing or re-flavouring a
+  user the user's `configuration.nix` defines is not expressible additively
+  (a removed option the live config also sets is a conflict or a no-op). Such
+  accounts are displayed read-only, never edited or removed.
+- **Creation must refuse collisions.** Before creating a name, check the
+  account does not already exist on the system (`id <name>` / `getent passwd`
+  — read-only); a same-named live account cannot be cleanly owned.
+- **Passwords are not held by the app.** The app never stores or renders
+  passwords. New accounts are created without a usable password and the flow
+  prompts the user (or the first login) to set one via the desktop's own
+  account tooling; a forced-change one-time password is the only escalation
+  considered, and it is out of the first slice.
+- **Removal is a confirmed, plain-worded destructive action.** "This removes
+  the account and its files" with a confirmation dialog (REQ-3); the boot-menu
+  recovery card stays as the undo path for a mistaken system change.
+
 The surface is unbounded by nature; carrying and reviewing it is risk [R04](../risks.md#r04) and scope risk [R09](../risks.md#r09). The boundary above is what keeps it finite: only Nix-owned, cross-desktop, migrate-able settings are authored.
 
 ## Relationship to the product model and search
