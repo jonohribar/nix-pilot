@@ -4,11 +4,14 @@
 // updates) and the GTK surface in `ui`. Coding-style.md.
 use glib::ExitCode;
 use gtk4::prelude::*;
+use std::fmt;
+use std::path::Path;
 
 mod apply;
 mod desired_state;
 mod install;
 mod model;
+mod process;
 mod search;
 mod settings;
 mod store;
@@ -34,18 +37,47 @@ fn resolve_index_path() -> Option<String> {
     None
 }
 
-fn load_index(path: &str) -> Result<Vec<IndexEntry>, String> {
-    let raw = std::fs::read_to_string(path).map_err(|e| format!("cannot read {}: {}", path, e))?;
-    let idx: model::CatalogueIndex =
-        serde_json::from_str(&raw).map_err(|e| format!("cannot parse index: {}", e))?;
+#[derive(Debug)]
+enum IndexLoadError {
+    Io {
+        path: String,
+        source: std::io::Error,
+    },
+    Parse(serde_json::Error),
+}
+
+impl fmt::Display for IndexLoadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io { path, source } => write!(f, "cannot read {path}: {source}"),
+            Self::Parse(source) => write!(f, "cannot parse catalogue index: {source}"),
+        }
+    }
+}
+
+impl std::error::Error for IndexLoadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io { source, .. } => Some(source),
+            Self::Parse(source) => Some(source),
+        }
+    }
+}
+
+fn load_index(path: &Path) -> Result<Vec<IndexEntry>, IndexLoadError> {
+    let raw = std::fs::read_to_string(path).map_err(|source| IndexLoadError::Io {
+        path: path.display().to_string(),
+        source,
+    })?;
+    let idx: model::CatalogueIndex = serde_json::from_str(&raw).map_err(IndexLoadError::Parse)?;
     Ok(idx.entries)
 }
 
 fn index_entries() -> (Vec<IndexEntry>, Option<String>) {
     match resolve_index_path() {
-        Some(p) => match load_index(&p) {
+        Some(p) => match load_index(Path::new(&p)) {
             Ok(entries) => (entries, None),
-            Err(e) => (vec![], Some(e)),
+            Err(e) => (vec![], Some(e.to_string())),
         },
         None => (
             vec![],

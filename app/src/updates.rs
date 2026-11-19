@@ -1,26 +1,14 @@
 //! Updates backend (v1 — safe build-first, failure-and-recovery.md).
 //!
-//! A system change is one transaction: explain -> evaluate/build -> apply ->
-//! rollback, plus a first-class boot-recovery story (failure-and-recovery.md).
-//! This module owns the transaction state machine (`TxStep`/`advance`,
-//! driven by the real Updates surface) and the *safe* "prepare" step:
-//! `verify_queued` checks each queued change with the same dry-run as the
-//! install check (never fetches/builds/activates). The real apply (switch)
-//! operates on the app-owned desired-state/generated config (`desired_state`),
-//! whose build/apply backend does not exist yet, so the surface's Apply
-//! control stays disabled until that layer lands; nothing here ever switches a
-//! live system.
+//! This module owns the transaction transition table and safe "prepare" step.
+//! `verify_queued` dry-runs each queued package, then the Updates page builds a
+//! candidate generation. The transition table also models future apply and
+//! recovery states; those states do not themselves perform system operations.
+//! The current app is build-only, so activation remains disabled.
 use std::time::Duration;
 
 use crate::install;
-
-/// A change destined for the transaction (kept decoupled from store/UI).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PendingChange {
-    pub attr: String,
-    pub name: String,
-    pub system_wide: bool,
-}
+pub use crate::store::PendingChange;
 
 /// Per-change build-verify outcome.
 #[derive(Debug, Clone, PartialEq)]
@@ -42,14 +30,9 @@ impl BuildReport {
     }
 }
 
-/// One transaction step. The full machine encodes failure-and-recovery.md:
-/// explain -> evaluate/build -> apply, rollback available after apply; a
-/// failed build changes nothing; a failed apply returns to the previous
-/// system; boot recovery runs before any app. The apply-side variants are
-/// constructed only once the apply backend (7wo.2) lands — until then the
-/// surface drives Ready/Explaining/BuildCheck/BuildFailed and the rest of the
-/// graph is spec-enforced and unit-tested, so dead_code is allowed on the
-/// enum rather than pretending the apply side is reachable today.
+/// One transaction step. The full transition model follows
+/// failure-and-recovery.md. Apply and recovery labels describe the intended
+/// user-facing states; performing those operations belongs to the adapter/UI.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TxStep {
@@ -71,10 +54,7 @@ impl TxStep {
         match self {
             Ready => "Changes are ready — nothing has been applied yet",
             Explaining => "Explaining the change…",
-            BuildCheck => {
-                "Prepared — the changes are built and checked; apply stays off \
-                 until the system-change layer lands"
-            }
+            BuildCheck => "Prepared — the changes are built and checked",
             Applying => "Applying…",
             Done => "The change was applied",
             BuildFailed => "Nothing was changed — building the change failed",
@@ -85,8 +65,8 @@ impl TxStep {
     }
 }
 
-/// Events that advance the transaction. Same gating as `TxStep`: the apply
-/// events are constructed only by the future apply backend (7wo.2).
+/// Events that advance the transaction. Apply and recovery events are model
+/// transitions; callers remain responsible for performing and verifying I/O.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TxEvent {

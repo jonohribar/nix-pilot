@@ -11,6 +11,13 @@ use std::collections::BTreeMap;
 
 use crate::desired_state::SettingValue;
 
+/// Value type accepted by a setting and used to choose its UI control.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueKind {
+    String,
+    Boolean,
+}
+
 /// One owned setting workflow: how it presents and how its value validates.
 pub struct Spec {
     /// The settings map key (== the NixOS option path, dotted).
@@ -19,8 +26,9 @@ pub struct Spec {
     pub label: &'static str,
     /// One-line plain-language behaviour (REQ-6).
     pub blurb: &'static str,
+    /// Value type, shared by validation and UI construction.
+    pub kind: ValueKind,
     validate: fn(&str) -> Result<(), String>,
-    allow_empty: bool,
 }
 
 const fn str_spec(
@@ -33,8 +41,8 @@ const fn str_spec(
         key,
         label,
         blurb,
+        kind: ValueKind::String,
         validate,
-        allow_empty: false,
     }
 }
 
@@ -111,8 +119,8 @@ const fn bool_spec(key: &'static str, label: &'static str, blurb: &'static str) 
         key,
         label,
         blurb,
+        kind: ValueKind::Boolean,
         validate: |_| Ok(()),
-        allow_empty: true,
     }
 }
 
@@ -121,14 +129,11 @@ pub fn validate(key: &str, value: &SettingValue) -> Result<(), String> {
     let Some(spec) = SPECS.iter().find(|s| s.key == key) else {
         return Err("unknown setting".into());
     };
-    match value {
-        SettingValue::Bool(_) => Ok(()),
-        SettingValue::Str(s) => {
-            if s.is_empty() && spec.allow_empty {
-                return Ok(());
-            }
-            (spec.validate)(s)
-        }
+    match (spec.kind, value) {
+        (ValueKind::Boolean, SettingValue::Bool(_)) => Ok(()),
+        (ValueKind::String, SettingValue::Str(s)) => (spec.validate)(s),
+        (ValueKind::Boolean, SettingValue::Str(_)) => Err("expected a true/false value".into()),
+        (ValueKind::String, SettingValue::Bool(_)) => Err("expected a text value".into()),
     }
 }
 
@@ -259,9 +264,11 @@ mod tests {
     }
 
     #[test]
-    fn bools_always_validate() {
+    fn values_must_match_the_setting_type() {
         assert!(validate("services.openssh.enable", &SettingValue::Bool(true)).is_ok());
         assert!(validate("services.openssh.enable", &SettingValue::Bool(false)).is_ok());
+        assert!(validate("services.openssh.enable", &SettingValue::Str("true".into())).is_err());
+        assert!(validate("networking.hostName", &SettingValue::Bool(true)).is_err());
         assert!(validate("unknown.key", &SettingValue::Bool(true)).is_err());
     }
 }

@@ -10,7 +10,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use crate::desired_state::{DesiredDoc, SettingValue};
-use crate::settings;
+use crate::settings::{self, ValueKind};
 
 enum Control {
     Entry(gtk4::Entry),
@@ -61,13 +61,7 @@ impl SettingsPage {
             card.append(&blurb);
 
             // bool settings render as a switch; string settings as an entry
-            let control = if matches!(
-                spec.key,
-                "services.openssh.enable"
-                    | "services.printing.enable"
-                    | "powerManagement.enable"
-                    | "networking.networkmanager.enable"
-            ) {
+            let control = if spec.kind == ValueKind::Boolean {
                 let sw = gtk4::Switch::new();
                 sw.set_halign(gtk4::Align::Start);
                 sw.set_margin_top(4);

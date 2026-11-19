@@ -137,6 +137,11 @@ pub fn run(
     let summary = gtk4::Label::new(None);
     summary.set_xalign(0.0);
     summary.add_css_class("dim-label");
+    let state_notice = gtk4::Label::new(None);
+    state_notice.set_xalign(0.0);
+    state_notice.set_wrap(true);
+    state_notice.add_css_class("error");
+    state_notice.set_visible(false);
     let listbox = gtk4::ListBox::new();
     let scrolled = gtk4::ScrolledWindow::builder()
         .child(&listbox)
@@ -145,6 +150,7 @@ pub fn run(
     let list_page = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
     list_page.set_margin_top(6);
     list_page.set_margin_bottom(6);
+    list_page.append(&state_notice);
     list_page.append(&summary);
     list_page.append(&scrolled);
 
@@ -158,12 +164,40 @@ pub fn run(
     // the backend resolves the real one at apply time.
     let account: String = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
     let wanted_path = crate::desired_state::default_desired_path();
-    let desired = Rc::new(RefCell::new(
-        crate::desired_state::load(&wanted_path).unwrap_or_else(|e| {
-            eprintln!("nix-pilot: {e}, starting with a clean desired state");
-            DesiredDoc::current()
-        }),
-    ));
+    let (initial_doc, state_warning, persistence_enabled) =
+        match crate::desired_state::load(&wanted_path) {
+            Ok(doc) => (doc, None, true),
+            Err(error) if error.is_missing() => (DesiredDoc::current(), None, true),
+            Err(error @ crate::desired_state::LoadError::NewerVersion { .. }) => (
+                DesiredDoc::current(),
+                Some(format!(
+                    "Saved changes were written by a newer version ({error}). This session starts empty and will not overwrite the saved file."
+                )),
+                false,
+            ),
+            Err(error) => match crate::desired_state::preserve_unreadable_file(&wanted_path) {
+                Ok(backup) => (
+                    DesiredDoc::current(),
+                    Some(format!(
+                        "Saved changes could not be loaded ({error}). The original was preserved at {}. This session starts with an empty desired state.",
+                        backup.display()
+                    )),
+                    true,
+                ),
+                Err(backup_error) => (
+                    DesiredDoc::current(),
+                    Some(format!(
+                        "Saved changes could not be loaded ({error}), and a backup could not be created ({backup_error}). This session's changes will not be saved, and the original file was left untouched."
+                    )),
+                    false,
+                ),
+            },
+        };
+    if let Some(warning) = &state_warning {
+        state_notice.set_text(warning);
+        state_notice.set_visible(true);
+    }
+    let desired = Rc::new(RefCell::new(initial_doc));
 
     // seed the in-app queue from the persisted state so selections survive a
     // restart (attrs double as display names until re-selected)
@@ -229,6 +263,9 @@ pub fn run(
         let account = account.clone();
         let wanted_path = wanted_path.clone();
         Rc::new(move || {
+            if !persistence_enabled {
+                return;
+            }
             let mut sys = Vec::new();
             let mut user = Vec::new();
             for p in queue.borrow().items() {
@@ -330,6 +367,7 @@ pub fn run(
     };
     if let Some(e) = load_error {
         summary.set_text(&e);
+        summary.add_css_class("error");
     } else {
         summary.set_text(&format!(
             "{} entries · {} application · {} unverified · {} terminal · {} command-line — click a result for details",

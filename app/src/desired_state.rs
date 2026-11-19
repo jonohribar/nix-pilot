@@ -1,10 +1,10 @@
 //! Desired-state model (7wo.2): the app owns *what the user wants*, and the
 //! NixOS configuration is generated output (architecture / Product model,
 //! decision D9). This module is the persisted source of truth plus a pure
-//! config renderer. Nothing here touches Nix; the build/apply backend that
-//! consumes the rendered module stays gated (7wo.2) until it lands. Per-user
-//! scope targets `users.users.<name>.packages` (D9) or, when the caller picks
-//! the home-manager backend (D22), `home-manager.users.<name>.home.packages`.
+//! config renderer. This module performs no external I/O; the candidate-build
+//! adapter consumes the rendered module, while activation is handled
+//! separately. Per-user scope targets `users.users.<name>.packages` or, when
+//! selected, `home-manager.users.<name>.home.packages`.
 //!
 //! Format: JSON, one file per running account (the account's per-user scope
 //! plus the machine's system scope). It is app-rewritten state — users never
@@ -22,7 +22,10 @@
 //! is a `schema_version` migration on top of this shape, not a rewrite.
 use std::collections::BTreeMap;
 use std::fmt;
+use std::fs::{File, OpenOptions};
+use std::io;
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -131,18 +134,43 @@ impl DesiredDoc {
         }
     }
 
+    /// Validate every value that will be inserted into generated Nix syntax.
+    pub fn validate(&self) -> Result<(), StateValidationError> {
+        for attr in &self.system.packages {
+            validate_package_attr(attr)?;
+        }
+        for (account, packages) in &self.users {
+            if !is_nix_identifier(account) {
+                return Err(StateValidationError::Account(account.clone()));
+            }
+            for attr in &packages.packages {
+                validate_package_attr(attr)?;
+            }
+        }
+        for (key, value) in &self.settings {
+            crate::settings::validate(key, value).map_err(|reason| {
+                StateValidationError::Setting {
+                    key: key.clone(),
+                    reason,
+                }
+            })?;
+        }
+        Ok(())
+    }
+
     /// Render the full generated NixOS module (system scope + every account's
     /// per-user packages through the chosen backend). This is what the backend
     /// would feed `nixos-rebuild`; byte-deterministic. Note: per-user entries
     /// assume the account already exists (defined by the preserved/system
     /// config) — the app adds *packages* for existing accounts, it never
     /// creates accounts.
-    pub fn render_module(&self, backend: UserBackend) -> String {
+    pub fn render_module(&self, backend: UserBackend) -> Result<String, StateValidationError> {
+        self.validate()?;
         let mut body = String::new();
         if !self.system.packages.is_empty() {
             body.push_str(&format!(
-                "  environment.systemPackages = with pkgs; [ {} ];\n",
-                self.system.packages.join(" ")
+                "  environment.systemPackages = [ {} ];\n",
+                render_package_list(&self.system.packages)
             ));
         }
         for (account, pkgs) in &self.users {
@@ -151,14 +179,14 @@ impl DesiredDoc {
             }
             match backend {
                 UserBackend::NixUsers => body.push_str(&format!(
-                    "  users.users.{} = {{\n    packages = with pkgs; [ {} ];\n  }};\n",
+                    "  users.users.\"{}\" = {{\n    packages = [ {} ];\n  }};\n",
                     account,
-                    pkgs.packages.join(" ")
+                    render_package_list(&pkgs.packages)
                 )),
                 UserBackend::HomeManager => body.push_str(&format!(
-                    "  home-manager.users.{}.home.packages = with pkgs; [ {} ];\n",
+                    "  home-manager.users.\"{}\".home.packages = [ {} ];\n",
                     account,
-                    pkgs.packages.join(" ")
+                    render_package_list(&pkgs.packages)
                 )),
             }
         }
@@ -166,15 +194,76 @@ impl DesiredDoc {
         if body.is_empty() {
             body.push_str("  # no packages selected\n");
         }
-        format!("{{ config, pkgs, lib, ... }}:\n\n{{\n{body}}}\n")
+        Ok(format!("{{ config, pkgs, lib, ... }}:\n\n{{\n{body}}}\n"))
     }
 }
+
+fn is_nix_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '\'' | '-'))
+}
+
+fn render_package_list(packages: &[String]) -> String {
+    packages
+        .iter()
+        .map(|attr| {
+            let path = attr
+                .split('.')
+                .map(|component| format!("\"{component}\""))
+                .collect::<Vec<_>>()
+                .join(".");
+            format!("pkgs.{path}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn validate_package_attr(attr: &str) -> Result<(), StateValidationError> {
+    if attr.split('.').all(|component| {
+        !component.is_empty()
+            && component
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '\'' | '-'))
+    }) {
+        Ok(())
+    } else {
+        Err(StateValidationError::PackageAttribute(attr.to_string()))
+    }
+}
+
+/// A desired-state value cannot safely or correctly be represented in Nix.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StateValidationError {
+    PackageAttribute(String),
+    Account(String),
+    Setting { key: String, reason: String },
+}
+
+impl fmt::Display for StateValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PackageAttribute(attr) => {
+                write!(f, "package attribute is not a valid Nix path: {attr:?}")
+            }
+            Self::Account(account) => {
+                write!(f, "account name is not a valid Nix identifier: {account:?}")
+            }
+            Self::Setting { key, reason } => {
+                write!(f, "setting {key} is invalid: {reason}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for StateValidationError {}
 
 /// Errors loading the persisted desired state.
 #[derive(Debug)]
 pub enum LoadError {
     Io(std::io::Error),
     Parse(serde_json::Error),
+    InvalidState(StateValidationError),
     /// The file was written by a newer app than the one reading it.
     NewerVersion {
         found: u8,
@@ -187,11 +276,29 @@ impl fmt::Display for LoadError {
         match self {
             LoadError::Io(e) => write!(f, "could not read desired-state file: {e}"),
             LoadError::Parse(e) => write!(f, "desired-state file is not valid: {e}"),
+            LoadError::InvalidState(e) => write!(f, "desired-state file contains invalid data: {e}"),
             LoadError::NewerVersion { found, supported } => write!(
                 f,
                 "desired-state file was written by a newer version of this app (schema {found}, this app supports up to {supported})"
             ),
         }
+    }
+}
+
+impl std::error::Error for LoadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            LoadError::Io(source) => Some(source),
+            LoadError::Parse(source) => Some(source),
+            LoadError::InvalidState(source) => Some(source),
+            LoadError::NewerVersion { .. } => None,
+        }
+    }
+}
+
+impl LoadError {
+    pub fn is_missing(&self) -> bool {
+        matches!(self, LoadError::Io(error) if error.kind() == io::ErrorKind::NotFound)
     }
 }
 
@@ -213,6 +320,7 @@ pub fn load(path: &Path) -> Result<DesiredDoc, LoadError> {
         });
     }
     let doc: DesiredDoc = serde_json::from_str(&text).map_err(LoadError::Parse)?;
+    doc.validate().map_err(LoadError::InvalidState)?;
     Ok(migrate(doc))
 }
 
@@ -227,14 +335,92 @@ fn migrate(mut doc: DesiredDoc) -> DesiredDoc {
 
 /// Write the desired state atomically (temp file + rename in the same
 /// directory), so a crash mid-write never leaves a truncated source of truth.
-pub fn save(doc: &DesiredDoc, path: &Path) -> std::io::Result<()> {
+#[derive(Debug)]
+pub enum SaveError {
+    Io(io::Error),
+    InvalidState(StateValidationError),
+}
+
+impl fmt::Display for SaveError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SaveError::Io(error) => write!(f, "could not save desired-state file: {error}"),
+            SaveError::InvalidState(error) => {
+                write!(f, "refusing to save invalid desired state: {error}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SaveError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            SaveError::Io(source) => Some(source),
+            SaveError::InvalidState(source) => Some(source),
+        }
+    }
+}
+
+impl From<io::Error> for SaveError {
+    fn from(error: io::Error) -> Self {
+        SaveError::Io(error)
+    }
+}
+
+pub fn save(doc: &DesiredDoc, path: &Path) -> Result<(), SaveError> {
+    doc.validate().map_err(SaveError::InvalidState)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let text = serde_json::to_string_pretty(doc).expect("DesiredDoc serializes");
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, format!("{text}\n"))?;
-    std::fs::rename(&tmp, path)
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+/// Copy an unreadable or invalid state file to a unique, private backup path.
+/// The source is never modified, so recovery remains possible if the copy fails.
+pub fn preserve_unreadable_file(path: &Path) -> io::Result<std::path::PathBuf> {
+    let name = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    for attempt in 0..100 {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let backup = path.with_file_name(format!("{name}.unreadable-{timestamp}-{attempt}.bak"));
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut destination = match options.open(&backup) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        };
+        let result = (|| {
+            let mut source = File::open(path)?;
+            io::copy(&mut source, &mut destination)?;
+            destination.sync_all()
+        })();
+        if let Err(error) = result {
+            drop(destination);
+            let _ = std::fs::remove_file(&backup);
+            return Err(error);
+        }
+        return Ok(backup);
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "could not allocate a unique desired-state backup name",
+    ))
 }
 
 /// Default location for this account's desired-state file:
@@ -292,8 +478,8 @@ mod tests {
     fn render_system_and_each_account() {
         let d = doc_with(&["gimp"], &[("alice", &["firefox"]), ("bob", &["vscode"])]);
         assert_eq!(
-            d.render_module(UserBackend::NixUsers),
-            "{ config, pkgs, lib, ... }:\n\n{\n  environment.systemPackages = with pkgs; [ gimp ];\n  users.users.alice = {\n    packages = with pkgs; [ firefox ];\n  };\n  users.users.bob = {\n    packages = with pkgs; [ vscode ];\n  };\n}\n"
+            d.render_module(UserBackend::NixUsers).unwrap(),
+            "{ config, pkgs, lib, ... }:\n\n{\n  environment.systemPackages = [ pkgs.\"gimp\" ];\n  users.users.\"alice\" = {\n    packages = [ pkgs.\"firefox\" ];\n  };\n  users.users.\"bob\" = {\n    packages = [ pkgs.\"vscode\" ];\n  };\n}\n"
         );
     }
 
@@ -301,17 +487,57 @@ mod tests {
     fn render_home_manager_backend_emits_home_packages() {
         let d = doc_with(&["gimp"], &[("alice", &["firefox"])]);
         assert_eq!(
-            d.render_module(UserBackend::HomeManager),
-            "{ config, pkgs, lib, ... }:\n\n{\n  environment.systemPackages = with pkgs; [ gimp ];\n  home-manager.users.alice.home.packages = with pkgs; [ firefox ];\n}\n"
+            d.render_module(UserBackend::HomeManager).unwrap(),
+            "{ config, pkgs, lib, ... }:\n\n{\n  environment.systemPackages = [ pkgs.\"gimp\" ];\n  home-manager.users.\"alice\".home.packages = [ pkgs.\"firefox\" ];\n}\n"
         );
     }
 
     #[test]
     fn render_empty_is_comment() {
         assert_eq!(
-            DesiredDoc::current().render_module(UserBackend::NixUsers),
+            DesiredDoc::current()
+                .render_module(UserBackend::NixUsers)
+                .unwrap(),
             "{ config, pkgs, lib, ... }:\n\n{\n  # no packages selected\n}\n"
         );
+    }
+
+    #[test]
+    fn renderer_rejects_invalid_package_and_account_identifiers() {
+        let mut package_doc = DesiredDoc::current();
+        package_doc.set_system(vec!["hello; builtins.abort \"injected\"".into()]);
+        assert!(matches!(
+            package_doc.render_module(UserBackend::NixUsers),
+            Err(StateValidationError::PackageAttribute(_))
+        ));
+
+        let mut account_doc = DesiredDoc::current();
+        account_doc.set_user("alice}.builtins.abort", vec!["firefox".into()]);
+        assert!(matches!(
+            account_doc.render_module(UserBackend::NixUsers),
+            Err(StateValidationError::Account(_))
+        ));
+
+        let nested_attr = doc_with(&["python3Packages.requests"], &[]);
+        assert!(nested_attr.render_module(UserBackend::NixUsers).is_ok());
+
+        let unusual_attr = doc_with(&["1password", "true"], &[])
+            .render_module(UserBackend::NixUsers)
+            .unwrap();
+        assert!(unusual_attr.contains("pkgs.\"1password\" pkgs.\"true\""));
+    }
+
+    #[test]
+    fn renderer_rejects_setting_type_mismatches() {
+        let mut doc = DesiredDoc::current();
+        doc.settings.insert(
+            "services.openssh.enable".into(),
+            SettingValue::Str("true".into()),
+        );
+        assert!(matches!(
+            doc.render_module(UserBackend::NixUsers),
+            Err(StateValidationError::Setting { .. })
+        ));
     }
 
     #[test]
@@ -347,6 +573,21 @@ mod tests {
         std::fs::write(&dir, "{\"schema_version\":1,\"bogus\":true}").unwrap();
         assert!(matches!(load(&dir), Err(LoadError::Parse(_))));
         let _ = std::fs::remove_file(&dir);
+    }
+
+    #[test]
+    fn unreadable_state_backup_preserves_original_bytes() {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("nix-pilot-ds-backup-{}.json", std::process::id()));
+        let original = b"not valid json";
+        std::fs::write(&dir, original).unwrap();
+
+        let backup = preserve_unreadable_file(&dir).unwrap();
+        assert_eq!(std::fs::read(&dir).unwrap(), original);
+        assert_eq!(std::fs::read(&backup).unwrap(), original);
+
+        let _ = std::fs::remove_file(&dir);
+        let _ = std::fs::remove_file(backup);
     }
 
     #[test]
@@ -392,7 +633,9 @@ mod tests {
         let _ = std::fs::remove_file(&dir);
 
         // rendered into the generated module with app-wins priority
-        let nix = d.render_module(crate::desired_state::UserBackend::NixUsers);
+        let nix = d
+            .render_module(crate::desired_state::UserBackend::NixUsers)
+            .unwrap();
         assert!(nix.contains(&"networking.hostName = lib.mkOverride 10 \"myhost\";".to_string()));
         assert!(nix.contains("services.openssh.enable = lib.mkOverride 10 true;"));
     }
@@ -411,8 +654,11 @@ mod tests {
     #[test]
     #[ignore = "requires nix-instantiate on PATH"]
     fn rendered_module_parses_with_nix() {
-        let d = doc_with(&["gimp"], &[("tester", &["firefox", "vscode"])]);
-        let nix = d.render_module(UserBackend::NixUsers);
+        let d = doc_with(
+            &["gimp", "1password", "python3Packages.requests"],
+            &[("tester", &["firefox", "vscode"])],
+        );
+        let nix = d.render_module(UserBackend::NixUsers).unwrap();
         let mut path = std::env::temp_dir();
         path.push(format!("nix-pilot-desired-{}.nix", std::process::id()));
         std::fs::write(&path, &nix).unwrap();

@@ -195,7 +195,11 @@ impl UpdatesPage {
             // render the config the desired-state model would generate (the
             // persisted doc: system + per-user packages + any app settings)
             let doc = desired.borrow().clone();
-            config_view.set_text(&doc.render_module(apply::detect_user_backend()));
+            match doc.render_module(apply::detect_user_backend()) {
+                Ok(config) => config_view.set_text(&config),
+                Err(error) => config_view
+                    .set_text(&format!("Cannot render the desired state safely: {error}")),
+            }
             let changes: Vec<updates::PendingChange> = queue
                 .borrow()
                 .items()

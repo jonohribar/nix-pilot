@@ -2,7 +2,7 @@
 //! Pure logic — no GTK, no Nix. The UI translates user actions into these and
 //! renders the outcome; the persistent desired-state model lives in
 //! `desired_state.rs` and is kept in sync with this queue.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingChange {
     pub attr: String,
     pub name: String,
@@ -64,8 +64,8 @@ impl ChangeQueue {
 
 /// Whether a finished availability check still applies to the current
 /// selection (a check for entry X must not update the card of entry Y).
-pub fn result_applies(current_attr: &str, requested_attr: &str) -> bool {
-    current_attr == requested_attr
+pub fn result_matches_selection(selected_attr: &str, checked_attr: &str) -> bool {
+    selected_attr == checked_attr
 }
 
 #[cfg(test)]
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn stale_result_does_not_apply() {
-        assert!(result_applies("firefox", "firefox"));
-        assert!(!result_applies("gimp", "firefox"));
+        assert!(result_matches_selection("firefox", "firefox"));
+        assert!(!result_matches_selection("gimp", "firefox"));
     }
 }

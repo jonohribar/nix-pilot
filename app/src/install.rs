@@ -9,10 +9,11 @@
 //! technical detail one click away. The dry-run below never downloads or
 //! builds; verdicts reflect what the system's own configuration will actually
 //! allow (an unfree refusal is "not allowed", not "installable").
-use std::io::Read;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
+
+use crate::process;
 
 /// Typed verdict for an availability check. The UI maps these to wording.
 #[derive(Debug, Clone, PartialEq)]
@@ -78,77 +79,31 @@ pub fn check_availability(nix: &std::path::Path, attr: &str, timeout: Duration) 
     parts.extend(["build", "--dry-run", "--no-link"].map(String::from));
     parts.push(format!("nixpkgs#{attr}"));
     if let Some(t) = which_timeout() {
-        parts.insert(0, "75".into());
+        parts.insert(0, timeout.as_secs().max(1).to_string());
         parts.insert(0, t);
     }
     let mut cmd = Command::new(&parts[0]);
-    cmd.args(&parts[1..])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
+    cmd.args(&parts[1..]);
+    let output = match process::run(&mut cmd, timeout) {
+        Ok(output) => output,
+        Err(error) => {
+            let (reason, detail) = match error {
+                process::Error::Timeout => (
+                    "the availability check took too long".into(),
+                    "the package check exceeded its time limit".into(),
+                ),
+                other => ("could not be checked right now".into(), other.to_string()),
+            };
             return CheckResult {
-                outcome: Outcome::CheckFailed {
-                    reason: "could not start the package checker".into(),
-                },
-                detail: e.to_string(),
-            }
+                outcome: Outcome::CheckFailed { reason },
+                detail,
+            };
         }
     };
-    // drain stdout/stderr on reader threads so a full pipe can never deadlock
-    // the wait loop below (nix output is normally tiny, but not guaranteed).
-    let out_reader = child.stdout.take().map(|mut o| {
-        std::thread::spawn(move || {
-            let mut s = String::new();
-            let _ = o.read_to_string(&mut s);
-            s
-        })
-    });
-    let err_reader = child.stderr.take().map(|mut e| {
-        std::thread::spawn(move || {
-            let mut s = String::new();
-            let _ = e.read_to_string(&mut s);
-            s
-        })
-    });
-    let deadline = std::time::Instant::now() + timeout;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(st)) => break st,
-            Ok(None) => {
-                if std::time::Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    // join so the readers' exit is explicit, not implicit
-                    let _ = out_reader.map(|t| t.join());
-                    let _ = err_reader.map(|t| t.join());
-                    return CheckResult {
-                        outcome: Outcome::CheckFailed {
-                            reason: "the availability check took too long".into(),
-                        },
-                        detail: "the availability check did not finish in time".into(),
-                    };
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(e) => {
-                return CheckResult {
-                    outcome: Outcome::CheckFailed {
-                        reason: "the package checker failed".into(),
-                    },
-                    detail: e.to_string(),
-                }
-            }
-        }
-    };
-    let stdout = out_reader
-        .map(|t| t.join().unwrap_or_default())
-        .unwrap_or_default();
-    let stderr = err_reader
-        .map(|t| t.join().unwrap_or_default())
-        .unwrap_or_default();
-    classify(status.success(), &format!("{stdout}\n{stderr}"))
+    classify(
+        output.status.success(),
+        &format!("{}\n{}", output.stdout, output.stderr),
+    )
 }
 
 /// Verdict rules, matching what the dry run actually prints (verified against

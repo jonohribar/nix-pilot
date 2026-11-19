@@ -1,24 +1,21 @@
-//! Apply backend (7wo.2): turn the desired-state document into a *built
-//! candidate generation*. Working rule (failure-and-recovery.md + the
-//! project's safety commitment): this module writes only into an explicit
-//! generation directory and only ever *builds* — `nixos-rebuild build` /
-//! `dry-build` — it never switches or activates a system (D20). A 2026-11-19
-//! review found an env-gated activation codepath ahead of the decided
-//! contract and it was removed: activation/rollback are spec (apply-
-//! activation.md) + VM-harness only, and the tx machine (`updates::TxStep`)
-//! keeps their states; nothing here can change the running system.
+//! Candidate-build adapter: turn the desired-state document into a built
+//! candidate generation. It writes only into an explicit generation directory
+//! and invokes `nixos-rebuild build` / `dry-build`; it never activates a system.
+//! Activation and rollback are separate operations and remain outside this
+//! adapter until their transaction and recovery guarantees are implemented.
 //!
 //! Generated-config shape (v1, revised by D21): the app owns the outer
 //! generated `configuration.nix`, which *imports the live pre-existing
 //! `configuration.nix` by absolute path* (never a copy — hand-edits are
 //! picked up on every build) plus the desired-state module verbatim.
 //! `system.stateVersion` is emitted only when there is no pre-existing
-//! config to own it. The settings surface will own baseline options (boot,
-//! network, …) later; the shape is recorded on the 7wo.3 beads task.
+//! config to own it. Baseline options can be added to the settings surface as
+//! supported workflows are designed.
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::desired_state::DesiredDoc;
+use crate::process;
 
 /// Names of the files the generated configuration owns inside `dir`.
 pub const DESIRED_MODULE_NAME: &str = "generated-desired.nix";
@@ -131,10 +128,10 @@ pub fn write_generation(
     hardware_config: Option<&Path>,
 ) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
-    std::fs::write(
-        dir.join(DESIRED_MODULE_NAME),
-        doc.render_module(detect_user_backend()),
-    )?;
+    let desired_module = doc
+        .render_module(detect_user_backend())
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    std::fs::write(dir.join(DESIRED_MODULE_NAME), desired_module)?;
 
     let mut imports = Vec::new();
     if let Some(user_cfg) = preserved_config {
@@ -219,7 +216,7 @@ pub fn build_candidate(
     // timeout(1) wrapper like install.rs, so an orphaned build (app closed
     // mid-run) still terminates instead of lingering.
     if let Some(t) = which_timeout() {
-        parts.insert(0, format!("{}", timeout.as_secs()));
+        parts.insert(0, timeout.as_secs().max(1).to_string());
         parts.insert(0, t);
     }
     let timeout = timeout.max(Duration::from_secs(5));
@@ -229,68 +226,22 @@ pub fn build_candidate(
     // the ambient environment says (a no-op when NIXOS_CONFIG is unset; a
     // guarantee we can never accidentally build a different file)
     cmd.env("NIXOS_CONFIG", config.as_os_str())
-        .args(&parts[1..])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
+        .args(&parts[1..]);
+    let output = match process::run(&mut cmd, timeout) {
+        Ok(output) => output,
+        Err(error) => {
+            let note = match &error {
+                process::Error::Timeout => "the build took too long".into(),
+                _ => "nixos-rebuild failed to run".into(),
+            };
             return CandidateBuild {
                 ok: false,
-                note: "could not start nixos-rebuild".into(),
-                log: e.to_string(),
-            }
+                note,
+                log: error.to_string(),
+            };
         }
     };
-    // drain pipes on reader threads so a big build log can never deadlock us
-    let out_reader = child.stdout.take().map(|mut o| {
-        std::thread::spawn(move || {
-            let mut s = String::new();
-            let _ = std::io::Read::read_to_string(&mut o, &mut s);
-            s
-        })
-    });
-    let err_reader = child.stderr.take().map(|mut e| {
-        std::thread::spawn(move || {
-            let mut s = String::new();
-            let _ = std::io::Read::read_to_string(&mut e, &mut s);
-            s
-        })
-    });
-    let deadline = std::time::Instant::now() + timeout;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(st)) => break st,
-            Ok(None) => {
-                if std::time::Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    let _ = out_reader.map(|t| t.join());
-                    let _ = err_reader.map(|t| t.join());
-                    return CandidateBuild {
-                        ok: false,
-                        note: "the build took too long".into(),
-                        log: "the build did not finish in time".into(),
-                    };
-                }
-                std::thread::sleep(Duration::from_millis(100));
-            }
-            Err(e) => {
-                return CandidateBuild {
-                    ok: false,
-                    note: "nixos-rebuild failed to run".into(),
-                    log: e.to_string(),
-                }
-            }
-        }
-    };
-    let stdout = out_reader
-        .map(|t| t.join().unwrap_or_default())
-        .unwrap_or_default();
-    let stderr = err_reader
-        .map(|t| t.join().unwrap_or_default())
-        .unwrap_or_default();
-    let out = format!("{stdout}\n{stderr}");
+    let out = format!("{}\n{}", output.stdout, output.stderr);
     let tail: String = out
         .lines()
         .rev()
@@ -302,8 +253,8 @@ pub fn build_candidate(
         .join("\n");
     let dry_note = if dry { "dry-" } else { "" };
     CandidateBuild {
-        ok: status.success(),
-        note: if status.success() {
+        ok: output.status.success(),
+        note: if output.status.success() {
             format!("{dry_note}build of the candidate generation succeeded — nothing was activated")
         } else {
             "the candidate generation did not build".into()
@@ -369,7 +320,7 @@ mod tests {
         // the renderer with the detected backend, so the build matches UI)
         assert_eq!(
             std::fs::read_to_string(gen.join("generated-desired.nix")).unwrap(),
-            doc.render_module(detect_user_backend())
+            doc.render_module(detect_user_backend()).unwrap()
         );
         // nothing is copied into the generation dir
         assert!(!gen.join("user-configuration.nix").exists());

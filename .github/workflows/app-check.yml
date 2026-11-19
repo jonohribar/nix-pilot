@@ -1,0 +1,26 @@
+name: App checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: experimental-features = nix-command flakes
+
+      - name: Format, lint, test, and smoke-test app
+        run: >-
+          nix-shell app/shell.nix --run
+          'cd app && cargo build && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && ./scripts/smoke.sh'
