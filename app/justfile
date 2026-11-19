@@ -29,6 +29,11 @@ smoke: build
 # 7wo.3 activation harness: prove switch+rollback in an isolated QEMU VM
 # (uses the NixOS test driver; never touches the host config or system; qemu
 # stays out of the main dev shell)
+# 7wo.3 installed-module harness: proves polkit pkexec authorizes the helper
+# and the area gets published (isolated QEMU VM; does not switch the host)
+vm-apply:
+    @if command -v qemu-system-x86_64 >/dev/null 2>&1; then ./scripts/vm-apply-test.sh; else nix-shell -p qemu openssh --run './scripts/vm-apply-test.sh'; fi
+
 vm-probe:
     @if command -v qemu-system-x86_64 >/dev/null 2>&1; then ./scripts/vm-activation-test.sh; else nix-shell -p qemu openssh --run './scripts/vm-activation-test.sh'; fi
 
