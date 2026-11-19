@@ -193,6 +193,7 @@ struct HeaderWidgets {
     back: gtk4::Button,
     pending: gtk4::Button,
     search: gtk4::SearchEntry,
+    unfree_filter: gtk4::CheckButton,
 }
 
 fn build_header(window: &gtk4::ApplicationWindow) -> HeaderWidgets {
@@ -211,12 +212,17 @@ fn build_header(window: &gtk4::ApplicationWindow) -> HeaderWidgets {
     search.set_placeholder_text(Some("Search apps…"));
     search.set_hexpand(true);
     header.pack_end(&search);
+
+    // optional non-free filter (decision D1): off by default
+    let unfree_filter = gtk4::CheckButton::with_label("Hide non-free");
+    header.pack_end(&unfree_filter);
     window.set_titlebar(Some(&header));
 
     HeaderWidgets {
         back,
         pending,
         search,
+        unfree_filter,
     }
 }
 
@@ -453,10 +459,16 @@ pub fn run(
         .build();
     let header = build_header(&window);
     let catalogue = build_catalogue_list();
-    let all = Rc::new(RefCell::new(entries));
-    let texts = Rc::new(RefCell::new(
-        all.borrow().iter().map(SearchText::build).collect(),
-    ));
+    let full_entries = entries;
+    let hide_unfree = Rc::new(std::cell::Cell::new(false));
+    let all = Rc::new(RefCell::new(Vec::<IndexEntry>::new()));
+    let texts = Rc::new(RefCell::new(Vec::<SearchText>::new()));
+    {
+        let mut a = all.borrow_mut();
+        let mut t = texts.borrow_mut();
+        *a = search::filter_unfree(&full_entries, false);
+        *t = a.iter().map(SearchText::build).collect();
+    }
     let shown = Rc::new(RefCell::new(Vec::<Option<IndexEntry>>::new()));
     let queue = Rc::new(RefCell::new(ChangeQueue::new()));
 
@@ -542,6 +554,35 @@ pub fn run(
         &shown,
     );
     wire_search_shortcut(&header.search, &window);
+
+    // Non-free filter (D1): flipping re-filters the full set and rebuilds.
+    {
+        let all = all.clone();
+        let texts = texts.clone();
+        let shown = shown.clone();
+        let listbox = catalogue.listbox.clone();
+        let summary = catalogue.summary.clone();
+        let search = header.search.clone();
+        let full_entries = full_entries.clone();
+        let hide = hide_unfree.clone();
+        header.unfree_filter.connect_toggled(move |btn| {
+            hide.set(btn.is_active());
+            {
+                let mut a = all.borrow_mut();
+                let mut t = texts.borrow_mut();
+                *a = search::filter_unfree(&full_entries, hide.get());
+                *t = a.iter().map(SearchText::build).collect();
+            }
+            let count = rebuild_list(
+                &listbox,
+                &all.borrow(),
+                &texts.borrow(),
+                &shown,
+                &search.text(),
+            );
+            summary.set_text(&format!("{count} shown"));
+        });
+    }
 
     rebuild_list(
         &catalogue.listbox,

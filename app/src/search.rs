@@ -50,10 +50,47 @@ pub fn rank(query: &str, texts: &[SearchText], max: usize) -> Vec<usize> {
     scored.into_iter().take(max).map(|(_, i)| i).collect()
 }
 
+/// Optional non-free filter (decision D1): when `hide_unfree` is on, entries
+/// with an unfree licence drop out of the results entirely (browse + search).
+pub fn filter_unfree(
+    entries: &[crate::model::IndexEntry],
+    hide_unfree: bool,
+) -> Vec<crate::model::IndexEntry> {
+    if !hide_unfree {
+        return entries.to_vec();
+    }
+    entries.iter().filter(|e| !e.unfree).cloned().collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::IndexEntry;
+
+    #[test]
+    fn unfree_filter_drops_only_when_requested() {
+        let free = IndexEntry {
+            attr: "firefox".into(),
+            pname: None,
+            version: None,
+            description: None,
+            home_page: None,
+            main_program: None,
+            unfree: false,
+            linux_ok: true,
+            class: crate::model::Class::App,
+            tier: crate::model::Tier::Rich,
+            install: None,
+        };
+        let mut unfree = free.clone();
+        unfree.attr = "discord".into();
+        unfree.unfree = true;
+        let entries = vec![free.clone(), unfree.clone()];
+        assert_eq!(filter_unfree(&entries, false).len(), 2);
+        let hidden = filter_unfree(&entries, true);
+        assert_eq!(hidden.len(), 1);
+        assert_eq!(hidden[0].attr, "firefox");
+    }
 
     fn text(name: &str, pn: &str, desc: &str) -> SearchText {
         SearchText {
