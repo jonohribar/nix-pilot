@@ -17,24 +17,28 @@ let
   # The root-only operations the desktop app is allowed to request.
   nix-pilot-apply = pkgs.writeShellApplication {
     name = "nix-pilot-apply";
-    runtimeInputs = [ pkgs.nixos-rebuild ];
+    runtimeInputs = [ pkgs.gnutar pkgs.nixos-rebuild ];
     text = ''
       set -euo pipefail
       area=/etc/nix-pilot/generated
       config=$area/configuration.nix
-      ensure_area() {
-        # nothing user-owned is created by the app here; the outer config
-        # imports the live /etc/nixos/configuration.nix by pointer, never a
-        # copy (D21), so this directory is purely app-owned generated output
-        mkdir -p "$area"
+      ensure_area() { mkdir -p "$area"; }
+      # D26 in-band publish-before-switch: the generated area (a tar of
+      # configuration.nix + generated-desired.nix) arrives on stdin and is
+      # written into the app-owned area before anything builds/switches. Empty
+      # stdin fails closed — there is never a stale or missing config to
+      # switch by accident.
+      publish() {
+        ensure_area
+        tar -xzf - -C "$area"
       }
       case "$1" in
         build)
-          ensure_area
+          publish
           nixos-rebuild build -I nixos-config="$config"
           ;;
         switch)
-          ensure_area
+          publish
           nixos-rebuild switch -I nixos-config="$config"
           ;;
         rollback)
