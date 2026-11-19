@@ -311,4 +311,27 @@ mod tests {
             }
         }
     }
+
+    /// Live test: read all seven owned settings and report their parsed types.
+    #[test]
+    #[ignore = "requires nixos with nix-instantiate"]
+    fn live_read_all_seven_owned_settings() {
+        let keys = [
+            "time.timeZone",
+            "networking.hostName",
+            "networking.networkmanager.enable",
+            "i18n.defaultLocale",
+            "services.printing.enable",
+            "powerManagement.enable",
+            "services.openssh.enable",
+        ];
+        for key in keys {
+            match read_config_value(key) {
+                Ok(ConfigValue::Str(s)) => println!("{}: Str({})", key, s),
+                Ok(ConfigValue::Bool(b)) => println!("{}: Bool({})", key, b),
+                Ok(ConfigValue::Unparsed(u)) => println!("{}: Unparsed({})", key, u),
+                Err(e) => println!("{}: Error({:?})", key, e),
+            }
+        }
+    }
 }
