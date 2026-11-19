@@ -272,6 +272,238 @@ fn which_timeout() -> Option<String> {
     })
 }
 
+// --- Activation surface (D24-D26) -----------------------------------------
+
+/// Whether activation is allowed in this environment.
+/// True only when NIX_PILOT_ALLOW_SWITCH is set AND the nix-pilot-apply
+/// helper is available on PATH.
+pub fn can_activate() -> bool {
+    std::env::var_os("NIX_PILOT_ALLOW_SWITCH").is_some() && which_apply_helper().is_some()
+}
+
+/// Locate the nix-pilot-apply helper on PATH (or well-known NixOS path).
+fn which_apply_helper() -> Option<std::path::PathBuf> {
+    if std::process::Command::new("nix-pilot-apply")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok()
+    {
+        return Some(std::path::PathBuf::from("nix-pilot-apply"));
+    }
+    let p = std::path::PathBuf::from("/run/current-system/sw/bin/nix-pilot-apply");
+    p.exists().then_some(p)
+}
+
+/// Activation action requested by the UI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivateAction {
+    Switch,
+    Rollback,
+}
+
+/// Result of an activation attempt.
+#[derive(Debug, Clone)]
+pub struct ActivateResult {
+    pub ok: bool,
+    /// Short plain-language outcome.
+    pub note: String,
+    /// Technical detail (one click away).
+    pub log: String,
+}
+
+/// Build a tar of exactly [configuration.nix, generated-desired.nix] from the
+/// persisted DesiredDoc and pipe it to `pkexec nix-pilot-apply <switch|rollback>`
+/// on stdin. Drains streams concurrently (reuses process.rs), applies a deadline,
+/// returns ok/note/log.
+///
+/// The subcommand comes ONLY from the fixed ActivateAction enum.
+pub fn activate(
+    action: ActivateAction,
+    doc: &crate::desired_state::DesiredDoc,
+    timeout: std::time::Duration,
+) -> ActivateResult {
+    // 1. Build the generated configuration in a scratch dir
+    let (preserved, hardware) = discover_nixos_sources();
+    let state_version = system_state_version().unwrap_or_else(|| "26.05".to_string());
+
+    let dir = std::env::temp_dir().join(format!("nix-pilot-activation-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let _outer = match write_generation(
+        &dir,
+        doc,
+        &state_version,
+        preserved.as_deref(),
+        hardware.as_deref(),
+    ) {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&dir);
+            return ActivateResult {
+                ok: false,
+                note: "could not write the activation configuration".into(),
+                log: e.to_string(),
+            };
+        }
+    };
+
+    // 2. Create tar.gz of the two files on stdout
+    let tar_output = match create_tar_gz(&dir) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&dir);
+            return ActivateResult {
+                ok: false,
+                note: "could not package the activation configuration".into(),
+                log: e.to_string(),
+            };
+        }
+    };
+
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // 3. Run pkexec nix-pilot-apply <subcommand> with tar on stdin
+    let helper = match which_apply_helper() {
+        Some(p) => p,
+        None => {
+            return ActivateResult {
+                ok: false,
+                note: "nix-pilot-apply helper not found".into(),
+                log: String::new(),
+            };
+        }
+    };
+
+    let subcommand = match action {
+        ActivateAction::Switch => "switch",
+        ActivateAction::Rollback => "rollback",
+    };
+
+    let mut cmd = std::process::Command::new("pkexec");
+    cmd.arg(&helper).arg(subcommand);
+
+    // Write tar to stdin, capture stdout/stderr with deadline
+    match run_with_stdin(&mut cmd, &tar_output, timeout) {
+        Ok(output) => {
+            let tail: String = format!("{}\n{}", output.stdout, output.stderr)
+                .lines()
+                .rev()
+                .take(12)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<_>>()
+                .join("\n");
+            ActivateResult {
+                ok: output.status.success(),
+                note: if output.status.success() {
+                    match action {
+                        ActivateAction::Switch => "the change was applied".into(),
+                        ActivateAction::Rollback => "the previous system was restored".into(),
+                    }
+                } else {
+                    match action {
+                        ActivateAction::Switch => "applying the change failed".into(),
+                        ActivateAction::Rollback => "rollback failed".into(),
+                    }
+                },
+                log: tail,
+            }
+        }
+        Err(e) => ActivateResult {
+            ok: false,
+            note: match action {
+                ActivateAction::Switch => "applying the change failed".into(),
+                ActivateAction::Rollback => "rollback failed".into(),
+            },
+            log: e.to_string(),
+        },
+    }
+}
+
+/// Create a tar.gz archive of the generation directory containing exactly
+/// configuration.nix and generated-desired.nix.
+fn create_tar_gz(dir: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    use std::process::{Command, Stdio};
+    let mut cmd = Command::new("tar");
+    cmd.arg("-czf")
+        .arg("-")
+        .arg("configuration.nix")
+        .arg("generated-desired.nix")
+        .current_dir(dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = cmd.output()?;
+    if !output.status.success() {
+        return Err(std::io::Error::other(format!(
+            "tar failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+    Ok(output.stdout)
+}
+
+/// Run a command with the given stdin data, capturing stdout/stderr concurrently
+/// with a deadline. Reuses the pattern from process.rs.
+fn run_with_stdin(
+    command: &mut std::process::Command,
+    stdin_data: &[u8],
+    timeout: std::time::Duration,
+) -> Result<crate::process::Output, crate::process::Error> {
+    use std::io::Write;
+    use std::process::Stdio;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(crate::process::Error::Spawn)?;
+
+    // Write stdin
+    if let Some(mut stdin) = child.stdin.take() {
+        let data = stdin_data.to_vec();
+        thread::spawn(move || {
+            let _ = stdin.write_all(&data);
+        });
+    }
+
+    let stdout = child.stdout.take().map(crate::process::spawn_reader);
+    let stderr = child.stderr.take().map(crate::process::spawn_reader);
+    let deadline = Instant::now() + timeout;
+
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(50));
+            }
+            Ok(None) => {
+                crate::process::terminate(&mut child);
+                crate::process::discard_reader(stdout);
+                crate::process::discard_reader(stderr);
+                return Err(crate::process::Error::Timeout);
+            }
+            Err(source) => {
+                crate::process::terminate(&mut child);
+                crate::process::discard_reader(stdout);
+                crate::process::discard_reader(stderr);
+                return Err(crate::process::Error::Wait(source));
+            }
+        }
+    };
+
+    Ok(crate::process::Output {
+        status,
+        stdout: crate::process::collect_reader(stdout, "stdout")?,
+        stderr: crate::process::collect_reader(stderr, "stderr")?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -406,5 +638,97 @@ mod tests {
         let b = build_candidate(&rebuild, &outer, false, Duration::from_secs(1200));
         let _ = std::fs::remove_dir_all(&dir);
         assert!(b.ok, "build failed:\n{}", b.log);
+    }
+
+    #[test]
+    fn can_activate_false_when_flag_unset() {
+        std::env::remove_var("NIX_PILOT_ALLOW_SWITCH");
+        assert!(!can_activate());
+    }
+
+    #[test]
+    fn tar_contains_exactly_two_files_and_is_deterministic() {
+        let mut doc = DesiredDoc::current();
+        doc.set_system(vec!["gimp".into()]);
+        doc.set_user("alice", vec!["firefox".into()]);
+        let state_version = "26.05";
+        let (preserved, hardware) = discover_nixos_sources();
+
+        let dir1 = std::env::temp_dir().join(format!("np-tar1-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir1);
+        std::fs::create_dir_all(&dir1).unwrap();
+        let _outer1 = write_generation(
+            &dir1,
+            &doc,
+            state_version,
+            preserved.as_deref(),
+            hardware.as_deref(),
+        )
+        .unwrap();
+        let tar1 = create_tar_gz(&dir1).unwrap();
+        let _ = std::fs::remove_dir_all(&dir1);
+
+        let dir2 = std::env::temp_dir().join(format!("np-tar2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir2);
+        std::fs::create_dir_all(&dir2).unwrap();
+        let _outer2 = write_generation(
+            &dir2,
+            &doc,
+            state_version,
+            preserved.as_deref(),
+            hardware.as_deref(),
+        )
+        .unwrap();
+        let tar2 = create_tar_gz(&dir2).unwrap();
+        let _ = std::fs::remove_dir_all(&dir2);
+
+        assert_eq!(
+            tar1, tar2,
+            "tar output must be deterministic across temp dirs"
+        );
+
+        // Write tar archives to temp files for listing (stdin from Cursor not supported)
+        let tar1_path = std::env::temp_dir().join(format!("np-tar1-list-{}", std::process::id()));
+        let tar2_path = std::env::temp_dir().join(format!("np-tar2-list-{}", std::process::id()));
+        std::fs::write(&tar1_path, &tar1).unwrap();
+        std::fs::write(&tar2_path, &tar2).unwrap();
+
+        use std::process::Command;
+        let list1 = Command::new("tar")
+            .args(["-tzvf", &tar1_path.to_string_lossy()])
+            .output()
+            .unwrap();
+        let list2 = Command::new("tar")
+            .args(["-tzvf", &tar2_path.to_string_lossy()])
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_file(&tar1_path);
+        let _ = std::fs::remove_file(&tar2_path);
+        assert!(list1.status.success());
+        assert!(list2.status.success());
+        let files1: Vec<_> = String::from_utf8_lossy(&list1.stdout)
+            .lines()
+            .map(|l| l.split_whitespace().last().unwrap_or("").to_string())
+            .collect();
+        let files2: Vec<_> = String::from_utf8_lossy(&list2.stdout)
+            .lines()
+            .map(|l| l.split_whitespace().last().unwrap_or("").to_string())
+            .collect();
+        assert_eq!(
+            files1.len(),
+            2,
+            "tar must contain exactly two files, got: {:?}",
+            files1
+        );
+        assert_eq!(files2.len(), 2);
+        assert!(files1.contains(&"configuration.nix".to_string()));
+        assert!(files1.contains(&"generated-desired.nix".to_string()));
+    }
+
+    #[test]
+    fn activate_action_enum_values() {
+        let _switch = ActivateAction::Switch;
+        let _rollback = ActivateAction::Rollback;
+        assert_ne!(ActivateAction::Switch, ActivateAction::Rollback);
     }
 }

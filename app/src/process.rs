@@ -53,6 +53,40 @@ impl std::error::Error for Error {
 
 type Reader = JoinHandle<io::Result<String>>;
 
+/// Spawn a reader thread for a pipe.
+pub fn spawn_reader(pipe: impl Read + Send + 'static) -> Reader {
+    thread::spawn(move || {
+        let mut output = String::new();
+        let mut pipe = pipe;
+        pipe.read_to_string(&mut output)?;
+        Ok(output)
+    })
+}
+
+/// Collect output from a reader thread.
+pub fn collect_reader(reader: Option<Reader>, stream: &'static str) -> Result<String, Error> {
+    match reader {
+        Some(reader) => reader
+            .join()
+            .map_err(|_| Error::ReaderPanicked { stream })?
+            .map_err(|source| Error::Read { stream, source }),
+        None => Ok(String::new()),
+    }
+}
+
+/// Discard a reader thread (join without collecting).
+pub fn discard_reader(reader: Option<Reader>) {
+    if let Some(reader) = reader {
+        let _ = reader.join();
+    }
+}
+
+/// Terminate a child process.
+pub fn terminate(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 /// Run a command with piped, concurrently drained output and a wall-clock limit.
 pub fn run(command: &mut Command, timeout: Duration) -> Result<Output, Error> {
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -87,35 +121,6 @@ pub fn run(command: &mut Command, timeout: Duration) -> Result<Output, Error> {
         stdout: collect_reader(stdout, "stdout")?,
         stderr: collect_reader(stderr, "stderr")?,
     })
-}
-
-fn spawn_reader(mut pipe: impl Read + Send + 'static) -> Reader {
-    thread::spawn(move || {
-        let mut output = String::new();
-        pipe.read_to_string(&mut output)?;
-        Ok(output)
-    })
-}
-
-fn collect_reader(reader: Option<Reader>, stream: &'static str) -> Result<String, Error> {
-    match reader {
-        Some(reader) => reader
-            .join()
-            .map_err(|_| Error::ReaderPanicked { stream })?
-            .map_err(|source| Error::Read { stream, source }),
-        None => Ok(String::new()),
-    }
-}
-
-fn discard_reader(reader: Option<Reader>) {
-    if let Some(reader) = reader {
-        let _ = reader.join();
-    }
-}
-
-fn terminate(child: &mut Child) {
-    let _ = child.kill();
-    let _ = child.wait();
 }
 
 #[cfg(test)]
