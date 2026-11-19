@@ -282,18 +282,16 @@ pub fn can_activate() -> bool {
 }
 
 /// Locate the nix-pilot-apply helper on PATH (or well-known NixOS path).
+/// Probes by path existence, not by running the helper: it has no `--version`
+/// subcommand. Returns an absolute path so pkexec can resolve it.
 fn which_apply_helper() -> Option<std::path::PathBuf> {
-    if std::process::Command::new("nix-pilot-apply")
-        .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok()
-    {
-        return Some(std::path::PathBuf::from("nix-pilot-apply"));
-    }
-    let p = std::path::PathBuf::from("/run/current-system/sw/bin/nix-pilot-apply");
-    p.exists().then_some(p)
+    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .map(|d| d.join("nix-pilot-apply"))
+        .find(|p| p.is_file())
+        .or_else(|| {
+            let p = std::path::PathBuf::from("/run/current-system/sw/bin/nix-pilot-apply");
+            p.is_file().then_some(p)
+        })
 }
 
 /// Activation action requested by the UI.
@@ -324,6 +322,16 @@ pub fn activate(
     doc: &crate::desired_state::DesiredDoc,
     timeout: std::time::Duration,
 ) -> ActivateResult {
+    // Defense-in-depth: never reach the elevated helper unless activation is
+    // genuinely enabled (module installed + flag set), regardless of caller.
+    if !can_activate() {
+        return ActivateResult {
+            ok: false,
+            note: "activation is not enabled on this system".into(),
+            log: "set NIX_PILOT_ALLOW_SWITCH only with the nix-pilot system module installed."
+                .into(),
+        };
+    }
     // 1. Build the generated configuration in a scratch dir
     let (preserved, hardware) = discover_nixos_sources();
     let state_version = system_state_version().unwrap_or_else(|| "26.05".to_string());
@@ -644,6 +652,20 @@ mod tests {
     fn can_activate_false_when_flag_unset() {
         std::env::remove_var("NIX_PILOT_ALLOW_SWITCH");
         assert!(!can_activate());
+    }
+
+    #[test]
+    fn activate_fails_closed_when_not_enabled() {
+        // Regardless of caller, the elevated helper must be unreachable unless
+        // activation is genuinely enabled (defense-in-depth, D24 gating).
+        std::env::remove_var("NIX_PILOT_ALLOW_SWITCH");
+        let doc = crate::desired_state::DesiredDoc::current();
+        let r = activate(
+            ActivateAction::Switch,
+            &doc,
+            std::time::Duration::from_secs(5),
+        );
+        assert!(!r.ok);
     }
 
     #[test]
