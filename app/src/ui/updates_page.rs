@@ -24,6 +24,118 @@ pub struct UpdatesPage {
     build_btn: gtk4::Button,
 }
 
+struct PrepareResult {
+    report: updates::BuildReport,
+    candidate: Option<apply::CandidateBuild>,
+}
+
+/// Verify queued packages, then build a candidate only when every check passes.
+fn prepare_changes(
+    nix: &std::path::Path,
+    changes: &[updates::PendingChange],
+    doc: &DesiredDoc,
+) -> PrepareResult {
+    let report = updates::verify_queued(nix, changes, std::time::Duration::from_secs(60));
+    let candidate = if report.all_ok() && !changes.is_empty() {
+        let (preserved, hardware) = apply::discover_nixos_sources();
+        if preserved.is_some() || hardware.is_some() {
+            let state_version =
+                apply::system_state_version().unwrap_or_else(|| "26.05".to_string());
+            Some(apply::build_from_desired(
+                doc,
+                &state_version,
+                preserved.as_deref(),
+                hardware.as_deref(),
+                std::time::Duration::from_secs(1500),
+            ))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    PrepareResult { report, candidate }
+}
+
+/// Update the page after the worker finishes; this function runs on GTK's thread.
+fn render_prepare_result(
+    result: PrepareResult,
+    step: &RefCell<TxStep>,
+    step_label: &gtk4::Label,
+    results_label: &gtk4::Label,
+    results_list: &gtk4::ListBox,
+    build_button: &gtk4::Button,
+) {
+    while let Some(child) = results_list.first_child() {
+        results_list.remove(&child);
+    }
+    for item in &result.report.items {
+        let text = if item.ok {
+            format!("{} — buildable", item.name)
+        } else {
+            format!("{} — {}", item.name, item.note)
+        };
+        append_result_row(results_list, &text, false);
+    }
+
+    let mut all_ok = result.report.all_ok();
+    let verdict = result.candidate.map(|candidate| {
+        append_log_tail(results_list, &candidate.log);
+        if !candidate.ok {
+            all_ok = false;
+        }
+        candidate.note
+    });
+
+    let (event, fallback) = if all_ok {
+        (TxEvent::Prepared, TxStep::BuildCheck)
+    } else {
+        (TxEvent::BuildFailed, TxStep::BuildFailed)
+    };
+    let target = updates::advance(*step.borrow(), event).unwrap_or(fallback);
+    *step.borrow_mut() = target;
+    step_label.set_text(target.label());
+    results_label.set_text(&verdict.unwrap_or_else(|| {
+        if result.report.items.is_empty() {
+            "Nothing queued to prepare".into()
+        } else if all_ok {
+            "All changes prepare cleanly".into()
+        } else {
+            "Some changes cannot be built for this system".into()
+        }
+    }));
+    build_button.set_sensitive(true);
+}
+
+fn append_result_row(list: &gtk4::ListBox, text: &str, technical: bool) {
+    let label = gtk4::Label::new(Some(text));
+    label.set_xalign(0.0);
+    if technical {
+        label.add_css_class("monospace");
+        label.add_css_class("dim-label");
+    }
+    let row = gtk4::ListBoxRow::new();
+    row.set_selectable(false);
+    row.set_activatable(false);
+    row.set_child(Some(&label));
+    list.append(&row);
+}
+
+fn append_log_tail(list: &gtk4::ListBox, log: &str) {
+    for line in log
+        .lines()
+        .rev()
+        .take(8)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+    {
+        if !line.trim().is_empty() {
+            append_result_row(list, line, true);
+        }
+    }
+}
+
 impl UpdatesPage {
     pub fn new() -> UpdatesPage {
         let page = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
@@ -154,11 +266,8 @@ impl UpdatesPage {
         }
     }
 
-    /// Wire Prepare (safe dry-run build-verify on a thread) + the gated Apply.
+    /// Wire Prepare on a worker thread; Apply remains disabled in this build.
     /// The button reads the queue at click time, so it reflects the latest adds.
-    /// `account` names the NixOS user whose per-user packages the generated
-    /// config targets (developer diagnostic only; the real account resolution
-    /// belongs to the 7wo.2 backend).
     pub fn wire(
         &self,
         queue: &Rc<RefCell<ChangeQueue>>,
@@ -190,7 +299,6 @@ impl UpdatesPage {
             let step = step.clone();
             let results_label = results_label.clone();
             let results_list = results_list.clone();
-            let config_view = config_view.clone();
             let b = b.clone();
             // render the config the desired-state model would generate (the
             // persisted doc: system + per-user packages + any app settings)
@@ -200,116 +308,25 @@ impl UpdatesPage {
                 Err(error) => config_view
                     .set_text(&format!("Cannot render the desired state safely: {error}")),
             }
-            let changes: Vec<updates::PendingChange> = queue
-                .borrow()
-                .items()
-                .iter()
-                .map(|p| updates::PendingChange {
-                    attr: p.attr.clone(),
-                    name: p.name.clone(),
-                    system_wide: p.system_wide,
-                })
-                .collect();
-            // after every item dry-runs clean, build the candidate generation
-            // in a scratch dir (build-only; never activates) so "prepared" is
-            // real: the store closure now contains the exact future system
-            let (tx, rx) =
-                std::sync::mpsc::channel::<(updates::BuildReport, Option<apply::CandidateBuild>)>();
+            let changes = queue.borrow().items().to_vec();
+            // Only plain data crosses to the worker; GTK stays on the main
+            // thread. Prepare verifies each item and then builds a candidate.
+            let (tx, rx) = std::sync::mpsc::channel::<PrepareResult>();
             std::thread::spawn(move || {
-                let rep =
-                    updates::verify_queued(&nixp, &changes, std::time::Duration::from_secs(60));
-                let build = if rep.all_ok() && !changes.is_empty() {
-                    let (preserved, hardware) = apply::discover_nixos_sources();
-                    if preserved.is_some() || hardware.is_some() {
-                        let sv =
-                            apply::system_state_version().unwrap_or_else(|| "26.05".to_string());
-                        Some(apply::build_from_desired(
-                            &doc,
-                            &sv,
-                            preserved.as_deref(),
-                            hardware.as_deref(),
-                            std::time::Duration::from_secs(1500),
-                        ))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                let _ = tx.send((rep, build));
+                let result = prepare_changes(&nixp, &changes, &doc);
+                let _ = tx.send(result);
             });
             glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
                 match rx.try_recv() {
-                    Ok((rep, build)) => {
-                        while let Some(ch) = results_list.first_child() {
-                            results_list.remove(&ch);
-                        }
-                        for it in &rep.items {
-                            let line = if it.ok {
-                                format!("{} — buildable", it.name)
-                            } else {
-                                format!("{} — {}", it.name, it.note)
-                            };
-                            let l = gtk4::Label::new(Some(&line));
-                            l.set_xalign(0.0);
-                            let row = gtk4::ListBoxRow::new();
-                            row.set_selectable(false);
-                            row.set_activatable(false);
-                            row.set_child(Some(&l));
-                            results_list.append(&row);
-                        }
-                        // candidate-build tail + verdict (dim, monospace: it is
-                        // technical detail, one click away)
-                        let mut all_ok = rep.all_ok();
-                        let mut verdict = None;
-                        if let Some(b) = build {
-                            for line in b
-                                .log
-                                .lines()
-                                .rev()
-                                .take(8)
-                                .collect::<Vec<_>>()
-                                .into_iter()
-                                .rev()
-                            {
-                                if line.trim().is_empty() {
-                                    continue;
-                                }
-                                let l = gtk4::Label::new(Some(line));
-                                l.set_xalign(0.0);
-                                l.add_css_class("monospace");
-                                l.add_css_class("dim-label");
-                                let row = gtk4::ListBoxRow::new();
-                                row.set_selectable(false);
-                                row.set_activatable(false);
-                                row.set_child(Some(&l));
-                                results_list.append(&row);
-                            }
-                            verdict = Some(b.note.clone());
-                            if !b.ok {
-                                all_ok = false;
-                            }
-                        }
-                        // Explaining --Prepared--> BuildCheck (or --BuildFailed-->
-                        // BuildFailed); the prepare result advances the machine
-                        let (ev, fallback) = if all_ok {
-                            (TxEvent::Prepared, TxStep::BuildCheck)
-                        } else {
-                            (TxEvent::BuildFailed, TxStep::BuildFailed)
-                        };
-                        let target = updates::advance(*step.borrow(), ev).unwrap_or(fallback);
-                        *step.borrow_mut() = target;
-                        step_label.set_text(target.label());
-                        results_label.set_text(&verdict.unwrap_or_else(|| {
-                            if rep.items.is_empty() {
-                                "Nothing queued to prepare".into()
-                            } else if all_ok {
-                                "All changes prepare cleanly".into()
-                            } else {
-                                "Some changes cannot be built for this system".into()
-                            }
-                        }));
-                        b.set_sensitive(true);
+                    Ok(result) => {
+                        render_prepare_result(
+                            result,
+                            &step,
+                            &step_label,
+                            &results_label,
+                            &results_list,
+                            &b,
+                        );
                         glib::ControlFlow::Break
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,

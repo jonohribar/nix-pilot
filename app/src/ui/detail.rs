@@ -1,6 +1,5 @@
-//! Store detail/install page. Builds the page and owns the install-intent
-//! state machine (check -> review -> queued); the real apply is the Updates
-//! transaction (a later surface) and nothing here mutates the system.
+//! Store detail/install page. It checks package availability and lets the user
+//! add or remove install intent; system changes are handled separately by Updates.
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -12,7 +11,7 @@ use crate::store;
 use crate::store::{ChangeQueue, PendingChange};
 use crate::ui::widgets::{esc, meta_row};
 
-/// Install intent state for the detail card (driven by wire_install).
+/// Availability and queue state shown by the detail card.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum InstallState {
     Idle,
@@ -246,10 +245,93 @@ impl DetailUi {
 }
 
 const ADDED_TEXT: &str =
-    "Added to your ready-to-change list — installs apply through Updates (next surface)";
+    "Added to your ready-to-change list — review and prepare it in Updates. Applying is not available in this build.";
 
-/// Wire the install button (async availability check + queue) and the home-page
-/// button. `on_change` is called whenever the queue changes so the shell can
+fn start_availability_check(
+    detail: &Rc<DetailUi>,
+    button: &gtk4::Button,
+    nix_path: std::path::PathBuf,
+    attr: String,
+) {
+    *detail.state.borrow_mut() = InstallState::Checking;
+    button.set_sensitive(false);
+    button.set_label("Checking…");
+    detail.status.set_text("Checking availability…");
+    detail.expander.set_visible(false);
+    detail.expander.set_expanded(false);
+
+    let state = detail.state.clone();
+    let current_attr = detail.current_attr.clone();
+    let status = detail.status.clone();
+    let technical_detail = detail.tech.clone();
+    let expander = detail.expander.clone();
+    let button = button.clone();
+    let checked_attr = attr.clone();
+    let (sender, receiver) = std::sync::mpsc::channel::<install::CheckResult>();
+    std::thread::spawn(move || {
+        let result =
+            install::check_availability(&nix_path, &attr, std::time::Duration::from_secs(60));
+        let _ = sender.send(result);
+    });
+
+    // GTK stays on the main thread; only the completed check crosses threads.
+    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+        match receiver.try_recv() {
+            Ok(result) => {
+                // Ignore results for a card that has since been replaced.
+                if !store::result_matches_selection(
+                    current_attr.borrow().as_deref().unwrap_or(""),
+                    &checked_attr,
+                ) {
+                    return glib::ControlFlow::Break;
+                }
+                match result.outcome {
+                    install::Outcome::ConfirmedAvailable { note } => {
+                        *state.borrow_mut() = InstallState::Available;
+                        button.set_sensitive(true);
+                        button.set_label("Add to ready-to-change list");
+                        status.set_text(if note.is_empty() {
+                            "Ready to install for you"
+                        } else {
+                            note.as_str()
+                        });
+                    }
+                    outcome => {
+                        *state.borrow_mut() = InstallState::Unavailable;
+                        button.set_sensitive(true);
+                        button.set_label("Check again");
+                        let message = match outcome {
+                            install::Outcome::UnfreeEvalBlocked => {
+                                "Unfree — your system does not allow it".to_string()
+                            }
+                            install::Outcome::Unavailable => {
+                                "Not available for this system".to_string()
+                            }
+                            install::Outcome::CheckFailed { reason } => reason,
+                            install::Outcome::ConfirmedAvailable { .. } => unreachable!(),
+                        };
+                        status.set_text(&message);
+                        technical_detail.set_text(&result.detail);
+                        expander.set_visible(true);
+                        expander.set_expanded(true);
+                    }
+                }
+                glib::ControlFlow::Break
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(_) => {
+                *state.borrow_mut() = InstallState::Unavailable;
+                button.set_sensitive(true);
+                button.set_label("Check again");
+                status.set_text("Could not be checked right now");
+                glib::ControlFlow::Break
+            }
+        }
+    });
+}
+
+/// Connect the install button (availability check + queue) and home-page button.
+/// `on_change` runs whenever the queue changes so the shell can
 /// refresh its header count. Nothing here mutates the system.
 pub fn wire(
     d: &Rc<DetailUi>,
@@ -259,7 +341,9 @@ pub fn wire(
     on_change: Rc<dyn Fn()>,
 ) {
     let d = d.clone();
-    let d_home = d.clone();
+    let home_btn = d.home.clone();
+    let home_url = d.home_url.clone();
+    let home_win = home_win.clone();
     let btn_install = d.btn_install.clone();
     let queue_click = queue.clone();
     let nix_click = nix.clone();
@@ -297,97 +381,14 @@ pub fn wire(
                         .set_text("The package checker is not available on this system");
                     return;
                 };
-                *d.state.borrow_mut() = InstallState::Checking;
-                btn.set_sensitive(false);
-                btn.set_label("Checking…");
-                d.status.set_text("Checking availability…");
-                d.expander.set_visible(false);
-                d.expander.set_expanded(false);
-                let state = d.state.clone();
-                let b = btn.clone();
-                let status = d.status.clone();
-                let tech = d.tech.clone();
-                let exp = d.expander.clone();
-                // guard against a stale result landing after the user switched
-                // to a different entry while the check ran
-                let attr_for_result = attr.clone();
-                let current_attr = d.current_attr.clone();
-                let (tx, rx) = std::sync::mpsc::channel::<install::CheckResult>();
-                std::thread::spawn(move || {
-                    let r = install::check_availability(
-                        &nixp,
-                        &attr,
-                        std::time::Duration::from_secs(60),
-                    );
-                    let _ = tx.send(r);
-                });
-                // main-loop poller: only the result crosses threads; the
-                // widget handles stay on the main thread (no Send bound).
-                glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-                    match rx.try_recv() {
-                        Ok(r) => {
-                            // stale results (user switched entries mid-check)
-                            // leave the card untouched
-                            if !store::result_applies(
-                                current_attr.borrow().as_deref().unwrap_or(""),
-                                &attr_for_result,
-                            ) {
-                                return glib::ControlFlow::Break;
-                            }
-                            match r.outcome {
-                                install::Outcome::ConfirmedAvailable { note } => {
-                                    *state.borrow_mut() = InstallState::Available;
-                                    b.set_sensitive(true);
-                                    b.set_label("Add to ready-to-change list");
-                                    status.set_text(if note.is_empty() {
-                                        "Ready to install for you"
-                                    } else {
-                                        note.as_str()
-                                    });
-                                }
-                                other => {
-                                    *state.borrow_mut() = InstallState::Unavailable;
-                                    b.set_sensitive(true);
-                                    b.set_label("Check again");
-                                    let wording = match other {
-                                        install::Outcome::UnfreeEvalBlocked => {
-                                            "Unfree — your system does not allow it".to_string()
-                                        }
-                                        install::Outcome::Unavailable => {
-                                            "Not available for this system".to_string()
-                                        }
-                                        install::Outcome::CheckFailed { reason } => reason,
-                                        _ => unreachable!(),
-                                    };
-                                    status.set_text(&wording);
-                                    tech.set_text(&r.detail);
-                                    exp.set_visible(true);
-                                    exp.set_expanded(true);
-                                }
-                            }
-                            glib::ControlFlow::Break
-                        }
-                        Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                        Err(_) => {
-                            *state.borrow_mut() = InstallState::Unavailable;
-                            b.set_sensitive(true);
-                            b.set_label("Check again");
-                            status.set_text("Could not be checked right now");
-                            glib::ControlFlow::Break
-                        }
-                    }
-                });
+                start_availability_check(&d, btn, nixp, attr);
             }
         }
     });
 
-    // home page button actually opens the URL
-    let home_btn = d_home.home.clone();
-    let home_url = d_home.home_url.clone();
-    let win = home_win.clone();
     home_btn.connect_clicked(move |_| {
         if let Some(u) = home_url.borrow().as_deref() {
-            gtk4::show_uri(Some(&win), u, gtk4::gdk::CURRENT_TIME);
+            gtk4::show_uri(Some(&home_win), u, gtk4::gdk::CURRENT_TIME);
         }
     });
 }

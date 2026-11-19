@@ -71,6 +71,104 @@ fn rebuild_list(
     n
 }
 
+fn wire_row_activation(
+    listbox: &gtk4::ListBox,
+    shown: &Rc<RefCell<Vec<Option<IndexEntry>>>>,
+    detail: &Rc<detail::DetailUi>,
+    queue: &Rc<RefCell<ChangeQueue>>,
+    stack: &gtk4::Stack,
+) {
+    let detail = detail.clone();
+    let stack = stack.clone();
+    let shown = shown.clone();
+    let queue = queue.clone();
+    listbox.connect_row_activated(move |_, row| {
+        let index = row.index();
+        if index < 0 {
+            return;
+        }
+        // Group headers have no entry in the row-to-entry map.
+        let Some(Some(entry)) = shown.borrow().get(index as usize).cloned() else {
+            return;
+        };
+        detail.populate(&entry);
+        detail.sync_added(queue.borrow().contains(&entry.attr));
+        stack.set_visible_child_name("detail");
+    });
+}
+
+fn wire_search(
+    search: &gtk4::SearchEntry,
+    listbox: &gtk4::ListBox,
+    stack: &gtk4::Stack,
+    summary: &gtk4::Label,
+    all: &Rc<RefCell<Vec<IndexEntry>>>,
+    texts: &Rc<RefCell<Vec<SearchText>>>,
+    shown: &Rc<RefCell<Vec<Option<IndexEntry>>>>,
+) {
+    let stack_for_changes = stack.clone();
+    let summary_for_changes = summary.clone();
+    let listbox_for_changes = listbox.clone();
+    let all_for_changes = all.clone();
+    let texts_for_changes = texts.clone();
+    let shown_for_changes = shown.clone();
+    search.connect_search_changed(move |search| {
+        let query = search.text();
+        let count = rebuild_list(
+            &listbox_for_changes,
+            &all_for_changes.borrow(),
+            &texts_for_changes.borrow(),
+            &shown_for_changes,
+            &query,
+        );
+        // Distinguish an empty search result from the bounded browse count.
+        if count == 0 && !query.trim().is_empty() {
+            summary_for_changes.set_text(&format!(
+                "No results for \"{}\" — try a different name",
+                query.trim()
+            ));
+        } else {
+            summary_for_changes.set_text(&format!("{count} shown"));
+        }
+        stack_for_changes.set_visible_child_name("list");
+    });
+
+    let listbox_for_stop = listbox.clone();
+    let all_for_stop = all.clone();
+    let texts_for_stop = texts.clone();
+    let shown_for_stop = shown.clone();
+    let summary_for_stop = summary.clone();
+    search.connect_stop_search(move |search| {
+        // Escape first clears the query; another stop restores the browse count.
+        if !search.text().is_empty() {
+            search.set_text("");
+            return;
+        }
+        let count = rebuild_list(
+            &listbox_for_stop,
+            &all_for_stop.borrow(),
+            &texts_for_stop.borrow(),
+            &shown_for_stop,
+            "",
+        );
+        summary_for_stop.set_text(&format!("{count} shown"));
+    });
+}
+
+fn wire_search_shortcut(search: &gtk4::SearchEntry, window: &gtk4::ApplicationWindow) {
+    let search = search.clone();
+    let keys = gtk4::EventControllerKey::new();
+    keys.connect_key_pressed(move |_, key, _, modifiers| {
+        if key == gtk4::gdk::Key::k && modifiers.contains(gtk4::gdk::ModifierType::CONTROL_MASK) {
+            search.grab_focus();
+            glib::Propagation::Stop
+        } else {
+            glib::Propagation::Proceed
+        }
+    });
+    window.add_controller(keys);
+}
+
 /// A sidebar nav button that switches the stack and (for Updates) refreshes it.
 fn nav_button(
     label: &str,
@@ -91,6 +189,249 @@ fn nav_button(
     b
 }
 
+struct HeaderWidgets {
+    back: gtk4::Button,
+    pending: gtk4::Button,
+    search: gtk4::SearchEntry,
+}
+
+fn build_header(window: &gtk4::ApplicationWindow) -> HeaderWidgets {
+    let header = gtk4::HeaderBar::new();
+    let back = gtk4::Button::with_label("‹ Back to results");
+    back.set_visible(false);
+    header.pack_start(&back);
+
+    let pending = gtk4::Button::new();
+    pending.add_css_class("flat");
+    pending.add_css_class("dim-label");
+    pending.set_visible(false);
+    header.pack_end(&pending);
+
+    let search = gtk4::SearchEntry::new();
+    search.set_placeholder_text(Some("Search apps…"));
+    search.set_hexpand(true);
+    header.pack_end(&search);
+    window.set_titlebar(Some(&header));
+
+    HeaderWidgets {
+        back,
+        pending,
+        search,
+    }
+}
+
+struct CatalogueList {
+    page: gtk4::Box,
+    listbox: gtk4::ListBox,
+    summary: gtk4::Label,
+    state_notice: gtk4::Label,
+}
+
+fn build_catalogue_list() -> CatalogueList {
+    let summary = gtk4::Label::new(None);
+    summary.set_xalign(0.0);
+    summary.add_css_class("dim-label");
+
+    let state_notice = gtk4::Label::new(None);
+    state_notice.set_xalign(0.0);
+    state_notice.set_wrap(true);
+    state_notice.add_css_class("error");
+    state_notice.set_visible(false);
+
+    let listbox = gtk4::ListBox::new();
+    let scrolled = gtk4::ScrolledWindow::builder()
+        .child(&listbox)
+        .vexpand(true)
+        .build();
+    let page = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+    page.set_margin_top(6);
+    page.set_margin_bottom(6);
+    page.append(&state_notice);
+    page.append(&summary);
+    page.append(&scrolled);
+
+    CatalogueList {
+        page,
+        listbox,
+        summary,
+        state_notice,
+    }
+}
+
+fn load_desired_state(notice: &gtk4::Label) -> (DesiredDoc, bool) {
+    let path = crate::desired_state::default_desired_path();
+    let (document, warning, persistence_enabled) = match crate::desired_state::load(&path) {
+        Ok(document) => (document, None, true),
+        Err(error) if error.is_missing() => (DesiredDoc::current(), None, true),
+        Err(error @ crate::desired_state::LoadError::NewerVersion { .. }) => (
+            DesiredDoc::current(),
+            Some(format!(
+                "Saved changes were written by a newer version ({error}). This session starts empty and will not overwrite the saved file."
+            )),
+            false,
+        ),
+        Err(error) => match crate::desired_state::preserve_unreadable_file(&path) {
+            Ok(backup) => (
+                DesiredDoc::current(),
+                Some(format!(
+                    "Saved changes could not be loaded ({error}). The original was preserved at {}. This session starts with an empty desired state.",
+                    backup.display()
+                )),
+                true,
+            ),
+            Err(backup_error) => (
+                DesiredDoc::current(),
+                Some(format!(
+                    "Saved changes could not be loaded ({error}), and a backup could not be created ({backup_error}). This session's changes will not be saved, and the original file was left untouched."
+                )),
+                false,
+            ),
+        },
+    };
+
+    if let Some(warning) = warning {
+        notice.set_text(&warning);
+        notice.set_visible(true);
+    }
+    (document, persistence_enabled)
+}
+
+fn seed_queue(queue: &mut ChangeQueue, document: &DesiredDoc, account: &str) {
+    for attr in document.system_packages() {
+        queue.add(crate::store::PendingChange {
+            attr: attr.clone(),
+            name: attr.clone(),
+            system_wide: true,
+        });
+    }
+    for attr in document.packages_for(account) {
+        queue.add(crate::store::PendingChange {
+            attr: attr.clone(),
+            name: attr.clone(),
+            system_wide: false,
+        });
+    }
+}
+
+fn wire_desired_state_persistence(
+    queue: &Rc<RefCell<ChangeQueue>>,
+    desired: &Rc<RefCell<DesiredDoc>>,
+    account: &str,
+    persistence_enabled: bool,
+) -> Rc<dyn Fn()> {
+    let queue = queue.clone();
+    let desired = desired.clone();
+    let account = account.to_string();
+    let path = crate::desired_state::default_desired_path();
+
+    Rc::new(move || {
+        if !persistence_enabled {
+            return;
+        }
+        let mut system_packages = Vec::new();
+        let mut user_packages = Vec::new();
+        for change in queue.borrow().items() {
+            if change.system_wide {
+                system_packages.push(change.attr.clone());
+            } else {
+                user_packages.push(change.attr.clone());
+            }
+        }
+        {
+            let mut document = desired.borrow_mut();
+            document.set_system(system_packages);
+            document.set_user(&account, user_packages);
+        }
+        if let Err(error) = crate::desired_state::save(&desired.borrow(), &path) {
+            eprintln!("nix-pilot: could not save desired state: {error}");
+        }
+    })
+}
+
+fn update_pending_button(queue: &ChangeQueue, button: &gtk4::Button) {
+    if queue.is_empty() {
+        button.set_visible(false);
+        button.set_label("");
+        return;
+    }
+
+    let suffix = if queue.len() == 1 { "" } else { "s" };
+    button.set_label(&format!("{} change{suffix} ready to apply", queue.len()));
+    let items = queue
+        .summary()
+        .iter()
+        .map(|(name, system_wide)| {
+            format!(
+                "- {} ({})",
+                name,
+                if *system_wide { "system" } else { "user" }
+            )
+        })
+        .collect::<Vec<_>>();
+    button.set_tooltip_text(Some(&items.join("\n")));
+    button.set_visible(true);
+}
+
+fn wire_pending_button(
+    button: &gtk4::Button,
+    stack: &gtk4::Stack,
+    updates: &Rc<updates_page::UpdatesPage>,
+    queue: &Rc<RefCell<ChangeQueue>>,
+) {
+    let stack = stack.clone();
+    let updates = updates.clone();
+    let queue = queue.clone();
+    button.connect_clicked(move |_| {
+        updates.refresh(&queue);
+        stack.set_visible_child_name("updates");
+    });
+}
+
+fn build_sidebar(
+    stack: &gtk4::Stack,
+    updates: &Rc<updates_page::UpdatesPage>,
+    queue: &Rc<RefCell<ChangeQueue>>,
+) -> gtk4::Box {
+    let sidebar = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    sidebar.set_width_request(220);
+    sidebar.append(&nav_button("Home", "list", stack, None));
+    sidebar.append(&nav_button("Settings", "settings", stack, None));
+
+    let updates = updates.clone();
+    let queue = queue.clone();
+    let refresh_updates = Rc::new(move || updates.refresh(&queue));
+    sidebar.append(&nav_button(
+        "Updates",
+        "updates",
+        stack,
+        Some(refresh_updates),
+    ));
+    sidebar
+}
+
+fn set_catalogue_summary(summary: &gtk4::Label, entries: &[IndexEntry], error: Option<&str>) {
+    if let Some(error) = error {
+        summary.set_text(error);
+        summary.add_css_class("error");
+        return;
+    }
+
+    let mut counts = [0usize; 4];
+    for entry in entries {
+        let index = match entry.class {
+            Class::App => 0,
+            Class::Unverified => 1,
+            Class::TermApp => 2,
+            _ => 3,
+        };
+        counts[index] += 1;
+    }
+    summary.set_text(&format!(
+        "{} entries · {} application · {} unverified · {} terminal · {} command-line — click a result for details",
+        entries.len(), counts[0], counts[1], counts[2], counts[3]
+    ));
+}
+
 /// Build and present the window for a loaded catalogue.
 pub fn run(
     app: &gtk4::Application,
@@ -104,364 +445,91 @@ pub fn run(
         .default_width(1180)
         .default_height(840)
         .build();
-
-    // header: back (detail only), pending-changes, global search
-    let header = gtk4::HeaderBar::new();
-    let back = gtk4::Button::new();
-    back.set_label("‹ Back to results");
-    back.set_visible(false);
-    header.pack_start(&back);
-    let pending_btn = gtk4::Button::new();
-    pending_btn.add_css_class("flat");
-    pending_btn.add_css_class("dim-label");
-    pending_btn.set_visible(false);
-    header.pack_end(&pending_btn);
-    let search = gtk4::SearchEntry::new();
-    search.set_placeholder_text(Some("Search apps…"));
-    search.set_hexpand(true);
-    header.pack_end(&search);
-    window.set_titlebar(Some(&header));
-
-    // shared app state
+    let header = build_header(&window);
+    let catalogue = build_catalogue_list();
     let all = Rc::new(RefCell::new(entries));
     let texts = Rc::new(RefCell::new(
-        all.borrow()
-            .iter()
-            .map(SearchText::build)
-            .collect::<Vec<_>>(),
+        all.borrow().iter().map(SearchText::build).collect(),
     ));
     let shown = Rc::new(RefCell::new(Vec::<Option<IndexEntry>>::new()));
     let queue = Rc::new(RefCell::new(ChangeQueue::new()));
 
-    // list page
-    let summary = gtk4::Label::new(None);
-    summary.set_xalign(0.0);
-    summary.add_css_class("dim-label");
-    let state_notice = gtk4::Label::new(None);
-    state_notice.set_xalign(0.0);
-    state_notice.set_wrap(true);
-    state_notice.add_css_class("error");
-    state_notice.set_visible(false);
-    let listbox = gtk4::ListBox::new();
-    let scrolled = gtk4::ScrolledWindow::builder()
-        .child(&listbox)
-        .vexpand(true)
-        .build();
-    let list_page = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
-    list_page.set_margin_top(6);
-    list_page.set_margin_bottom(6);
-    list_page.append(&state_notice);
-    list_page.append(&summary);
-    list_page.append(&scrolled);
+    let account = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
+    let (initial_document, persistence_enabled) = load_desired_state(&catalogue.state_notice);
+    let desired = Rc::new(RefCell::new(initial_document));
+    seed_queue(&mut queue.borrow_mut(), &desired.borrow(), &account);
 
-    // detail/install page
     let detail = Rc::new(detail::DetailUi::new(
         "Installs into your user account — no administrator rights needed",
     ));
-
-    // desired-state persistence (7wo.2): the app's owned model, stored one
-    // file per running account. The OS user stands in for the NixOS account;
-    // the backend resolves the real one at apply time.
-    let account: String = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
-    let wanted_path = crate::desired_state::default_desired_path();
-    let (initial_doc, state_warning, persistence_enabled) =
-        match crate::desired_state::load(&wanted_path) {
-            Ok(doc) => (doc, None, true),
-            Err(error) if error.is_missing() => (DesiredDoc::current(), None, true),
-            Err(error @ crate::desired_state::LoadError::NewerVersion { .. }) => (
-                DesiredDoc::current(),
-                Some(format!(
-                    "Saved changes were written by a newer version ({error}). This session starts empty and will not overwrite the saved file."
-                )),
-                false,
-            ),
-            Err(error) => match crate::desired_state::preserve_unreadable_file(&wanted_path) {
-                Ok(backup) => (
-                    DesiredDoc::current(),
-                    Some(format!(
-                        "Saved changes could not be loaded ({error}). The original was preserved at {}. This session starts with an empty desired state.",
-                        backup.display()
-                    )),
-                    true,
-                ),
-                Err(backup_error) => (
-                    DesiredDoc::current(),
-                    Some(format!(
-                        "Saved changes could not be loaded ({error}), and a backup could not be created ({backup_error}). This session's changes will not be saved, and the original file was left untouched."
-                    )),
-                    false,
-                ),
-            },
-        };
-    if let Some(warning) = &state_warning {
-        state_notice.set_text(warning);
-        state_notice.set_visible(true);
-    }
-    let desired = Rc::new(RefCell::new(initial_doc));
-
-    // seed the in-app queue from the persisted state so selections survive a
-    // restart (attrs double as display names until re-selected)
-    {
-        let mut q = queue.borrow_mut();
-        let d = desired.borrow();
-        for a in d.system_packages() {
-            q.add(crate::store::PendingChange {
-                attr: a.clone(),
-                name: a.clone(),
-                system_wide: true,
-            });
-        }
-        for a in d.packages_for(&account) {
-            q.add(crate::store::PendingChange {
-                attr: a.clone(),
-                name: a.clone(),
-                system_wide: false,
-            });
-        }
-    }
-
-    // updates page (builds/reviews from the persisted desired doc)
     let updates = Rc::new(updates_page::UpdatesPage::new());
     updates.wire(&queue, &desired, &nix);
-
-    // settings page (editable workflows)
     let settings = Rc::new(settings_page::SettingsPage::new());
 
-    // pending-changes header button -> Updates page (refresh on show)
-    let update_pending_label: Rc<dyn Fn()> = {
-        let queue = queue.clone();
-        let label = pending_btn.clone();
+    let persist_desired_state =
+        wire_desired_state_persistence(&queue, &desired, &account, persistence_enabled);
+    persist_desired_state();
+    settings.wire(&desired, persist_desired_state.clone());
+
+    let pending = header.pending.clone();
+    let queue_for_label = queue.clone();
+    let update_pending = Rc::new(move || {
+        update_pending_button(&queue_for_label.borrow(), &pending);
+    });
+    let on_queue_change = {
+        let update_pending = update_pending.clone();
+        let persist_desired_state = persist_desired_state.clone();
         Rc::new(move || {
-            let q = queue.borrow();
-            if q.is_empty() {
-                label.set_visible(false);
-                label.set_label("");
-            } else {
-                let pl = if q.len() == 1 { "" } else { "s" };
-                label.set_label(&format!("{} change{} ready to apply", q.len(), pl));
-                let items: Vec<String> = q
-                    .summary()
-                    .iter()
-                    .map(|(name, system_wide)| {
-                        format!(
-                            "- {} ({})",
-                            name,
-                            if *system_wide { "system" } else { "user" }
-                        )
-                    })
-                    .collect();
-                label.set_tooltip_text(Some(&items.join("\n")));
-                label.set_visible(true);
-            }
+            update_pending();
+            persist_desired_state();
         })
     };
-    // persist after every queue change: rebuild this account's user scope and
-    // the system scope from the queue, keeping other sections already present
-    let persist: Rc<dyn Fn()> = {
-        let queue = queue.clone();
-        let desired = desired.clone();
-        let account = account.clone();
-        let wanted_path = wanted_path.clone();
-        Rc::new(move || {
-            if !persistence_enabled {
-                return;
-            }
-            let mut sys = Vec::new();
-            let mut user = Vec::new();
-            for p in queue.borrow().items() {
-                if p.system_wide {
-                    sys.push(p.attr.clone());
-                } else {
-                    user.push(p.attr.clone());
-                }
-            }
-            {
-                let mut d = desired.borrow_mut();
-                d.set_system(sys);
-                d.set_user(&account, user);
-            }
-            let d = desired.borrow();
-            if let Err(e) = crate::desired_state::save(&d, &wanted_path) {
-                eprintln!("nix-pilot: could not save desired state: {e}");
-            }
-        })
-    };
-    // persist the freshly-seeded queue before any user action
-    persist();
+    detail::wire(&detail, &queue, &nix, &window, on_queue_change);
+    update_pending();
 
-    // settings edits write back through the same persist (they touch only the
-    // settings map; the system/users rebuild from the queue stays untouched)
-    settings.wire(&desired, persist.clone());
-
-    let on_change: Rc<dyn Fn()> = {
-        let label = update_pending_label.clone();
-        let persist = persist.clone();
-        Rc::new(move || {
-            label();
-            persist();
-        })
-    };
-
-    // install flow + home button (owns the state machine)
-    detail::wire(&detail, &queue, &nix, &window, on_change);
-    update_pending_label();
-
-    // stack: list <-> detail <-> updates
     let stack = gtk4::Stack::new();
     stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
-    stack.add_named(&list_page, Some("list"));
+    stack.add_named(&catalogue.page, Some("list"));
     stack.add_named(&detail.page, Some("detail"));
     stack.add_named(&updates.page, Some("updates"));
     stack.add_named(&settings.page, Some("settings"));
     stack.set_visible_child_name("list");
 
-    // sidebar nav
-    let sidebar = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    sidebar.set_width_request(220);
-    sidebar.append(&nav_button("Home", "list", &stack, None));
-    sidebar.append(&nav_button("Settings", "settings", &stack, None));
-    {
-        let updates = updates.clone();
-        let queue = queue.clone();
-        let show = Rc::new(move || updates.refresh(&queue));
-        sidebar.append(&nav_button("Updates", "updates", &stack, Some(show)));
-    }
-
+    let sidebar = build_sidebar(&stack, &updates, &queue);
     let body = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     body.append(&sidebar);
     body.append(&stack);
     window.set_child(Some(&body));
 
-    // pending button -> Updates
-    {
-        let stack = stack.clone();
-        let updates = updates.clone();
-        let queue = queue.clone();
-        pending_btn.connect_clicked(move |_| {
-            updates.refresh(&queue);
-            stack.set_visible_child_name("updates");
-        });
-    }
-
-    let back2 = back.clone();
-    let stack_note = stack.clone();
+    wire_pending_button(&header.pending, &stack, &updates, &queue);
+    let back_button = header.back.clone();
     stack.connect_visible_child_name_notify(move |s| {
-        back2.set_visible(s.visible_child_name().as_deref() == Some("detail"));
-        let _ = stack_note;
+        back_button.set_visible(s.visible_child_name().as_deref() == Some("detail"));
     });
-    let stack_back = stack.clone();
-    back.connect_clicked(move |_| stack_back.set_visible_child_name("list"));
+    let stack_for_back = stack.clone();
+    header
+        .back
+        .connect_clicked(move |_| stack_for_back.set_visible_child_name("list"));
 
-    // list header summary
-    let by_class = {
-        let es = all.borrow();
-        es.iter().fold([0i64; 4], |mut a, e| {
-            match e.class {
-                Class::App => a[0] += 1,
-                Class::Unverified => a[1] += 1,
-                Class::TermApp => a[2] += 1,
-                _ => a[3] += 1,
-            }
-            a
-        })
-    };
-    if let Some(e) = load_error {
-        summary.set_text(&e);
-        summary.add_css_class("error");
-    } else {
-        summary.set_text(&format!(
-            "{} entries · {} application · {} unverified · {} terminal · {} command-line — click a result for details",
-            all.borrow().len(),
-            by_class[0],
-            by_class[1],
-            by_class[2],
-            by_class[3]
-        ));
-    }
-
-    // detail on row activation
-    let detail_for_row = detail.clone();
-    let stack_for_row = stack.clone();
-    let shown_for_row = shown.clone();
-    let queue_for_row = queue.clone();
-    listbox.connect_row_activated(move |_, row| {
-        let i = row.index();
-        if i >= 0 {
-            if let Some(Some(e)) = shown_for_row.borrow().get(i as usize).cloned() {
-                detail_for_row.populate(&e);
-                detail_for_row.sync_added(queue_for_row.borrow().contains(&e.attr));
-                stack_for_row.set_visible_child_name("detail");
-            }
-        }
-    });
-
-    // live global search
-    let stack_live = stack.clone();
-    let summary_live = summary.clone();
-    let listbox_live = listbox.clone();
-    let all_live = all.clone();
-    let texts_live = texts.clone();
-    let shown_live = shown.clone();
-    search.connect_search_changed(move |s| {
-        let q = s.text();
-        let n = rebuild_list(
-            &listbox_live,
-            &all_live.borrow(),
-            &texts_live.borrow(),
-            &shown_live,
-            &q,
-        );
-        // empty-state: a non-empty query with nothing found gets an honest
-        // line instead of a bare "0 shown" (the browse case stays a count)
-        if n == 0 && !q.trim().is_empty() {
-            summary_live.set_text(&format!(
-                "No results for \"{}\" — try a different name",
-                q.trim()
-            ));
-        } else {
-            summary_live.set_text(&format!("{n} shown"));
-        }
-        stack_live.set_visible_child_name("list");
-    });
-    // Esc clears the query and shows the browse list again
-    let listbox_esc = listbox.clone();
-    let all_esc = all.clone();
-    let texts_esc = texts.clone();
-    let shown_esc = shown.clone();
-    let summary_esc = summary.clone();
-    search.connect_stop_search(move |s| {
-        if !s.text().is_empty() {
-            s.set_text("");
-        } else {
-            let n = rebuild_list(
-                &listbox_esc,
-                &all_esc.borrow(),
-                &texts_esc.borrow(),
-                &shown_esc,
-                "",
-            );
-            summary_esc.set_text(&format!("{} shown", n));
-        }
-    });
-    // Ctrl+K focuses the global search
-    let kc = gtk4::EventControllerKey::new();
-    let search_k = search.clone();
-    kc.connect_key_pressed(move |_, key, _, mods| {
-        if key == gtk4::gdk::Key::k && mods.contains(gtk4::gdk::ModifierType::CONTROL_MASK) {
-            search_k.grab_focus();
-            glib::Propagation::Stop
-        } else {
-            glib::Propagation::Proceed
-        }
-    });
-    window.add_controller(kc);
+    set_catalogue_summary(&catalogue.summary, &all.borrow(), load_error.as_deref());
+    wire_row_activation(&catalogue.listbox, &shown, &detail, &queue, &stack);
+    wire_search(
+        &header.search,
+        &catalogue.listbox,
+        &stack,
+        &catalogue.summary,
+        &all,
+        &texts,
+        &shown,
+    );
+    wire_search_shortcut(&header.search, &window);
 
     rebuild_list(
-        &listbox,
+        &catalogue.listbox,
         &all.borrow(),
         &texts.borrow(),
         &shown,
-        &search.text(),
+        &header.search.text(),
     );
     window.present();
 }
