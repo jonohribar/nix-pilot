@@ -310,6 +310,168 @@ pub fn build_candidate(
     }
 }
 
+/// The sanctioned activation action names (argument-free, fixed; see the
+/// nix-pilot NixOS module's nix-pilot-apply helper). Rollback is exercised by
+/// the VM harness and the tx machine today; the in-app rollback control ships
+/// with the Apply-failure UI, so its variant is not yet reachable from prod.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivateAction {
+    Switch,
+    Rollback,
+}
+
+impl ActivateAction {
+    fn subcommand(self) -> &'static str {
+        match self {
+            ActivateAction::Switch => "switch",
+            ActivateAction::Rollback => "rollback",
+        }
+    }
+}
+
+/// Whether switching is possible on this host: the app's NixOS module is
+/// installed (nix-pilot-apply on PATH) AND the operator has explicitly
+/// allowed switching (NIX_PILOT_ALLOW_SWITCH). Everything else keeps Apply
+/// disabled — no implicit switching of a live system, ever.
+pub fn can_activate() -> bool {
+    if std::env::var_os("NIX_PILOT_ALLOW_SWITCH").is_none() {
+        return false;
+    }
+    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .any(|d| d.join("nix-pilot-apply").exists())
+}
+
+/// The helper lookup used by the module's polkit action. Returns the resolved
+/// pkexec path if available (pkexec must exist for the prompt).
+fn which_pkexec() -> Option<PathBuf> {
+    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .map(|d| d.join("pkexec"))
+        .find(|p| p.exists())
+}
+
+/// Result of an activation attempt.
+#[derive(Debug, Clone)]
+pub struct ActivateResult {
+    pub ok: bool,
+    pub note: String,
+    pub log: String,
+}
+
+/// Run one sanctioned activation action via polkit (nix-pilot-apply).
+/// The subcommand is fixed; the helper itself pins the config path, so no
+/// argument can ever point at anything but the app-owned generated config.
+pub fn activate(action: ActivateAction, timeout: Duration) -> ActivateResult {
+    if !can_activate() {
+        return ActivateResult {
+            ok: false,
+            note:
+                "activation is not enabled on this system (the nix-pilot module is not installed)"
+                    .into(),
+            log: String::new(),
+        };
+    }
+    let Some(pkexec) = which_pkexec() else {
+        return ActivateResult {
+            ok: false,
+            note: "pkexec is not available here".into(),
+            log: String::new(),
+        };
+    };
+
+    let mut parts = vec![
+        pkexec.to_string_lossy().into_owned(),
+        "nix-pilot-apply".into(),
+    ];
+    parts.push(action.subcommand().to_string());
+    if let Some(t) = which_timeout() {
+        parts.insert(0, format!("{}", timeout.as_secs()));
+        parts.insert(0, t);
+    }
+    let timeout = timeout.max(Duration::from_secs(5));
+
+    let mut cmd = std::process::Command::new(&parts[0]);
+    cmd.args(&parts[1..])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            return ActivateResult {
+                ok: false,
+                note: "could not start the activation helper".into(),
+                log: e.to_string(),
+            }
+        }
+    };
+    let out_reader = child.stdout.take().map(|mut o| {
+        std::thread::spawn(move || {
+            let mut s = String::new();
+            let _ = std::io::Read::read_to_string(&mut o, &mut s);
+            s
+        })
+    });
+    let err_reader = child.stderr.take().map(|mut e| {
+        std::thread::spawn(move || {
+            let mut s = String::new();
+            let _ = std::io::Read::read_to_string(&mut e, &mut s);
+            s
+        })
+    });
+    let deadline = std::time::Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(st)) => break st,
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = out_reader.map(|t| t.join());
+                    let _ = err_reader.map(|t| t.join());
+                    return ActivateResult {
+                        ok: false,
+                        note: "activation took too long".into(),
+                        log: "the activation helper did not finish in time".into(),
+                    };
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => {
+                return ActivateResult {
+                    ok: false,
+                    note: "activation helper failed to run".into(),
+                    log: e.to_string(),
+                }
+            }
+        }
+    };
+    let stdout = out_reader
+        .map(|t| t.join().unwrap_or_default())
+        .unwrap_or_default();
+    let stderr = err_reader
+        .map(|t| t.join().unwrap_or_default())
+        .unwrap_or_default();
+    let out = format!("{stdout}\n{stderr}");
+    let tail: String = out
+        .lines()
+        .rev()
+        .take(12)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n");
+    ActivateResult {
+        ok: status.success(),
+        note: if status.success() {
+            "The change was applied".into()
+        } else {
+            "Applying failed — the system was not changed".into()
+        },
+        log: tail,
+    }
+}
+
 fn which_timeout() -> Option<String> {
     std::env::var_os("PATH").and_then(|p| {
         std::env::split_paths(&p)
@@ -332,6 +494,14 @@ mod tests {
         assert_eq!(parse_state_version("26.05"), Some("26.05".into()));
         assert_eq!(parse_state_version(""), None);
         assert_eq!(parse_state_version("not-a-version"), None);
+    }
+
+    #[test]
+    fn activate_actions_map_to_fixed_helper_subcommands() {
+        // the polkit helper only ever runs a fixed subcommand; there is no
+        // free-form argument to inject
+        assert_eq!(ActivateAction::Switch.subcommand(), "switch");
+        assert_eq!(ActivateAction::Rollback.subcommand(), "rollback");
     }
 
     #[test]
