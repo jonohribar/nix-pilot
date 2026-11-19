@@ -2,7 +2,9 @@
 //! NixOS configuration is generated output (architecture / Product model,
 //! decision D9). This module is the persisted source of truth plus a pure
 //! config renderer. Nothing here touches Nix; the build/apply backend that
-//! consumes the rendered module stays gated (7wo.2) until it lands.
+//! consumes the rendered module stays gated (7wo.2) until it lands. Per-user
+//! scope targets `users.users.<name>.packages` (D9) or, when the caller picks
+//! the home-manager backend (D22), `home-manager.users.<name>.home.packages`.
 //!
 //! Format: JSON, one file per running account (the account's per-user scope
 //! plus the machine's system scope). It is app-rewritten state — users never
@@ -30,6 +32,16 @@ pub const CURRENT_SCHEMA: u8 = 1;
 
 /// The NixOS account that owns a per-user package selection.
 pub type Account = String;
+
+/// Which per-user package mechanism the render targets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UserBackend {
+    /// NixOS-native: `users.users.<name>.packages` (default, decision D9).
+    NixUsers,
+    /// home-manager: `home-manager.users.<name>.home.packages` — used when
+    /// the system is home-manager managed (decision D22).
+    HomeManager,
+}
 
 /// A set of package attributes (nixpkgs attribute names, e.g. `firefox`).
 /// Held as a sorted, deduped Vec for clean JSON and stable diffs.
@@ -105,12 +117,13 @@ impl DesiredDoc {
         }
     }
 
-    /// Render the full generated NixOS module (system scope + every account).
-    /// This is what the backend would feed `nixos-rebuild`; byte-deterministic.
-    /// Note: per-user entries assume the account already exists (defined by
-    /// the preserved/system config) — the app adds *packages* for existing
-    /// accounts, it never creates accounts.
-    pub fn render_module(&self) -> String {
+    /// Render the full generated NixOS module (system scope + every account's
+    /// per-user packages through the chosen backend). This is what the backend
+    /// would feed `nixos-rebuild`; byte-deterministic. Note: per-user entries
+    /// assume the account already exists (defined by the preserved/system
+    /// config) — the app adds *packages* for existing accounts, it never
+    /// creates accounts.
+    pub fn render_module(&self, backend: UserBackend) -> String {
         let mut body = String::new();
         if !self.system.packages.is_empty() {
             body.push_str(&format!(
@@ -122,11 +135,18 @@ impl DesiredDoc {
             if pkgs.packages.is_empty() {
                 continue;
             }
-            body.push_str(&format!(
-                "  users.users.{} = {{\n    packages = with pkgs; [ {} ];\n  }};\n",
-                account,
-                pkgs.packages.join(" ")
-            ));
+            match backend {
+                UserBackend::NixUsers => body.push_str(&format!(
+                    "  users.users.{} = {{\n    packages = with pkgs; [ {} ];\n  }};\n",
+                    account,
+                    pkgs.packages.join(" ")
+                )),
+                UserBackend::HomeManager => body.push_str(&format!(
+                    "  home-manager.users.{}.home.packages = with pkgs; [ {} ];\n",
+                    account,
+                    pkgs.packages.join(" ")
+                )),
+            }
         }
         if body.is_empty() {
             body.push_str("  # no packages selected\n");
@@ -257,15 +277,24 @@ mod tests {
     fn render_system_and_each_account() {
         let d = doc_with(&["gimp"], &[("alice", &["firefox"]), ("bob", &["vscode"])]);
         assert_eq!(
-            d.render_module(),
+            d.render_module(UserBackend::NixUsers),
             "{ config, pkgs, ... }:\n\n{\n  environment.systemPackages = with pkgs; [ gimp ];\n  users.users.alice = {\n    packages = with pkgs; [ firefox ];\n  };\n  users.users.bob = {\n    packages = with pkgs; [ vscode ];\n  };\n}\n"
+        );
+    }
+
+    #[test]
+    fn render_home_manager_backend_emits_home_packages() {
+        let d = doc_with(&["gimp"], &[("alice", &["firefox"])]);
+        assert_eq!(
+            d.render_module(UserBackend::HomeManager),
+            "{ config, pkgs, ... }:\n\n{\n  environment.systemPackages = with pkgs; [ gimp ];\n  home-manager.users.alice.home.packages = with pkgs; [ firefox ];\n}\n"
         );
     }
 
     #[test]
     fn render_empty_is_comment() {
         assert_eq!(
-            DesiredDoc::current().render_module(),
+            DesiredDoc::current().render_module(UserBackend::NixUsers),
             "{ config, pkgs, ... }:\n\n{\n  # no packages selected\n}\n"
         );
     }
@@ -345,7 +374,7 @@ mod tests {
     #[ignore = "requires nix-instantiate on PATH"]
     fn rendered_module_parses_with_nix() {
         let d = doc_with(&["gimp"], &[("tester", &["firefox", "vscode"])]);
-        let nix = d.render_module();
+        let nix = d.render_module(UserBackend::NixUsers);
         let mut path = std::env::temp_dir();
         path.push(format!("nix-pilot-desired-{}.nix", std::process::id()));
         std::fs::write(&path, &nix).unwrap();

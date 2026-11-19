@@ -202,7 +202,7 @@ impl UpdatesPage {
             let mut desired = DesiredDoc::current();
             desired.set_system(sys);
             desired.set_user(&account, user);
-            config_view.set_text(&desired.render_module());
+            config_view.set_text(&desired.render_module(apply::detect_user_backend()));
             let changes: Vec<updates::PendingChange> = queue
                 .borrow()
                 .items()

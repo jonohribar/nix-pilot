@@ -47,6 +47,17 @@ Recovery runs before any application starts, so it cannot be in-app:
 - The recovery how-to ships before the failure: a recovery card in Settings explains what to do when the computer will not start, which boot option to pick, and when to ask for help.
 - Once the earlier state boots, the app says plainly that the system was restored, and offers to retry the change or ask for help.
 
+## Per-user installs on a home-manager system
+
+Per-user installs on a system whose config enables the home-manager module
+(decision D22) roll back as **home-manager generations**, not system
+generations: lighter, activated on the user session, and with no boot-menu
+stakes — a bad per-user change at worst breaks the user environment, never the
+system boot. Everything above (one transaction, build failure changes nothing,
+apply failure returns to the previous state) still applies within that lighter
+scope. System-wide changes always ride the system generation with boot-menu
+recovery.
+
 ## Rolling back
 
 - Rollback is "go back to yesterday's system", not a technical operation. No Nix vocabulary.

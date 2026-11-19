@@ -103,6 +103,24 @@ pub fn discover_nixos_sources() -> (Option<PathBuf>, Option<PathBuf>) {
 /// desired-state module; `state_version` is emitted only when there is no
 /// pre-existing config to own it. Returns the path to the outer
 /// configuration.nix.
+/// Which per-user backend this machine's installs target (decision D22).
+///
+/// Explicit, defaulting to NixOS-native `users.users` (D9). home-manager
+/// mode is valid ONLY when the config tree being built enables the
+/// home-manager NixOS module (e.g. the app module added inside a flake that
+/// already imports home-manager) — it must never be auto-detected from the
+/// OS user's state, because a user can use home-manager standalone while the
+/// /etc/nixos config we build against does not enable its module (that makes
+/// `home-manager.users.*` an undefined option and the build fail). The
+/// override is an env var for now (same pattern as $NIX_BIN); the settings
+/// surface owns this choice later.
+pub fn detect_user_backend() -> crate::desired_state::UserBackend {
+    match std::env::var("NIX_PILOT_USER_BACKEND").as_deref() {
+        Ok("home-manager") | Ok("hm") => crate::desired_state::UserBackend::HomeManager,
+        _ => crate::desired_state::UserBackend::NixUsers,
+    }
+}
+
 pub fn write_generation(
     dir: &Path,
     doc: &DesiredDoc,
@@ -111,7 +129,10 @@ pub fn write_generation(
     hardware_config: Option<&Path>,
 ) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
-    std::fs::write(dir.join(DESIRED_MODULE_NAME), doc.render_module())?;
+    std::fs::write(
+        dir.join(DESIRED_MODULE_NAME),
+        doc.render_module(detect_user_backend()),
+    )?;
 
     let mut imports = Vec::new();
     if let Some(user_cfg) = preserved_config {
@@ -343,10 +364,10 @@ mod tests {
         assert!(!outer_text.contains("user-configuration.nix"));
         assert!(outer_text.contains("./generated-desired.nix"));
         // the desired module is written verbatim (byte for byte identical to
-        // the renderer, so the build matches what the UI shows)
+        // the renderer with the detected backend, so the build matches UI)
         assert_eq!(
             std::fs::read_to_string(gen.join("generated-desired.nix")).unwrap(),
-            doc.render_module()
+            doc.render_module(detect_user_backend())
         );
         // nothing is copied into the generation dir
         assert!(!gen.join("user-configuration.nix").exists());
