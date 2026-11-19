@@ -1,11 +1,13 @@
 # nix-pilot NixOS module — the app's system integration (7wo.3 packaging).
 #
-# Installs the sanctioned apply helper and a polkit action so the user can
-# write the app-owned configuration area and switch/rollback generations,
-# all through one controlled, argument-free interface. Nothing here parses or
-# edits the user's configuration: the generated config area is the app's own
-# and the switch always targets exactly /etc/nix-pilot/generated/configuration.nix
-# (decision D21 pointer import; apply-activation.md).
+# Installs the sanctioned apply helper and a polkit action so a *future* app
+# codepath can have the user write the app-owned configuration area and
+# switch/rollback generations through one controlled, argument-free
+# interface. Nothing here parses or edits the user's configuration; the
+# generated config area is the app's own and the switch always targets
+# exactly /etc/nix-pilot/generated/configuration.nix (decision D21 pointer
+# import; apply-activation.md). Per decision D20 no product code calls these
+# yet — the helper is the spec+test surface (VM harness) for activation.
 #
 # Enable with: services.nix-pilot.enable = true;  (in the user's flake/modules)
 { config, lib, pkgs, ... }:

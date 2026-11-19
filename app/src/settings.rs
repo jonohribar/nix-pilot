@@ -144,10 +144,18 @@ pub fn render_block(settings: &BTreeMap<String, SettingValue>) -> String {
         };
         match v {
             SettingValue::Str(s) => {
+                // Escape for a Nix double-quoted string: backslash, quote,
+                // and every `$` as the interpolation `${...}` marker. A bare
+                // `$` (or a `$` that opens no `{`) is not dangerous, but
+                // replacing all of them with a literal is always valid, so no
+                // accepted value can ever become Nix code.
+                let esc = s
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('$', r#"${"$"}"#);
                 out.push_str(&format!(
                     "  {} = lib.mkOverride 10 \"{}\";\n",
-                    spec.key,
-                    s.replace('\\', "\\\\").replace('"', "\\\"")
+                    spec.key, esc
                 ));
             }
             SettingValue::Bool(b) => {
@@ -165,6 +173,26 @@ pub fn render_block(settings: &BTreeMap<String, SettingValue>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn render_block_escapes_interpolation() {
+        // `${...}` in an accepted value must never reach the generated Nix as
+        // code: it is re-emitted as a literal-dollar interpolation.
+        let mut m = BTreeMap::new();
+        m.insert(
+            "time.timeZone".into(),
+            SettingValue::Str("evil${builtins.abort \"x\"}z".into()),
+        );
+        let out = render_block(&m);
+        assert!(
+            out.contains(r#"${"$"}{builtins"#),
+            "dollar must be quoted: {out}"
+        );
+        assert!(
+            !out.contains("${builtins.abort"),
+            "interpolation must not survive: {out}"
+        );
+    }
 
     fn str_map() -> BTreeMap<String, SettingValue> {
         let mut m = BTreeMap::new();

@@ -76,6 +76,26 @@ build; the review text states what will change before anything is applied
   VM harness that cannot affect the host (the same "explicit scratch dir"
   rule that gates every apply test today). Never a switch on a live system.
 
+## Review requirements (2026-11-19 independent review)
+
+Fixes already applied in code: the env-gated activation codepath was removed
+from the product binary (the shipped surface stays build-only per D20; the
+Apply button is present but disabled), and settings values are escaped for
+Nix interpolation so an accepted value can never become Nix code.
+
+Open contract requirements this spec must satisfy before any product
+activation code lands:
+
+- **Publish-before-switch**: the candidate that gets applied must be
+  byte-identical to the candidate that was prepared. The helper must receive
+  the generated configuration in-band (not a path the app happens to have
+  left somewhere), write it atomically into the app-owned area, and only then
+  switch — one transaction, no stale-config window.
+- **Failure restores the system**: on activation failure the transaction must
+  restore the previous generation (the failure-and-recovery contract), not
+  merely report. The UI never asserts "the system was not changed" without
+  verification.
+
 ## Open questions
 
 - Elevation mechanism for writing the configuration area and running `switch`

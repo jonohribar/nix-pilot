@@ -1,7 +1,8 @@
 //! Updates page — review of the queued changes: Prepare dry-runs each item and
-//! builds the candidate generation (store-only); Apply activates it through
-//! the app's nix-pilot module helper, and only when that module is installed
-//! AND switching is explicitly allowed (never implicit). See updates.rs.
+//! builds the candidate generation (store-only). Activation is NOT part of
+//! this build (decision D20): the Apply button is present in the wireframe
+//! but stays disabled — activation/rollback are spec + test only
+//! (apply-activation.md, the VM harness). See updates.rs.
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -21,7 +22,6 @@ pub struct UpdatesPage {
     results_list: gtk4::ListBox,
     config_view: gtk4::Label,
     build_btn: gtk4::Button,
-    apply_btn: gtk4::Button,
 }
 
 impl UpdatesPage {
@@ -75,8 +75,8 @@ impl UpdatesPage {
         apply_btn.add_css_class("suggested-action");
         apply_btn.set_sensitive(false);
         apply_btn.set_tooltip_text(Some(
-            "Apply activates the built candidate — it unlocks once the \
-             nix-pilot system module is installed and switching is enabled.",
+            "Applying is not part of this build (decision D20) — activation is \
+             spec and test only; see apply-activation.md.",
         ));
         let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
         buttons.set_halign(gtk4::Align::End);
@@ -110,7 +110,6 @@ impl UpdatesPage {
             results_list,
             config_view,
             build_btn,
-            apply_btn,
         }
     }
 
@@ -175,7 +174,6 @@ impl UpdatesPage {
         let results_list = self.results_list.clone();
         let config_view = self.config_view.clone();
         let build_btn = self.build_btn.clone();
-        let apply_btn = self.apply_btn.clone();
         build_btn.connect_clicked(move |b| {
             b.set_sensitive(false);
             // the transaction advances: Ready --Prepare--> Explaining
@@ -193,7 +191,6 @@ impl UpdatesPage {
             let results_label = results_label.clone();
             let results_list = results_list.clone();
             let config_view = config_view.clone();
-            let apply_btn = apply_btn.clone();
             let b = b.clone();
             // render the config the desired-state model would generate (the
             // persisted doc: system + per-user packages + any app settings)
@@ -308,97 +305,12 @@ impl UpdatesPage {
                                 "Some changes cannot be built for this system".into()
                             }
                         }));
-                        // Apply unlocks only for a real, green candidate on a
-                        // host where switching is enabled (module + flag)
-                        if all_ok && apply::can_activate() {
-                            apply_btn.set_sensitive(true);
-                            apply_btn.set_tooltip_text(None);
-                        } else {
-                            apply_btn.set_sensitive(false);
-                        }
                         b.set_sensitive(true);
                         glib::ControlFlow::Break
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
                     Err(_) => {
                         b.set_sensitive(true);
-                        glib::ControlFlow::Break
-                    }
-                }
-            });
-        });
-
-        // Apply: activate the built candidate through the sanctioned helper.
-        // BuildCheck --BuildOk--> Applying; ApplyOk -> Done, ApplyFailed ->
-        // ApplyFailed (the rollback edges stay machine-tested until the
-        // rollback control ships). Everything re-checks can_activate.
-        let apply_btn = self.apply_btn.clone();
-        let apply_step = self.step.clone();
-        let apply_step_label = self.step_label.clone();
-        let apply_results_label = self.results_label.clone();
-        let apply_results_list = self.results_list.clone();
-        apply_btn.connect_clicked(move |btn| {
-            if !apply::can_activate() {
-                return;
-            }
-            btn.set_sensitive(false);
-            let step = apply_step.clone();
-            let step_label = apply_step_label.clone();
-            let results_label = apply_results_label.clone();
-            let results_list = apply_results_list.clone();
-            let btn = btn.clone();
-            // BuildCheck --BuildOk--> Applying
-            *step.borrow_mut() =
-                updates::advance(*step.borrow(), TxEvent::BuildOk).unwrap_or(TxStep::Applying);
-            step_label.set_text(step.borrow().label());
-            let (tx, rx) = std::sync::mpsc::channel::<apply::ActivateResult>();
-            std::thread::spawn(move || {
-                let r = apply::activate(
-                    apply::ActivateAction::Switch,
-                    std::time::Duration::from_secs(600),
-                );
-                let _ = tx.send(r);
-            });
-            glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-                match rx.try_recv() {
-                    Ok(r) => {
-                        let (ev, fallback) = if r.ok {
-                            (TxEvent::ApplyOk, TxStep::Done)
-                        } else {
-                            (TxEvent::ApplyFailed, TxStep::ApplyFailed)
-                        };
-                        let target = updates::advance(*step.borrow(), ev).unwrap_or(fallback);
-                        *step.borrow_mut() = target;
-                        step_label.set_text(target.label());
-                        results_label.set_text(&r.note);
-                        for line in r
-                            .log
-                            .lines()
-                            .rev()
-                            .take(8)
-                            .collect::<Vec<_>>()
-                            .into_iter()
-                            .rev()
-                        {
-                            if line.trim().is_empty() {
-                                continue;
-                            }
-                            let l = gtk4::Label::new(Some(line));
-                            l.set_xalign(0.0);
-                            l.add_css_class("monospace");
-                            l.add_css_class("dim-label");
-                            let row = gtk4::ListBoxRow::new();
-                            row.set_selectable(false);
-                            row.set_activatable(false);
-                            row.set_child(Some(&l));
-                            results_list.append(&row);
-                        }
-                        btn.set_sensitive(true);
-                        glib::ControlFlow::Break
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(_) => {
-                        btn.set_sensitive(true);
                         glib::ControlFlow::Break
                     }
                 }
