@@ -184,12 +184,23 @@ impl DetailUi {
         } else {
             "Free licence"
         };
+        // R07 surface: an entry with no Linux availability in the index is
+        // first-class "not available on this system", not a blank field
         let platforms = if e.linux_ok {
             "Linux (x86_64 / aarch64)"
         } else {
-            "Unknown"
+            "Not available on Linux"
         };
         let main = e.main_program.as_deref().unwrap_or("—");
+        if !e.linux_ok {
+            let l = gtk4::Label::new(Some(
+                "This entry is not available on your system — it cannot be installed.",
+            ));
+            l.set_xalign(0.0);
+            l.set_wrap(true);
+            l.add_css_class("error");
+            self.meta.append(&l);
+        }
         self.meta.append(&meta_row("Licence", licence));
         self.meta.append(&meta_row("Evidence", e.tier.label()));
         self.meta.append(&meta_row("Available for", platforms));

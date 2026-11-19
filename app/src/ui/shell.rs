@@ -365,14 +365,24 @@ pub fn run(
     let texts_live = texts.clone();
     let shown_live = shown.clone();
     search.connect_search_changed(move |s| {
+        let q = s.text();
         let n = rebuild_list(
             &listbox_live,
             &all_live.borrow(),
             &texts_live.borrow(),
             &shown_live,
-            &s.text(),
+            &q,
         );
-        summary_live.set_text(&format!("{} shown", n));
+        // empty-state: a non-empty query with nothing found gets an honest
+        // line instead of a bare "0 shown" (the browse case stays a count)
+        if n == 0 && !q.trim().is_empty() {
+            summary_live.set_text(&format!(
+                "No results for \"{}\" — try a different name",
+                q.trim()
+            ));
+        } else {
+            summary_live.set_text(&format!("{n} shown"));
+        }
         stack_live.set_visible_child_name("list");
     });
     // Esc clears the query and shows the browse list again

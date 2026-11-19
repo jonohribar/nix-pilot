@@ -36,6 +36,22 @@ Each setting workflow is versioned record with the following fields:
 
 The first-release surface covers the areas in REQ-5: networking, display, sound, printers, users, power and remote access. Each area is a set of setting workflows meeting the boundary above; anything in those areas that fails the boundary (for example display appearance, which is desktop chrome) is exposed as a pointer, not a workflow.
 
+### First-release workflows
+
+Shipped in `app/src/settings.rs` (single-value overrides, verified against the pinned nixpkgs; each renders as an app-wins `lib.mkOverride 10` line and is stored in `DesiredDoc.settings`):
+
+| Setting | NixOS option | Type | Plain label |
+|---|---|---|---|
+| Device name | `networking.hostName` | string | device name on the network |
+| Network connections | `networking.networkmanager.enable` | boolean | manage Wi-Fi/wired via NetworkManager |
+| Time zone | `time.timeZone` | string | the time zone used for times and dates |
+| Language and region | `i18n.defaultLocale` | string | language for messages, dates and numbers |
+| Printing | `services.printing.enable` | boolean | start the printing service |
+| Power management | `powerManagement.enable` | boolean | suspend and power-saving features |
+| Remote access (SSH) | `services.openssh.enable` | boolean | allow connecting to this computer remotely |
+
+Pending first-release candidates that need a per-workflow design (structural / safety-sensitive, not a plain value): user accounts (`users.users.<name>`, add/edit/remove workflow), printer queues (runtime CUPS state, a pointer not an option), idle/sleep timeouts (live in the desktop, no cross-desktop option).
+
 The surface is unbounded by nature; carrying and reviewing it is risk [R04](../risks.md#r04) and scope risk [R09](../risks.md#r09). The boundary above is what keeps it finite: only Nix-owned, cross-desktop, migrate-able settings are authored.
 
 ## Relationship to the product model and search
