@@ -1,2 +1,6 @@
 /target
 /wireframes/build
+
+# nix build/vm artifacts
+/result
+*.qcow2
