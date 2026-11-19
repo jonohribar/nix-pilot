@@ -33,11 +33,13 @@ The app owns a root-owned directory, `nix-pilot`'s generated configuration:
 
 ```
 /etc/nix-pilot/generated/
-  configuration.nix          # outer: imports + stateVersion + desired module
-  hardware-configuration.nix  # copy, refreshed by the user's nixos-generate-config
-  user-configuration.nix      # preserved pre-existing configuration (migration)
-  generated-desired.nix       # rendered desired-state module (verbatim)
+  configuration.nix          # outer: imports the live config + desired module (D21)
+  generated-desired.nix      # rendered desired-state module (verbatim)
 ```
+
+(D21: the live `/etc/nixos/configuration.nix` is imported by absolute pointer,
+never copied, and already imports hardware — so the app does not keep a
+`user-configuration.nix` or a hardware copy.)
 
 - Writes to this area require elevation. The elevation mechanism is an open
   decision (see Open questions); `nixos-rebuild build`/`switch` already need
@@ -96,13 +98,37 @@ activation code lands:
   merely report. The UI never asserts "the system was not changed" without
   verification.
 
-## Open questions
+## Decisions (2026-11-19)
 
-- Elevation mechanism for writing the configuration area and running `switch`
-  (polkit `pkexec` vs `sudo` vs a NixOS-deployed setuid helper); affects only
-  the wrapper, not the config shape.
-- Whether the outer config keeps `system.stateVersion` duplicated while the
-  preserved config also sets it (currently harmless — equal values merge).
-- Whether `user-configuration.nix` migration should diff-audit the preserved
-  file so the app can surface "this setting no longer applies" (D14/R04
-  precedent) when the user's own config references removed options.
+- **Elevation (D24): polkit `pkexec`.** Activation runs
+  `pkexec nix-pilot-apply <subcommand>`; the desktop auth dialog is the gate,
+  the rule authorizes only `org.nix-pilot.apply` for wheel, the helper is
+  argument-free and pins the config path.
+- **Failure recovery (D25): sanctioned go-back.** After a failed apply the
+  page states honestly that the change did not complete and offers "Go back
+  to the previous system" (`pkexec nix-pilot-apply rollback`) behind a
+  one-dialog confirmation (REQ-3); the boot-menu card stays the boot-level
+  fallback. No silent auto-rollback.
+- **stateVersion is resolved by D21**: the generated outer emits
+  `system.stateVersion` only in the fresh/no-user-config case; it is never
+  duplicated.
+
+## Publish-before-switch (D26, decided)
+
+The applied candidate must be byte-identical to the prepared one.
+**In-band stdin handoff:** Apply re-renders the generated configuration from
+the persisted desired-state doc and feeds it to `pkexec nix-pilot-apply
+switch` via stdin; the helper writes it atomically (temp + rename) into the
+area and only then switches — one transaction, no stale-config window. The
+renderer must be location-independent (byte-identical in a scratch dir and in
+the area), enforced by a unit test. Rejected: write-then-hash-verify
+(check-then-switch window, elevation on every prepare) and single-source-area
+(elevation before any dry-run).
+
+## Deferred
+
+- Diff-auditing the user's config ("your config references a removed option"):
+  **symbol-based, via evaluation** (option eval errors + definition
+  provenance from the module system), read-only, as a diagnostic — never
+  text-parsing arbitrary Nix. Shares machinery with 9f3.8's "current value"
+  read-out. Low priority (P3).
