@@ -1,54 +1,77 @@
 # Package Version Selection
 
-Design draft — not yet decided. An idea raised 2026-11-19: when installing an
-app, let a non-technical user choose between the stable, the bleeding-edge
-(unstable), or a specific version of that package.
+Design draft — not yet decided. Idea raised 2026-11-19: let a non-technical
+user choose the stable, the bleeding-edge (unstable), or a specific version of
+an app at install time. Reviewed 2026-11-19 for usability, validity and
+feasibility; this version reflects that review, which found the idea mostly
+good but the per-app "unstable / custom version" shapes in tension with the
+decided architecture.
 
-## The request, in the user's words
+## The underlying want
 
-- Stable is the default, with the current version highlighted.
-- A dropdown offers "unstable — bleeding edge" as the cutoff, plus all other
-  available versions.
-- Or a single custom option that reveals a text field; the options filter as
-  the user types the version number.
+A user installing an app can legitimately want a *newer* version than the one
+their system ships (the current one is buggy, a fix/feature just landed) or,
+much rarer, an *older* one (a regression). The current-version display is
+real: the catalogue index already carries `version` per package, so showing
+"version X (current)" is trivial and cheap.
 
-## What nixpkgs actually offers (feasibility ground truth)
+## Reality of nixpkgs (validity)
 
-- nixpkgs ships exactly **one** version of most packages per snapshot. There
-  is no per-package version matrix to pick from; arbitrary "version numbers"
-  mostly do not exist as installable choices.
-- The real levers are **nixpkgs channels/revisions**: a *stable* channel
-  (e.g. 26.05) and the *unstable* branch, plus the ability to pin a specific
-  nixpkgs revision (which resolves every app to the version that revision
-  ships).
-- "Bleeding edge for one app but stable for everything else" is therefore not
-  expressible by per-app version strings; it is a whole-catalogue/channel
-  question re-scoped to that app (an override), which carries maintenance and
-  eval cost.
+- nixpkgs ships **one** version of most packages per snapshot. There is no
+  per-package version matrix to pick from; a free-form "1.2.3" mostly does not
+  exist as an installable choice. A custom-version text field is not
+  implementable as described and should not be promised.
+- The real versions come from nixpkgs **channels/revisions**: a stable channel
+  (e.g. 26.05) and the unstable branch. "Newer" is a channel question, not an
+  app query.
 
-So the honest surface is: **stable vs unstable** as the primary choice, with
-"custom" reframed as a **nixpkgs revision/date pin** rather than a per-package
-version string.
+## The central tension (feasibility)
 
-## Proposed v1
+Per-app "unstable" requires the app to pin its **own** unstable nixpkgs for
+that one app. That collides with decision D23: in the flake integration the
+app's module "follows the user's nixpkgs input" and deliberately never
+imposes its own pin over the user's eval (that was the earlier finding — the
+only way the app fights a user's config is imposing its own nixpkgs pins).
+So per-app bleeding-edge, in its naive form, is a decision reversal, not a
+small feature.
 
-- At install time the surface shows Stable (default, current version
-  highlighted) and a "bleeding edge" option marked clearly as unstable.
-  Selecting unstable resolves the app against the unstable catalogue/channel.
-- Custom is deferred: no text field for a made-up version number. If it
-  returns, it is a nixpkgs-revision pin with filtered suggestions sourced from
-  real available revisions, never a free-form "1.2.3" that doesn't exist.
+It also has a hard infra cost: an unstable choice needs a second catalogue
+index built from nixpkgs-unstable plus its own distribution (binary cache) —
+the catalogue-service body (`7wo.4`).
 
-## Dependencies and gating
+## Options
 
-- An unstable choice needs a second catalogue index built from nixpkgs-unstable
-  and its own distribution (binary cache) — tightly coupled to the catalogue
-  service body (`7wo.4`) and the binary-cache evaluation.
-- Until that exists, the dropdown cannot be offered honestly.
+- **A. Whole-system channel switch (recommended).** One setting, plain words:
+  "System packages: stay on the stable channel / switch to the newest
+  available." Lives in settings; a whole-system switch keeps one nixpkgs, one
+  eval, no mixed closures, matches the "one nixpkgs, one system" model, and
+  needs no per-app pin. Costs: it is not per-app.
+- **B. Per-app unstable override.** The app pins its own unstable nixpkgs for
+  a single named app (via the D23 module). Gives the requested per-app UX but
+  reverses the no-imposed-pin principle and adds a channel + catalogue +
+  mixed-closure surface — the most complex option.
+- **C. Pointer only.** Skip the mechanism; surface a plain-language pointer
+  ("to get the newest version, your system must run the newer channel") that
+  links to option A.
 
-## Open questions
+## Proposed ideal UX (whichever option)
 
-- Whether per-app "one unstable app on a stable system" is in scope at all
-  (an override) or out of scope for v1 (whole-catalogue channel switch only).
-- Where the choice is stored/surfaced in the desired-state model (a per-app
-  `channel` field) and how rollback treats an unstable-app install.
+- Always an opt-in, advanced/overflow surface — never a dropdown on every
+  install. The default pass ("install this") is frictionless.
+- Plain words, never Nix vocabulary (REQ-6): "Version shown in the store"
+  instead of "stable", "newest available test build" instead of "unstable",
+  "choose a specific release" instead of "pin a revision".
+- Current version is always highlighted; a newer-available hint (when the
+  index knows a newer version exists) is honest and actionable.
+
+## Gating
+
+- Options A and B both need catalogue-channel infra (`7wo.4`) to know whether
+  a newer version exists; B also needs the D23 principle revisited. Until
+  that decision is made, nothing is shipped.
+
+## Decision request
+
+Adopt option A, or revisit D23 to allow per-app unstable (option B)? The
+recommendation is **A**: whole-system channel switch, per-app override
+out of scope for v1. Tracked as beads `9f3.9`.
