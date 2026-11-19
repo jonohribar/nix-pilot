@@ -318,10 +318,12 @@ fn wire_desired_state_persistence(
     desired: &Rc<RefCell<DesiredDoc>>,
     account: &str,
     persistence_enabled: bool,
+    notice: &gtk4::Label,
 ) -> Rc<dyn Fn()> {
     let queue = queue.clone();
     let desired = desired.clone();
     let account = account.to_string();
+    let notice = notice.clone();
     let path = crate::desired_state::default_desired_path();
 
     Rc::new(move || {
@@ -344,6 +346,10 @@ fn wire_desired_state_persistence(
         }
         if let Err(error) = crate::desired_state::save(&desired.borrow(), &path) {
             eprintln!("nix-pilot: could not save desired state: {error}");
+            notice.set_text(&format!(
+                "Your changes could not be saved and will be lost on restart ({error})."
+            ));
+            notice.set_visible(true);
         }
     })
 }
@@ -466,8 +472,13 @@ pub fn run(
     updates.wire(&queue, &desired, &nix);
     let settings = Rc::new(settings_page::SettingsPage::new());
 
-    let persist_desired_state =
-        wire_desired_state_persistence(&queue, &desired, &account, persistence_enabled);
+    let persist_desired_state = wire_desired_state_persistence(
+        &queue,
+        &desired,
+        &account,
+        persistence_enabled,
+        &catalogue.state_notice,
+    );
     persist_desired_state();
     settings.wire(&desired, persist_desired_state.clone());
 
