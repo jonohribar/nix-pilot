@@ -63,6 +63,37 @@ fn prepare_changes(
     PrepareResult { report, candidate }
 }
 
+/// Outcome classification for a prepare run (pure, unit-testable).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrepareVerdict {
+    /// No changes queued — nothing to do.
+    NotQueued,
+    /// One or more items failed verification or the candidate build failed.
+    Blocked,
+    /// Everything is green and a candidate was built.
+    Ready,
+    /// Green report but no candidate: no NixOS system config to build for.
+    NoSystemConfig,
+}
+
+fn classify_prepare(
+    report_ok: bool,
+    items_empty: bool,
+    candidate_ok: Option<bool>,
+) -> PrepareVerdict {
+    if items_empty {
+        PrepareVerdict::NotQueued
+    } else if !report_ok {
+        PrepareVerdict::Blocked
+    } else {
+        match candidate_ok {
+            Some(true) => PrepareVerdict::Ready,
+            Some(false) => PrepareVerdict::Blocked,
+            None => PrepareVerdict::NoSystemConfig,
+        }
+    }
+}
+
 /// Update the page after the worker finishes; this function runs on GTK's thread.
 fn render_prepare_result(
     result: PrepareResult,
@@ -94,21 +125,30 @@ fn render_prepare_result(
         candidate.note.clone()
     });
 
-    let (event, fallback) = if all_ok {
-        (TxEvent::Prepared, TxStep::BuildCheck)
-    } else {
-        (TxEvent::BuildFailed, TxStep::BuildFailed)
+    // A green report with no candidate means there was no NixOS system config
+    // to build for — say so instead of claiming everything is ready.
+    let classification = classify_prepare(
+        result.report.all_ok(),
+        result.report.items.is_empty(),
+        result.candidate.as_ref().map(|c| c.ok),
+    );
+    let (event, fallback) = match classification {
+        PrepareVerdict::Ready => (TxEvent::Prepared, TxStep::BuildCheck),
+        _ => (TxEvent::BuildFailed, TxStep::BuildFailed),
     };
     let target = updates::advance(*step.borrow(), event).unwrap_or(fallback);
     *step.borrow_mut() = target;
     step_label.set_text(target.label());
     results_label.set_text(&verdict.unwrap_or_else(|| {
-        if result.report.items.is_empty() {
-            "Nothing queued to prepare".into()
-        } else if all_ok {
-            "All changes prepare cleanly".into()
-        } else {
-            "Some changes cannot be built for this system".into()
+        match classification {
+            PrepareVerdict::NotQueued => "Nothing queued to prepare".into(),
+            PrepareVerdict::NoSystemConfig => {
+                "No managed NixOS system configuration was found — changes can't be \
+             built on this computer"
+                    .into()
+            }
+            PrepareVerdict::Blocked => "Some changes cannot be built for this system".into(),
+            PrepareVerdict::Ready => "All changes prepare cleanly".into(),
         }
     }));
     build_button.set_sensitive(true);
@@ -689,4 +729,44 @@ fn restore_apply_wiring(
         "Activation requires NIX_PILOT_ALLOW_SWITCH=1 and the nix-pilot-apply helper installed (nixos-module).",
     ));
     build_btn.set_sensitive(true);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::classify_prepare;
+    use super::PrepareVerdict;
+
+    #[test]
+    fn classify_prepare_ready_needs_a_green_candidate() {
+        assert_eq!(
+            classify_prepare(true, false, Some(true)),
+            PrepareVerdict::Ready
+        );
+        assert_eq!(
+            classify_prepare(true, true, Some(true)),
+            PrepareVerdict::NotQueued
+        );
+    }
+
+    #[test]
+    fn classify_prepare_blocked_when_checks_or_build_fail() {
+        assert_eq!(
+            classify_prepare(false, false, Some(true)),
+            PrepareVerdict::Blocked
+        );
+        assert_eq!(
+            classify_prepare(true, false, Some(false)),
+            PrepareVerdict::Blocked
+        );
+    }
+
+    #[test]
+    fn classify_prepare_without_system_config_is_honest() {
+        // green checks but no candidate (non-NixOS / no config) must never read
+        // as "ready" — the page must not claim nothing can be built is fine
+        assert_eq!(
+            classify_prepare(true, false, None),
+            PrepareVerdict::NoSystemConfig
+        );
+    }
 }
