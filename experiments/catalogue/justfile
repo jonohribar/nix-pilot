@@ -36,3 +36,48 @@ measure n:
 # serve the browsable catalogue at localhost:8137
 viewer:
     node serve.js
+
+# known-apps recall against the pinned set (needs records.json)
+recall:
+    node recall.js
+
+# heuristic classifier probe vs the QA sample labels
+classify-probe:
+    node classify.js
+
+# desktop-entry join prototype (needs records.json; fetches package outputs)
+[confirm]
+join:
+    node join.js
+
+# discovery probe: fetch candidate outputs from cache and scan for desktop data
+[confirm]
+discover *pkgs:
+    bash discover.sh {{pkgs}}
+
+# statistical coverage sample (random derivations; network; long at large N)
+[confirm]
+coverage *args:
+    node sample-coverage.js {{args}}
+
+# tier-split sample of app candidates (network; resumable)
+[confirm]
+tier-sample *args:
+    node tier-sample.js {{args}}
+
+# QA sample: generate entries.json
+qa-generate:
+    node qa/generate.js
+
+# QA sample: assemble sample-v1.md from a labeller score file (arg = file path)
+qa-assemble score-file:
+    node qa/assemble.js {{score-file}}
+
+# QA sample: precision/recall from sample-v1.md
+qa-score:
+    node qa/score.js
+
+# nus.5 cli-pool recovery batch (chunked, resumable; network; hours; arg=deadline HH:MM)
+[confirm]
+recover-cli deadline='07:30':
+    bash nus5-batch.sh {{deadline}}
