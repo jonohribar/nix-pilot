@@ -6,6 +6,7 @@ pub mod detail;
 pub mod settings_page;
 pub mod updates_page;
 pub mod widgets;
+pub mod your_system;
 
 mod shell;
 

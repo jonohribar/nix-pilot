@@ -10,7 +10,7 @@ use crate::desired_state::DesiredDoc;
 use crate::model::{Class, IndexEntry, SearchText};
 use crate::search;
 use crate::store::ChangeQueue;
-use crate::ui::{detail, settings_page, updates_page, widgets};
+use crate::ui::{detail, settings_page, updates_page, widgets, your_system};
 
 /// How many rows the list shows at once (empty query is a bounded browse).
 const MAX_ROWS: usize = 60;
@@ -403,6 +403,9 @@ fn build_sidebar(
     stack: &gtk4::Stack,
     updates: &Rc<updates_page::UpdatesPage>,
     queue: &Rc<RefCell<ChangeQueue>>,
+    your_system: &Rc<your_system::YourSystemPage>,
+    desired: &Rc<RefCell<DesiredDoc>>,
+    on_queue_change: &Rc<dyn Fn()>,
 ) -> gtk4::Box {
     let sidebar = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     sidebar.set_width_request(220);
@@ -410,13 +413,28 @@ fn build_sidebar(
     sidebar.append(&nav_button("Settings", "settings", stack, None));
 
     let updates = updates.clone();
-    let queue = queue.clone();
-    let refresh_updates = Rc::new(move || updates.refresh(&queue));
+    let updates_queue = queue.clone();
+    let refresh_updates = Rc::new(move || updates.refresh(&updates_queue));
     sidebar.append(&nav_button(
         "Updates",
         "updates",
         stack,
         Some(refresh_updates),
+    ));
+
+    // Your system: refresh the recipe list each time it is shown so removals
+    // made elsewhere (Store, Settings) show up here.
+    let your_system = your_system.clone();
+    let desired = desired.clone();
+    let your_queue = queue.clone();
+    let on_change = on_queue_change.clone();
+    let refresh_your_system =
+        Rc::new(move || your_system.refresh(&desired, &your_queue, &on_change));
+    sidebar.append(&nav_button(
+        "Your system",
+        "your-system",
+        stack,
+        Some(refresh_your_system),
     ));
     sidebar
 }
@@ -482,6 +500,7 @@ pub fn run(
     ));
     let updates = Rc::new(updates_page::UpdatesPage::new());
     let settings = Rc::new(settings_page::SettingsPage::new(&account));
+    let your_system = Rc::new(your_system::YourSystemPage::new(&account));
 
     let persist_desired_state = wire_desired_state_persistence(
         &queue,
@@ -499,7 +518,7 @@ pub fn run(
     let update_pending = Rc::new(move || {
         update_pending_button(&queue_for_label.borrow(), &pending);
     });
-    let on_queue_change = {
+    let on_queue_change: Rc<dyn Fn()> = {
         let update_pending = update_pending.clone();
         let persist_desired_state = persist_desired_state.clone();
         Rc::new(move || {
@@ -507,6 +526,7 @@ pub fn run(
             persist_desired_state();
         })
     };
+    let on_queue_change_for_sidebar = on_queue_change.clone();
     detail::wire(&detail, &queue, &nix, &window, on_queue_change);
     update_pending();
 
@@ -516,6 +536,7 @@ pub fn run(
     stack.add_named(&detail.page, Some("detail"));
     stack.add_named(&updates.page, Some("updates"));
     stack.add_named(&settings.page, Some("settings"));
+    stack.add_named(&your_system.page, Some("your-system"));
     stack.set_visible_child_name("list");
 
     // Load current config values when Settings page becomes visible (lazy, non-blocking)
@@ -526,7 +547,14 @@ pub fn run(
         }
     });
 
-    let sidebar = build_sidebar(&stack, &updates, &queue);
+    let sidebar = build_sidebar(
+        &stack,
+        &updates,
+        &queue,
+        &your_system,
+        &desired,
+        &on_queue_change_for_sidebar,
+    );
     // the Settings home's "Updates" row navigates to the Updates surface
     let settings_for_updates = settings.clone();
     let stack_for_updates = stack.clone();
