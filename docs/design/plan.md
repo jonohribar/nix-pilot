@@ -98,7 +98,7 @@ All product decisions D1–D15 are resolved; their outcomes are maintained in on
 
 ## Status (current)
 
-- Research + decisions D1–D26 complete; risk register live.
-- Product code: a working Rust + GTK4 desktop app (browse/search a real 27k-package catalogue, install-intent queue, settings page with seven owned workflows). The app builds a candidate generation from a persisted desired-state doc (D20/D21) and ships the activation module + polkit helper (D24–D26); activation itself is spec/test-only until an installed-host verification.
-- Further work tracked in beads: `7wo.3` (installed-host activation), `9f3.8` (settings remainder), `1ah` (robustness tail); catalogue service/distribution is the next big body.
+- Research + decisions D1–D27 complete; risk register live.
+- Product code: a working Rust + GTK4 desktop app (browse/search a real 27k-package catalogue, install-intent queue). Settings follows the familiar desktop-settings structure (home + profile header; System, Network & internet, Accounts, Time & language, Personalisation, Privacy & security, Updates subpages; seven single-value workflows + SSH keys + app-owned accounts). The Updates page drives the transaction machine and now carries an Automatic upkeep card (GC, store optimisation, system auto-upgrade). The app builds a candidate generation from a persisted desired-state doc (D20/D21) and ships the activation module + polkit helper (D24–D26); activation itself is spec/test-only until an installed-host verification.
+- Further work tracked in beads: `7wo.3` (installed-host activation), `7wo.4` (catalogue service), `9f3.9` (per-app version channels); catalogue service/distribution is the next big body.
 - All destinations under `docs/` are written except `validation.md` (planned placeholder; its epic is created when content exists). The destination map above records the beads task that produced each.

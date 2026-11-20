@@ -51,6 +51,18 @@ Shipped in `app/src/settings.rs` (single-value overrides, verified against the p
 | Remote access (SSH) | `services.openssh.enable` | boolean | allow connecting to this computer remotely |
 | Remote access keys (SSH) | `users.users.<name>.openssh.authorizedKeys.keys` | list of strings (per user) | the public keys allowed to log into this computer, one per line (add/remove) |
 
+Automatic upkeep (category `updates`, rendered on the Updates page as the
+set-and-forget "Automatic" card; verified against the pinned nixpkgs):
+
+| Setting | NixOS option | Type | Plain label |
+|---|---|---|---|
+| Automatic cleanup | `nix.gc.automatic` + `nix.gc.options` | boolean + string | regularly remove what nothing needs |
+| Reclaim storage | `nix.optimise.automatic` | boolean | hard-link duplicates to save space |
+| Automatic system updates | `system.autoUpgrade.enable` | boolean | check and switch on a schedule |
+| Update schedule / delay / action / config | `system.autoUpgrade.dates`, `.randomizedDelaySec`, `.operation`, `.flake` | strings | when and how updates run |
+
+Candidates explicitly excluded after verification: `programs.nix-index-database.comma.enable` does not exist in the pinned nixpkgs snapshot; home-manager auto-update options exist only where the home-manager module is enabled (D23 gating, pending detection decision).
+
 Pending first-release candidates that need a per-workflow design (structural / safety-sensitive, not a plain value): user accounts (`users.users.<name>`, add/edit/remove workflow), printer queues (runtime CUPS state, a pointer not an option), idle/sleep timeouts (live in the desktop, no cross-desktop option).
 
 ### User-accounts workflow (design, 2026-11-19)
