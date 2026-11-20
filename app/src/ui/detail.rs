@@ -302,7 +302,10 @@ fn start_availability_check(
                         button.set_label("Check again");
                         let message = match outcome {
                             install::Outcome::UnfreeEvalBlocked => {
-                                "Unfree — your system does not allow it".to_string()
+                                "This app is free to use but carries a licence your system's \
+                                 software settings refuse, so nothing was installed. Its \
+                                 licence is marked unfree."
+                                    .to_string()
                             }
                             install::Outcome::Unavailable => {
                                 "Not available for this system".to_string()
@@ -311,9 +314,11 @@ fn start_availability_check(
                             install::Outcome::ConfirmedAvailable { .. } => unreachable!(),
                         };
                         status.set_text(&message);
+                        // The raw nix trace stays one click away (collapsed): a
+                        // normal user should not be handed stdenv internals.
                         technical_detail.set_text(&result.detail);
                         expander.set_visible(true);
-                        expander.set_expanded(true);
+                        expander.set_expanded(false);
                     }
                 }
                 glib::ControlFlow::Break
