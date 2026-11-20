@@ -406,7 +406,7 @@ fn build_sidebar(
 ) -> gtk4::Box {
     let sidebar = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     sidebar.set_width_request(220);
-    sidebar.append(&nav_button("Home", "list", stack, None));
+    sidebar.append(&nav_button("Apps", "list", stack, None));
     sidebar.append(&nav_button("Settings", "settings", stack, None));
 
     let updates = updates.clone();
@@ -527,6 +527,12 @@ pub fn run(
     });
 
     let sidebar = build_sidebar(&stack, &updates, &queue);
+    // the Settings home's "Updates" row navigates to the Updates surface
+    let settings_for_updates = settings.clone();
+    let stack_for_updates = stack.clone();
+    settings_for_updates.wire_updates(Rc::new(move || {
+        stack_for_updates.set_visible_child_name("updates")
+    }));
     let body = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     body.append(&sidebar);
     body.append(&stack);

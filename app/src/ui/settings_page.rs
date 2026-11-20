@@ -36,8 +36,26 @@ struct RowData {
     current_label: gtk4::Label,
 }
 
+/// The app-level action behind the Settings home's "Updates" row
+/// (navigates to the Updates surface; wired by the shell after startup).
+type UpdatesCallback = Rc<dyn Fn()>;
+type UpdatesCallbackCell = Rc<RefCell<Option<UpdatesCallback>>>;
+
+/// Settings-category per SPECS index (familiar desktop-settings surfaces:
+/// GNOME / macOS / Windows share System, Network, Time, Accounts, Privacy).
+const SPECS_CATEGORY: [&str; 7] = [
+    "system",  // networking.hostName (device name)
+    "network", // networking.networkmanager.enable
+    "time",    // time.timeZone
+    "time",    // i18n.defaultLocale
+    "system",  // services.printing.enable
+    "system",  // powerManagement.enable
+    "privacy", // services.openssh.enable (remote access)
+];
+
 pub struct SettingsPage {
-    pub page: gtk4::Box,
+    /// The settings-internal stack: home + one subpage per category.
+    pub page: gtk4::Stack,
     /// Row data in SPECS order.
     rows: Vec<RowData>,
     /// The system account the per-user workflows operate on.
@@ -51,29 +69,92 @@ pub struct SettingsPage {
     add_admin: gtk4::Switch,
     add_btn: gtk4::Button,
     accounts_status: gtk4::Label,
+    /// Action behind the home "Updates" row (the app-level stack; wired by
+    /// the shell after startup).
+    updates_cb: UpdatesCallbackCell,
 }
 
 impl SettingsPage {
     pub fn new(account: &str) -> SettingsPage {
-        let page = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
-        page.set_margin_top(18);
-        page.set_margin_start(28);
-        page.set_margin_end(28);
+        // Settings-internal stack: a home (profile + category navigation) and
+        // one subpage per category, like the common desktop settings shells.
+        let stack = gtk4::Stack::new();
+        stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
+        stack.set_margin_top(18);
+        stack.set_margin_start(28);
+        stack.set_margin_end(28);
+        stack.set_vexpand(true);
 
+        let updates_cb: UpdatesCallbackCell = Rc::new(RefCell::new(None));
+
+        let home = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
         let heading = gtk4::Label::new(Some("Settings"));
         heading.add_css_class("title-2");
         heading.set_xalign(0.0);
-        page.append(&heading);
-
-        let notice = gtk4::Label::new(Some(
+        home.append(&heading);
+        let hint = gtk4::Label::new(Some(
             "Settings apply to this computer and always explain what changes \
-             before they are applied. Changes are collected and applied through \
-             Updates.",
+             before they are applied.",
         ));
-        notice.set_xalign(0.0);
-        notice.set_wrap(true);
-        notice.add_css_class("dim-label");
-        page.append(&notice);
+        hint.set_xalign(0.0);
+        hint.set_wrap(true);
+        hint.add_css_class("dim-label");
+        home.append(&hint);
+
+        // Profile header: avatar + name + account, click -> Accounts.
+        let profile = gtk4::Button::new();
+        profile.set_halign(gtk4::Align::Fill);
+        profile.add_css_class("card");
+        let avatar = gtk4::Label::new(Some(&initial_of(account)));
+        avatar.add_css_class("avatar");
+        avatar.set_margin_end(12);
+        let name_col = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        let name_label = gtk4::Label::new(Some(&full_name_of(account)));
+        name_label.add_css_class("heading");
+        name_label.set_xalign(0.0);
+        let acc_label = gtk4::Label::new(Some(&format!("@{account}")));
+        acc_label.add_css_class("dim-label");
+        acc_label.set_xalign(0.0);
+        name_col.append(&name_label);
+        name_col.append(&acc_label);
+        let profile_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+        profile_row.append(&avatar);
+        profile_row.append(&name_col);
+        profile.set_child(Some(&profile_row));
+        {
+            let s = stack.clone();
+            profile.connect_clicked(move |_| s.set_visible_child_name("accounts"));
+        }
+        home.append(&profile);
+
+        // Category navigation (familiar names shared across desktop shells).
+        let categories: [(&str, &str); 7] = [
+            ("System", "system"),
+            ("Network & internet", "network"),
+            ("Accounts", "accounts"),
+            ("Time & language", "time"),
+            ("Personalisation", "appearance"),
+            ("Privacy & security", "privacy"),
+            ("Updates", "updates"),
+        ];
+        for (label, child) in categories {
+            let btn = gtk4::Button::with_label(label);
+            btn.set_halign(gtk4::Align::Fill);
+            btn.add_css_class("nav-item");
+            let s = stack.clone();
+            let child = child.to_string();
+            btn.connect_clicked(move |_| s.set_visible_child_name(&child));
+            home.append(&btn);
+        }
+        stack.add_named(&home, Some("home"));
+
+        let mut cat_pages: std::collections::BTreeMap<&'static str, gtk4::Box> =
+            std::collections::BTreeMap::new();
+        for (child, title) in categories {
+            let page = category_page(&stack, title);
+            stack.add_named(&page, Some(child));
+            cat_pages.insert(child, page);
+        }
 
         let mut rows = Vec::new();
         for spec in settings::SPECS {
@@ -118,15 +199,8 @@ impl SettingsPage {
                 control,
                 current_label,
             });
-            page.append(&card);
+            cat_pages[SPECS_CATEGORY[rows.len() - 1]].append(&card);
         }
-
-        // Users area: SSH authorized keys (structural per-user workflow).
-        let user_heading = gtk4::Label::new(Some("Users"));
-        user_heading.add_css_class("title-3");
-        user_heading.set_xalign(0.0);
-        user_heading.set_margin_top(14);
-        page.append(&user_heading);
 
         let keys_card = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
         keys_card.add_css_class("card");
@@ -150,7 +224,7 @@ impl SettingsPage {
         keys_card.append(&keys_label);
         keys_card.append(&keys_blurb);
         keys_card.append(&view);
-        page.append(&keys_card);
+        cat_pages["accounts"].append(&keys_card);
 
         // App-owned user accounts (user-accounts workflow). The app owns only
         // the accounts it creates; system accounts are never edited here.
@@ -195,7 +269,7 @@ impl SettingsPage {
         accounts_card.append(&accounts_box);
         accounts_card.append(&add_row);
         accounts_card.append(&accounts_status);
-        page.append(&accounts_card);
+        cat_pages["accounts"].append(&accounts_card);
 
         // D14 pointer: desktop chrome is owned by the desktop, never the app
         let pointer = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
@@ -213,11 +287,39 @@ impl SettingsPage {
         p_body.add_css_class("dim-label");
         pointer.append(&p_head);
         pointer.append(&p_body);
-        page.append(&pointer);
+        cat_pages["appearance"].append(&pointer);
 
-        page.set_vexpand(true);
+        // Updates category: maintenance lives on the Updates page; this row
+        // opens it (wired by the shell via wire_updates).
+        let updates_card = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+        updates_card.add_css_class("card");
+        updates_card.set_margin_top(6);
+        let u_head = gtk4::Label::new(Some("Automatic updates & maintenance"));
+        u_head.add_css_class("heading");
+        u_head.set_xalign(0.0);
+        let u_body = gtk4::Label::new(Some(
+            "Set-and-forget upkeep — automatic updates, garbage collection and \
+             store optimisation — lives on the Updates page.",
+        ));
+        u_body.set_xalign(0.0);
+        u_body.set_wrap(true);
+        u_body.add_css_class("dim-label");
+        let u_go = gtk4::Button::with_label("Open Updates");
+        {
+            let updates_cb = updates_cb.clone();
+            u_go.connect_clicked(move |_| {
+                if let Some(open) = updates_cb.borrow().as_ref() {
+                    open();
+                }
+            });
+        }
+        updates_card.append(&u_head);
+        updates_card.append(&u_body);
+        updates_card.append(&u_go);
+        cat_pages["updates"].append(&updates_card);
+
         SettingsPage {
-            page,
+            page: stack,
             rows,
             account: account.to_string(),
             keys_buffer: buffer,
@@ -227,7 +329,14 @@ impl SettingsPage {
             add_admin,
             add_btn,
             accounts_status,
+            updates_cb,
         }
+    }
+
+    /// Provide the action behind the home/updates "Open Updates" control
+    /// (navigates the app-level stack; called by the shell after startup).
+    pub fn wire_updates(&self, open_updates: UpdatesCallback) {
+        *self.updates_cb.borrow_mut() = Some(open_updates);
     }
 
     /// Populate from the desired state and wire edits back through `save`.
@@ -426,6 +535,51 @@ impl SettingsPage {
             }
         });
     }
+}
+
+/// A settings category subpage: back button + title; returned as the Box the
+/// category's cards are appended to.
+fn category_page(stack: &gtk4::Stack, title: &str) -> gtk4::Box {
+    let page = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+    page.set_vexpand(true);
+    let back = gtk4::Button::with_label("‹ Settings");
+    let s = stack.clone();
+    back.connect_clicked(move |_| s.set_visible_child_name("home"));
+    page.append(&back);
+    let heading = gtk4::Label::new(Some(title));
+    heading.add_css_class("title-2");
+    heading.set_xalign(0.0);
+    page.append(&heading);
+    page
+}
+
+/// Best-effort display name of the OS account: getent passwd field 5, else
+/// the username. Read-only display; never used for decisions.
+fn full_name_of(account: &str) -> String {
+    if let Ok(out) = std::process::Command::new("getent")
+        .args(["passwd", account])
+        .output()
+    {
+        if out.status.success() {
+            let line = String::from_utf8_lossy(&out.stdout);
+            if let Some(gecos) = line.split(':').nth(4) {
+                let gecos = gecos.trim();
+                if !gecos.is_empty() {
+                    return gecos.to_string();
+                }
+            }
+        }
+    }
+    account.to_string()
+}
+
+/// One-letter avatar: first character of the account name, uppercased.
+fn initial_of(account: &str) -> String {
+    account
+        .chars()
+        .next()
+        .map(|c| c.to_ascii_uppercase().to_string())
+        .unwrap_or_else(|| "?".to_string())
 }
 
 /// Whether an account name already exists on this system (read-only collision
