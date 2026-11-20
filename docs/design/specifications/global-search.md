@@ -1,12 +1,12 @@
 # Global Search Surface (design draft)
 
-Status: decided 2026-11-18 — v1 implements the catalogue-only global search (header search, D16/D18 grouped, opens the store detail page); the settings / help / update-action domains join the same broadcast when those surfaces land in the app (tracked nix-pilot-q1w). The product has four surfaces (Software Store, Settings, Updates, global search); store-local search lives inside the Store page (see [navigation map](../../../app/wireframes/navigation.md)).
+Status: decided 2026-11-18, revised 2026-11-20 — v1 implements the global search (apps + settings, D16/D18 grouped, opens the store detail or the owning Settings category); the help / update-action domains join the same broadcast when those surfaces land (tracked nix-pilot-q1w). The product has four surfaces (Apps, Settings, Updates, global search); app-wide search sits atop the sidebar, and store-local search lives inside the Apps page (see [navigation map](../../../app/wireframes/navigation.md); layout decision recorded as [D28](../../research/04-recommendations.md#decision-log)).
 
 ## Scope and placement
 
-A search box in the global header searches the whole application: settings, applications, command-line tools, help content, and update actions. A search box inside the Store page searches only the Store. Placement must match scope — the global box belongs in the header, the store-local box stays inside the Store page. This is the single app-wide search of constraint [C4](../../requirements/requirements.md#product-constraints); a query is broadcast to all indexed document types (search requirements [S1, S2](../../requirements/requirements.md#search)).
+A search box at the top of the sidebar searches the whole application: settings, applications, command-line tools, help content, and update actions. A search box inside the Store/Apps page searches only the catalogue. Placement matches scope — the global box sits where navigation lives (ensuring it always searches the same thing regardless of the surface you are on, the KDE Discover lesson), the store-local box stays inside the Apps page. This is the single app-wide search of constraint [C4](../../requirements/requirements.md#product-constraints); a query is broadcast to all indexed document types (search requirements [S1, S2](../../requirements/requirements.md#search)).
 
-The global header search is a fourth, separate surface. It does not replace the store-local search entry. A query that matches an application appears in the global results' Application group, and opening it jumps to the same detail/install page the Store search uses.
+The global search is a separate surface reachable from anywhere. It does not replace the store-local search entry. A query that matches an application appears in the global results' Application group, and opening it jumps to the same detail/install page the Store search uses; one that matches a setting appears in a Settings group and opens the owning Settings category (S2 — "ssh" surfaces both the Remote Access setting and the OpenSSH application).
 
 ## Result presentation
 
@@ -22,4 +22,4 @@ Full-text search inside settings rows or help documents, ranking signals beyond 
 
 ## Open questions
 
-The architecture's user-interface section lists global search as spanning settings, applications and help (C4); this spec adds update actions to the broadcast, which needs confirming in the architecture wording when the Updates surface lands. Whether the global box stays in the header when the Store window grows Settings/Updates is a layout decision for the msn.2 pass.
+The architecture's user-interface section lists global search as spanning settings, applications and help (C4); this spec adds update actions to the broadcast, which needs confirming in the architecture wording when the Updates surface lands. Decided 2026-11-20 (D28): the global box does not stay in the window header — it moves to the top of the sidebar, and Updates is a top-level sidebar surface only (the Settings home's "Updates" category row was removed; upkeep settings continue to render on the Updates page).

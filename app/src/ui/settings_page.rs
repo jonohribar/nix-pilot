@@ -35,11 +35,6 @@ struct RowData {
     current_label: gtk4::Label,
 }
 
-/// The app-level action behind the Settings home's "Updates" row
-/// (navigates to the Updates surface; wired by the shell after startup).
-type UpdatesCallback = Rc<dyn Fn()>;
-type UpdatesCallbackCell = Rc<RefCell<Option<UpdatesCallback>>>;
-
 pub struct SettingsPage {
     /// The settings-internal stack: home + one subpage per category.
     pub page: gtk4::Stack,
@@ -56,9 +51,6 @@ pub struct SettingsPage {
     add_admin: gtk4::Switch,
     add_btn: gtk4::Button,
     accounts_status: gtk4::Label,
-    /// Action behind the home "Updates" row (the app-level stack; wired by
-    /// the shell after startup).
-    updates_cb: UpdatesCallbackCell,
 }
 
 impl SettingsPage {
@@ -71,8 +63,6 @@ impl SettingsPage {
         stack.set_margin_start(28);
         stack.set_margin_end(28);
         stack.set_vexpand(true);
-
-        let updates_cb: UpdatesCallbackCell = Rc::new(RefCell::new(None));
 
         let home = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
         let heading = gtk4::Label::new(Some("Settings"));
@@ -115,14 +105,15 @@ impl SettingsPage {
         home.append(&profile);
 
         // Category navigation (familiar names shared across desktop shells).
-        let categories: [(&str, &str); 7] = [
+        // Updates is a top-level sidebar surface, never duplicated here
+        // (single-topping, fyq).
+        let categories: [(&str, &str); 6] = [
             ("System", "system"),
             ("Network & internet", "network"),
             ("Accounts", "accounts"),
             ("Time & language", "time"),
             ("Personalisation", "appearance"),
             ("Privacy & security", "privacy"),
-            ("Updates", "updates"),
         ];
         for (label, child) in categories {
             let btn = gtk4::Button::with_label(label);
@@ -284,35 +275,6 @@ impl SettingsPage {
         pointer.append(&p_body);
         cat_pages["appearance"].append(&pointer);
 
-        // Updates category: maintenance lives on the Updates page; this row
-        // opens it (wired by the shell via wire_updates).
-        let updates_card = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
-        updates_card.add_css_class("card");
-        updates_card.set_margin_top(6);
-        let u_head = gtk4::Label::new(Some("Automatic updates & maintenance"));
-        u_head.add_css_class("heading");
-        u_head.set_xalign(0.0);
-        let u_body = gtk4::Label::new(Some(
-            "Set-and-forget upkeep — automatic updates, garbage collection and \
-             store optimisation — lives on the Updates page.",
-        ));
-        u_body.set_xalign(0.0);
-        u_body.set_wrap(true);
-        u_body.add_css_class("dim-label");
-        let u_go = gtk4::Button::with_label("Open Updates");
-        {
-            let updates_cb = updates_cb.clone();
-            u_go.connect_clicked(move |_| {
-                if let Some(open) = updates_cb.borrow().as_ref() {
-                    open();
-                }
-            });
-        }
-        updates_card.append(&u_head);
-        updates_card.append(&u_body);
-        updates_card.append(&u_go);
-        cat_pages["updates"].append(&updates_card);
-
         SettingsPage {
             page: stack,
             rows,
@@ -324,19 +286,18 @@ impl SettingsPage {
             add_admin,
             add_btn,
             accounts_status,
-            updates_cb,
         }
-    }
-
-    /// Provide the action behind the home/updates "Open Updates" control
-    /// (navigates the app-level stack; called by the shell after startup).
-    pub fn wire_updates(&self, open_updates: UpdatesCallback) {
-        *self.updates_cb.borrow_mut() = Some(open_updates);
     }
 
     /// Populate from the desired state and wire edits back through `save`.
     /// A valid change stores/removes the value; an invalid one is flagged on
     /// the control and left out of the desired state.
+    /// Jump straight to a category subpage (global-search results land here;
+    /// the shell shows this page's stack on the app-level stack first).
+    pub fn show_category(&self, child_id: &str) {
+        self.page.set_visible_child_name(child_id);
+    }
+
     pub fn wire(&self, desired: &Rc<RefCell<DesiredDoc>>, save: Rc<dyn Fn()>) {
         for row in &self.rows {
             let key: &'static str = row.key;

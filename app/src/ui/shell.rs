@@ -156,6 +156,197 @@ fn wire_search(
     });
 }
 
+/// The app-wide search surface (fyq): a search entry atop the sidebar whose
+/// results span apps + settings (S1/C4), grouped per surface (S2). Selecting
+/// an app opens its detail page; selecting a setting opens its Settings
+/// category.
+struct GlobalSearch {
+    entry: gtk4::SearchEntry,
+    page: gtk4::Box,
+    listbox: gtk4::ListBox,
+    summary: gtk4::Label,
+}
+
+fn build_global_search() -> GlobalSearch {
+    let entry = gtk4::SearchEntry::new();
+    let summary = gtk4::Label::new(None);
+    summary.set_xalign(0.0);
+    summary.add_css_class("dim-label");
+
+    let listbox = gtk4::ListBox::new();
+    let scrolled = gtk4::ScrolledWindow::builder()
+        .child(&listbox)
+        .vexpand(true)
+        .build();
+    let page = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+    page.set_margin_top(6);
+    page.set_margin_bottom(6);
+    page.append(&summary);
+    page.append(&scrolled);
+
+    GlobalSearch {
+        entry,
+        page,
+        listbox,
+        summary,
+    }
+}
+
+/// One selectable global-search row: an app (opens detail) or a setting
+/// (opens its Settings category). Group headers have no row payload.
+#[derive(Clone)]
+enum GlobalRow {
+    App(IndexEntry),
+    Setting(&'static crate::settings::Spec),
+}
+
+/// Rank + render the global results: app groups (D16/D18 labels) then a
+/// Settings group. Writes the row payloads into `shown` so activation maps a
+/// row index back to its target.
+fn rebuild_global(
+    listbox: &gtk4::ListBox,
+    all: &[IndexEntry],
+    texts: &[SearchText],
+    shown: &RefCell<Vec<Option<GlobalRow>>>,
+    query: &str,
+) -> usize {
+    while let Some(child) = listbox.first_child() {
+        listbox.remove(&child);
+    }
+    let mut rows: Vec<Option<GlobalRow>> = Vec::new();
+
+    let apps: Vec<&IndexEntry> = search::rank(query, texts, MAX_ROWS)
+        .into_iter()
+        .map(|i| &all[i])
+        .collect();
+    let mut groups: Vec<(Class, Vec<&IndexEntry>)> = Vec::new();
+    for c in GROUP_ORDER {
+        let v: Vec<&IndexEntry> = apps.iter().filter(|e| e.class == c).cloned().collect();
+        if !v.is_empty() {
+            groups.push((c, v));
+        }
+    }
+    let others: Vec<&IndexEntry> = apps
+        .iter()
+        .filter(|e| !GROUP_ORDER.contains(&e.class))
+        .cloned()
+        .collect();
+    if !others.is_empty() {
+        groups.push((Class::Other, others));
+    }
+    for (c, v) in groups {
+        listbox.append(&widgets::group_header_row(c.group_label(), v.len()));
+        rows.push(None);
+        for e in v {
+            listbox.append(&widgets::entry_row(e));
+            rows.push(Some(GlobalRow::App(e.clone())));
+        }
+    }
+
+    let settings = search::rank_settings(query, crate::settings::SPECS, 20);
+    if !settings.is_empty() {
+        listbox.append(&widgets::group_header_row("Settings", settings.len()));
+        rows.push(None);
+        for i in settings {
+            let spec = &crate::settings::SPECS[i];
+            listbox.append(&widgets::setting_row(spec));
+            rows.push(Some(GlobalRow::Setting(spec)));
+        }
+    }
+
+    let n = rows.iter().filter(|r| r.is_some()).count();
+    *shown.borrow_mut() = rows;
+    n
+}
+
+fn wire_global_activation(
+    listbox: &gtk4::ListBox,
+    shown: &Rc<RefCell<Vec<Option<GlobalRow>>>>,
+    detail: &Rc<detail::DetailUi>,
+    queue: &Rc<RefCell<ChangeQueue>>,
+    stack: &gtk4::Stack,
+    settings: &Rc<settings_page::SettingsPage>,
+) {
+    let detail = detail.clone();
+    let stack = stack.clone();
+    let shown = shown.clone();
+    let queue = queue.clone();
+    let settings = settings.clone();
+    listbox.connect_row_activated(move |_, row| {
+        let index = row.index();
+        if index < 0 {
+            return;
+        }
+        let Some(Some(row)) = shown.borrow().get(index as usize).cloned() else {
+            return;
+        };
+        match row {
+            GlobalRow::App(entry) => {
+                detail.populate(&entry);
+                detail.sync_added(queue.borrow().contains(&entry.attr));
+                stack.set_visible_child_name("detail");
+            }
+            GlobalRow::Setting(spec) => {
+                settings.show_category(spec.category);
+                stack.set_visible_child_name("settings");
+            }
+        }
+    });
+}
+
+/// Wire the sidebar-top global search: typing navigates to the global-search
+/// page and shows grouped app + setting results; Esc clears the query and a
+/// further stop returns to the Apps list.
+fn wire_global_search(
+    search: &gtk4::SearchEntry,
+    listbox: &gtk4::ListBox,
+    stack: &gtk4::Stack,
+    summary: &gtk4::Label,
+    all: &Rc<RefCell<Vec<IndexEntry>>>,
+    texts: &Rc<RefCell<Vec<SearchText>>>,
+    shown: &Rc<RefCell<Vec<Option<GlobalRow>>>>,
+) {
+    let stack_for_changes = stack.clone();
+    let summary_for_changes = summary.clone();
+    let listbox_for_changes = listbox.clone();
+    let all_for_changes = all.clone();
+    let texts_for_changes = texts.clone();
+    let shown_for_changes = shown.clone();
+    search.connect_search_changed(move |search| {
+        let query = search.text();
+        let count = rebuild_global(
+            &listbox_for_changes,
+            &all_for_changes.borrow(),
+            &texts_for_changes.borrow(),
+            &shown_for_changes,
+            &query,
+        );
+        if count == 0 && !query.trim().is_empty() {
+            summary_for_changes.set_text(&format!(
+                "No results for \"{}\" — try a different name",
+                query.trim()
+            ));
+        } else if query.trim().is_empty() {
+            summary_for_changes.set_text("Search apps and settings");
+        } else {
+            summary_for_changes.set_text(&format!("{count} shown"));
+        }
+        stack_for_changes.set_visible_child_name("global-search");
+    });
+
+    let listbox_for_stop = listbox.clone();
+    let stack_for_stop = stack.clone();
+    search.connect_stop_search(move |search| {
+        // Escape first clears the query; another stop returns to the Apps list.
+        if !search.text().is_empty() {
+            search.set_text("");
+            return;
+        }
+        stack_for_stop.set_visible_child_name("list");
+        let _ = &listbox_for_stop;
+    });
+}
+
 fn wire_search_shortcut(search: &gtk4::SearchEntry, window: &gtk4::ApplicationWindow) {
     let search = search.clone();
     let keys = gtk4::EventControllerKey::new();
@@ -204,8 +395,6 @@ fn nav_button(
 struct HeaderWidgets {
     back: gtk4::Button,
     pending: gtk4::Button,
-    search: gtk4::SearchEntry,
-    unfree_filter: gtk4::CheckButton,
 }
 
 fn build_header(window: &gtk4::ApplicationWindow) -> HeaderWidgets {
@@ -219,33 +408,32 @@ fn build_header(window: &gtk4::ApplicationWindow) -> HeaderWidgets {
     pending.add_css_class("dim-label");
     pending.set_visible(false);
     header.pack_end(&pending);
-
-    let search = gtk4::SearchEntry::new();
-    search.set_placeholder_text(Some("Search apps…"));
-    search.set_hexpand(true);
-    header.pack_end(&search);
-
-    // optional non-free filter (decision D1): off by default
-    let unfree_filter = gtk4::CheckButton::with_label("Hide non-free");
-    header.pack_end(&unfree_filter);
     window.set_titlebar(Some(&header));
 
-    HeaderWidgets {
-        back,
-        pending,
-        search,
-        unfree_filter,
-    }
+    HeaderWidgets { back, pending }
 }
 
 struct CatalogueList {
     page: gtk4::Box,
     listbox: gtk4::ListBox,
     summary: gtk4::Label,
+    search: gtk4::SearchEntry,
+    unfree_filter: gtk4::CheckButton,
     state_notice: gtk4::Label,
 }
 
 fn build_catalogue_list() -> CatalogueList {
+    // Store-local search (fyq): the bar that scopes to the catalogue lives
+    // inside the Apps tab; the app-wide search sits atop the sidebar.
+    let search = gtk4::SearchEntry::new();
+    search.set_placeholder_text(Some("Search apps…"));
+    search.set_hexpand(true);
+    // optional non-free filter (decision D1): off by default
+    let unfree_filter = gtk4::CheckButton::with_label("Hide non-free");
+    let filter_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    filter_row.append(&search);
+    filter_row.append(&unfree_filter);
+
     let summary = gtk4::Label::new(None);
     summary.set_xalign(0.0);
     summary.add_css_class("dim-label");
@@ -264,6 +452,7 @@ fn build_catalogue_list() -> CatalogueList {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
     page.set_margin_top(6);
     page.set_margin_bottom(6);
+    page.append(&filter_row);
     page.append(&state_notice);
     page.append(&summary);
     page.append(&scrolled);
@@ -272,6 +461,8 @@ fn build_catalogue_list() -> CatalogueList {
         page,
         listbox,
         summary,
+        search,
+        unfree_filter,
         state_notice,
     }
 }
@@ -418,9 +609,20 @@ fn build_sidebar(
     your_system: &Rc<your_system::YourSystemPage>,
     desired: &Rc<RefCell<DesiredDoc>>,
     on_queue_change: &Rc<dyn Fn()>,
+    global_search: &gtk4::SearchEntry,
 ) -> gtk4::Box {
     let sidebar = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     sidebar.set_width_request(220);
+    // The app-wide search sits atop the sidebar, above the surface nav
+    // (fyq): it spans apps + settings, so it cannot live inside one surface.
+    let search_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    search_box.set_margin_top(8);
+    search_box.set_margin_bottom(4);
+    search_box.set_margin_start(8);
+    search_box.set_margin_end(8);
+    global_search.set_placeholder_text(Some("Search everything…"));
+    search_box.append(global_search);
+    sidebar.append(&search_box);
     sidebar.append(&nav_button("Apps", "list", stack, None));
     sidebar.append(&nav_button("Settings", "settings", stack, None));
 
@@ -489,6 +691,7 @@ pub fn run(
         .build();
     let header = build_header(&window);
     let catalogue = build_catalogue_list();
+    let global = build_global_search();
     let full_entries = entries;
     let hide_unfree = Rc::new(std::cell::Cell::new(false));
     let all = Rc::new(RefCell::new(Vec::<IndexEntry>::new()));
@@ -500,6 +703,7 @@ pub fn run(
         *t = a.iter().map(SearchText::build).collect();
     }
     let shown = Rc::new(RefCell::new(Vec::<Option<IndexEntry>>::new()));
+    let global_shown = Rc::new(RefCell::new(Vec::<Option<GlobalRow>>::new()));
     let queue = Rc::new(RefCell::new(ChangeQueue::new()));
 
     let account = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
@@ -546,6 +750,7 @@ pub fn run(
     stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
     stack.add_named(&catalogue.page, Some("list"));
     stack.add_named(&detail.page, Some("detail"));
+    stack.add_named(&scrolled_page(&global.page), Some("global-search"));
     // Tall surfaces scroll; a plain Box would push content below the window
     // edge with no way to reach it (onz). Wrap them so everything is shown.
     stack.add_named(&scrolled_page(&updates.page), Some("updates"));
@@ -568,13 +773,8 @@ pub fn run(
         &your_system,
         &desired,
         &on_queue_change_for_sidebar,
+        &global.entry,
     );
-    // the Settings home's "Updates" row navigates to the Updates surface
-    let settings_for_updates = settings.clone();
-    let stack_for_updates = stack.clone();
-    settings_for_updates.wire_updates(Rc::new(move || {
-        stack_for_updates.set_visible_child_name("updates")
-    }));
     let body = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     body.append(&sidebar);
     body.append(&stack);
@@ -592,8 +792,10 @@ pub fn run(
 
     set_catalogue_summary(&catalogue.summary, &all.borrow(), load_error.as_deref());
     wire_row_activation(&catalogue.listbox, &shown, &detail, &queue, &stack);
+    // Store-local search (fyq): filters only the catalogue, lives in the
+    // Apps tab; the global search below spans apps + settings.
     wire_search(
-        &header.search,
+        &catalogue.search,
         &catalogue.listbox,
         &stack,
         &catalogue.summary,
@@ -601,7 +803,24 @@ pub fn run(
         &texts,
         &shown,
     );
-    wire_search_shortcut(&header.search, &window);
+    wire_search_shortcut(&global.entry, &window);
+    wire_global_search(
+        &global.entry,
+        &global.listbox,
+        &stack,
+        &global.summary,
+        &all,
+        &texts,
+        &global_shown,
+    );
+    wire_global_activation(
+        &global.listbox,
+        &global_shown,
+        &detail,
+        &queue,
+        &stack,
+        &settings,
+    );
 
     // Non-free filter (D1): flipping re-filters the full set and rebuilds.
     {
@@ -610,10 +829,10 @@ pub fn run(
         let shown = shown.clone();
         let listbox = catalogue.listbox.clone();
         let summary = catalogue.summary.clone();
-        let search = header.search.clone();
+        let search = catalogue.search.clone();
         let full_entries = full_entries.clone();
         let hide = hide_unfree.clone();
-        header.unfree_filter.connect_toggled(move |btn| {
+        catalogue.unfree_filter.connect_toggled(move |btn| {
             hide.set(btn.is_active());
             {
                 let mut a = all.borrow_mut();
@@ -637,7 +856,7 @@ pub fn run(
         &all.borrow(),
         &texts.borrow(),
         &shown,
-        &header.search.text(),
+        &catalogue.search.text(),
     );
     window.present();
 }

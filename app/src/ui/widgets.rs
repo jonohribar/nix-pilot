@@ -39,6 +39,36 @@ pub fn entry_row(e: &IndexEntry) -> gtk4::ListBoxRow {
     row
 }
 
+/// A settings-result row for the global search: label + blurb, plain. It
+/// does not render an install control; selecting it opens the Settings
+/// category that owns it.
+pub fn setting_row(spec: &crate::settings::Spec) -> gtk4::ListBoxRow {
+    let boxv = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    boxv.set_margin_top(8);
+    boxv.set_margin_bottom(8);
+    boxv.set_margin_start(10);
+    boxv.set_margin_end(10);
+
+    let title = gtk4::Label::new(None);
+    title.set_xalign(0.0);
+    title.set_markup(&format!(
+        "<b>{}</b>  <span size='small'>setting</span>",
+        esc(spec.label)
+    ));
+    boxv.append(&title);
+
+    let blurb = gtk4::Label::new(Some(spec.blurb));
+    blurb.set_xalign(0.0);
+    blurb.set_wrap(false);
+    blurb.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    blurb.add_css_class("dim-label");
+    boxv.append(&blurb);
+
+    let row = gtk4::ListBoxRow::new();
+    row.set_child(Some(&boxv));
+    row
+}
+
 /// Non-clickable group header row ("Applications · 12 results").
 pub fn group_header_row(label: &str, count: usize) -> gtk4::ListBoxRow {
     let s = if count == 1 { "" } else { "s" };

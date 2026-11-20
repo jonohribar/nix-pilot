@@ -4,18 +4,15 @@ The wireframes are a single clickable prototype (`just app proto`): one window,
 sidebar + stack pages. This map is the at-a-glance route diagram; the PNGs are
 the rendered states.
 
-**Real-app parity (2026-11-19):** the app's live window now matches this layout
-— a sidebar (Home / Settings / Updates) over a stack. Differences: the real
-app's header carries the global search (catalogue-only v1, decided
-2026-11-18), the Updates page's Prepare-and-build runs the real candidate build
-(build-only, store never activated), updates/settings rollback state pages are
-capture-only until 7wo.3, and the Settings page lists the REQ-5 areas with no
-changeable workflow yet (9f3.8).
-
-**Search is store-local:** the search field lives inside the Software Store page
-(home + results), so it reads as "search the store". The header bar currently
-has no search — the app-wide global search is a separate surface in the
-architecture and is designed later.
+**Real-app parity (2026-11-20):** the app's live window now matches this layout
+— a sidebar (Apps / Settings / Updates / Your system) over a stack. The
+sidebar carries the app-wide search at its top (D28, fyq): it searches apps +
+settings and always keeps that scope regardless of surface. The store's
+scoped search + Hide non-free filter live inside the Apps page. Updates is a
+top-level surface only (the Settings home no longer duplicates it). The
+Updates page's Prepare-and-build runs the real candidate build (build-only,
+store never activated); updates/settings rollback state pages are capture-only
+until 7wo.3.
 
 Note: `just app` lists the app recipes; `just app proto` opens the prototype.
 
@@ -23,11 +20,17 @@ Note: `just app` lists the app recipes; `just app proto` opens the prototype.
 
 ```mermaid
 flowchart LR
-    START([Sidebar navigation]) --> HOME[Software Store · home]
+    START([Sidebar]) --> HOME[Apps · home]
     HOME -->|"click an app card"| DETAIL[Application detail]
     DETAIL -->|"Back"| HOME
-    HOME -->|"type in the store search"| RESULTS[Search results · grouped]
+    HOME -->|"type in the Apps search"| RESULTS[App results · grouped]
     RESULTS -->|"clear search / Back"| HOME
+    START -->|"type in the sidebar search"| GSTART[Global search · apps + settings]
+    GSTART -->|"an app result"| DETAIL
+    GSTART -->|"a setting result"| SETCAT[Settings category]
+    START -->|"Settings"| SET[Settings · home]
+    SET -->|"open a category"| SETCAT
+    SETCAT -->|"back"| SET
     START -->|"Updates"| UPD[Updates · ready]
     UPD -->|"Prepare and install"| SUM[Update summary]
     SUM -->|"Apply changes"| APP[Applying]
@@ -38,8 +41,6 @@ flowchart LR
     APP -.->|"apply failure"| AF[Apply failure · nothing half-applied]
     UPD -.->|"system will not boot"| BOOT[Boot recovery · "Start with yesterday's system"]
     BOOT -->|"I'm back on an earlier system"| REST
-    START -->|"Settings"| SET[Settings · system-only]
-    SET -->|"open a row"| SET2["Network · Display · Sound · Printers · Users · Power · Remote access (REQ-5, D14)"]
 ```
 
 ## States (rendered)

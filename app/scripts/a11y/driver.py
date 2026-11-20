@@ -96,7 +96,13 @@ class AtspiDriver:
             "GSK_RENDERER": "cairo",  # software rendering, no Vulkan/GPU needed
             "GTK_MODULES": "",  # GTK4 has built-in AT-SPI, no atk-bridge needed
             "XDG_DATA_HOME": "/tmp/nix-pilot-test-data",
+            # Isolate the run-time dir: at-spi creates its bus socket under
+            # $XDG_RUNTIME_DIR/at-spi/bus_<id>, and the shared /run/user/1000
+            # namespace collects stale sockets from killed runs that let the
+            # launcher reconnect to a dead bus ("unit failed").
+            "XDG_RUNTIME_DIR": f"/tmp/nix-pilot-test-runtime-{os.getpid()}",
         })
+        os.makedirs(env["XDG_RUNTIME_DIR"], exist_ok=True)
         if extra_env:
             env.update(extra_env)
         os.makedirs(env["XDG_DATA_HOME"], exist_ok=True)
@@ -316,11 +322,29 @@ def _first_or_none(items: List[Atspi.Accessible]) -> Optional[Atspi.Accessible]:
 
 
 def find_search_entry(driver: AtspiDriver) -> Optional[Atspi.Accessible]:
-    """Find the global search entry."""
-    # Search entry is in the header bar, within the main window frame. GTK4
-    # reports gtk::SearchEntry as role "entry" (a text entry), not the
-    # fictional "search box" role. Return the first text entry.
-    return _first_or_none(driver.find_by_role(driver.app, "entry"))
+    """Find the store-local search entry (the one scoped to the catalogue).
+
+    The app now has two search entries: the app-wide one at the top of the
+    sidebar (fyq) and the store-local one inside the Apps tab. The store one
+    is the entry whose ancestor page also holds the "Hide non-free" filter
+    check box, so we locate that check box and take the first entry inside
+    its page subtree.
+    """
+    check = driver.find_by_role_and_name(driver.app, "check box", "Hide non-free")
+    scope = None
+    if check is not None:
+        # Walk up to a container that holds an entry (the store page box).
+        parent = check
+        while parent is not None and scope is None:
+            parent = parent.get_parent()
+            if parent is None:
+                break
+            entries = driver.find_by_role(parent, "entry")
+            if entries:
+                scope = parent
+    if scope is None:
+        scope = driver.app
+    return _first_or_none(driver.find_by_role(scope, "entry"))
 
 
 def find_listbox(driver: AtspiDriver) -> Optional[Atspi.Accessible]:

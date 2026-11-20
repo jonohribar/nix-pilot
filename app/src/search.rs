@@ -50,6 +50,22 @@ pub fn rank(query: &str, texts: &[SearchText], max: usize) -> Vec<usize> {
     scored.into_iter().take(max).map(|(_, i)| i).collect()
 }
 
+/// Ranked indices of the authored settings specs matching the query (S1/S3):
+/// same scorer as the catalogue, so a global query reads consistently over
+/// both document types (S2 — "ssh" surfaces the Remote Access setting beside
+/// the OpenSSH application). name=label, pn=option key, desc=blurb.
+pub fn rank_settings(query: &str, specs: &[crate::settings::Spec], max: usize) -> Vec<usize> {
+    let texts: Vec<SearchText> = specs
+        .iter()
+        .map(|s| SearchText {
+            name: s.label.to_lowercase(),
+            pn: s.key.to_lowercase(),
+            desc: s.blurb.to_lowercase(),
+        })
+        .collect();
+    rank(query, &texts, max)
+}
+
 /// Optional non-free filter (decision D1): when `hide_unfree` is on, entries
 /// with an unfree licence drop out of the results entirely (browse + search).
 pub fn filter_unfree(
@@ -161,6 +177,23 @@ mod tests {
         // terms under 2 chars are skipped, so nothing ever scores
         assert!(rank("a", &texts, 10).is_empty());
         assert!(rank("   ", &texts, 10).is_empty());
+    }
+
+    #[test]
+    fn rank_settings_scopes_settings_rows() {
+        // SPECS includes the SSH remote-access row, keyed by its option path;
+        // a global "ssh" query must surface that setting beside the OpenSSH
+        // application (S2).
+        let got = rank_settings("ssh", crate::settings::SPECS, 10);
+        assert!(!got.is_empty());
+        let ssh = got
+            .into_iter()
+            .map(|i| crate::settings::SPECS[i].key)
+            .collect::<Vec<_>>();
+        assert!(
+            ssh.contains(&"services.openssh.enable"),
+            "ssh query must match the SSH setting, got {ssh:?}"
+        );
     }
 
     #[test]
