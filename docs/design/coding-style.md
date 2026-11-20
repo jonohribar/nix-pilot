@@ -41,3 +41,20 @@ just app smoke     # headless window-launch smoke test
 ```
 
 Run `just app check` before committing; keep it green.
+
+## Logging
+
+The app uses the `log` crate with `env_logger` as the backend (single stderr destination, level-filtered, zero async runtime).
+
+- Initialise in `main.rs` (and the `proto`/`wireframe` binaries) via:
+  ```rust
+  env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+  ```
+- Control level with the standard `RUST_LOG` env var, e.g. `RUST_LOG=debug cargo run`. Default is `info`.
+- Import macros with `use log::{debug, info, warn, error};` and use the appropriate level:
+  - `error!` — failures that affect user-visible outcomes (save failed, nix check failed)
+  - `warn!` — unexpected but recovered situations
+  - `info!` — notable lifecycle events (startup, nix client resolved, apply begun)
+  - `debug!` — detailed diagnostics for development (search ranking, queue mutations, nix command lines)
+- Rule: **UI shows plain summaries to the user; raw internals go to the log**. Never dump nix output, backtraces, or internal state into the user-facing window (REQ-6). The one remaining `eprintln!` with the `nix-pilot:` prefix in `shell.rs` was migrated to `error!` — it now appears only when `RUST_LOG` permits.
+- Binary entry points (`main`, `proto`, `wireframe`) each initialise the logger so `cargo run --bin <name>` works under `RUST_LOG` independently.

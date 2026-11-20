@@ -4,6 +4,7 @@
 // updates) and the GTK surface in `ui`. Coding-style.md.
 use glib::ExitCode;
 use gtk4::prelude::*;
+use log::{error, info};
 
 mod apply;
 mod catalogue;
@@ -30,8 +31,11 @@ pub fn index_entries() -> (Vec<model::IndexEntry>, Option<String>) {
 }
 
 fn main() -> ExitCode {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    info!("nix-pilot starting");
+
     if libadwaita::init().is_err() {
-        eprintln!("failed to initialise libadwaita");
+        error!("failed to initialise libadwaita");
         return ExitCode::FAILURE;
     }
 

@@ -4,23 +4,27 @@
 //   xvfb-run -a sh -c 'target/debug/wireframe build/foo.ui style.css & \
 //                      sleep 2; import -window root foo.png'
 use gtk4::prelude::*;
+use log::{error, info};
 
 fn main() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    info!("nix-pilot wireframe starting");
+
     let mut args = std::env::args().skip(1);
     let (ui, css) = match (args.next(), args.next()) {
         (Some(u), Some(c)) => (u, c),
         _ => {
-            eprintln!("usage: wireframe <window.ui> <style.css>");
+            error!("usage: wireframe <window.ui> <style.css>");
             std::process::exit(1);
         }
     };
 
     if gtk4::init().is_err() {
-        eprintln!("failed to initialise GTK");
+        error!("failed to initialise GTK");
         std::process::exit(1);
     }
     if libadwaita::init().is_err() {
-        eprintln!("failed to initialise libadwaita");
+        error!("failed to initialise libadwaita");
         std::process::exit(1);
     }
 
@@ -28,7 +32,7 @@ fn main() {
     let css_text = match std::fs::read_to_string(&css) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("cannot read css {}: {}", css, e);
+            error!("cannot read css {}: {}", css, e);
             std::process::exit(1);
         }
     };
@@ -49,5 +53,5 @@ fn main() {
         .expect("ui must define a widget id `window`");
     window.present();
 
-    glib::MainLoop::new(None, false).run();
+    glib::MainLoop::new(None, false).run()
 }

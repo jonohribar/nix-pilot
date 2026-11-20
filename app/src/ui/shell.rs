@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
+use log::error;
 
 use crate::desired_state::DesiredDoc;
 use crate::model::{Class, IndexEntry, SearchText};
@@ -362,7 +363,7 @@ fn wire_desired_state_persistence(
             document.set_user(&account, user_packages);
         }
         if let Err(error) = crate::desired_state::save(&desired.borrow(), &path) {
-            eprintln!("nix-pilot: could not save desired state: {error}");
+            error!("could not save desired state: {error}");
             notice.set_text(&format!(
                 "Your changes could not be saved and will be lost on restart ({error})."
             ));

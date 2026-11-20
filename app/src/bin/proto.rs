@@ -12,6 +12,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
+use log::{error, info};
 
 fn arg(name: &str) -> Option<String> {
     let a: Vec<String> = std::env::args().collect();
@@ -41,12 +42,15 @@ fn wire_store_search(entry: &gtk4::SearchEntry, stack: &gtk4::Stack, prev: &Rc<R
 }
 
 fn main() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    info!("nix-pilot prototype starting");
+
     if gtk4::init().is_err() {
-        eprintln!("failed to initialise GTK");
+        error!("failed to initialise GTK");
         std::process::exit(1);
     }
     if libadwaita::init().is_err() {
-        eprintln!("failed to initialise libadwaita");
+        error!("failed to initialise libadwaita");
         std::process::exit(1);
     }
 
