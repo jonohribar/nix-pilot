@@ -41,6 +41,12 @@ vm-probe:
 module-check:
     @if command -v nix-instantiate >/dev/null 2>&1; then ./scripts/module-check.sh; else nix-shell ./shell.nix --run './scripts/module-check.sh'; fi
 
+# AT-SPI integration tests (headless, accessibility-tree driven)
+# Each test runs inside one dbus-run-session (see run-test.sh) so the a11y
+# client, launcher, and app share a single session bus.
+atspi-test: build
+    @nix-shell ./test-atspi.nix --run 'bash ./scripts/a11y/run-test.sh ./scripts/a11y/test_nav_settings.py ./target/debug/nix-pilot-app && bash ./scripts/a11y/run-test.sh ./scripts/a11y/test_search.py ./target/debug/nix-pilot-app'
+
 # fmt + clippy + tests gate (run before committing)
 check:
     @if command -v cargo >/dev/null 2>&1; then cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test; else nix-shell ./shell.nix --run 'cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test'; fi
