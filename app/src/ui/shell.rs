@@ -481,7 +481,6 @@ pub fn run(
         "Installs into your user account — no administrator rights needed",
     ));
     let updates = Rc::new(updates_page::UpdatesPage::new());
-    updates.wire(&queue, &desired, &nix);
     let settings = Rc::new(settings_page::SettingsPage::new(&account));
 
     let persist_desired_state = wire_desired_state_persistence(
@@ -492,6 +491,7 @@ pub fn run(
         &catalogue.state_notice,
     );
     persist_desired_state();
+    updates.wire(&queue, &desired, &nix, persist_desired_state.clone());
     settings.wire(&desired, persist_desired_state.clone());
 
     let pending = header.pending.clone();

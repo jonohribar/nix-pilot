@@ -8,7 +8,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use crate::apply;
-use crate::desired_state::DesiredDoc;
+use crate::desired_state::{DesiredDoc, SettingValue};
 use crate::store::ChangeQueue;
 use crate::updates::{self, TxEvent, TxStep};
 
@@ -16,6 +16,9 @@ pub struct UpdatesPage {
     pub page: gtk4::Box,
     step_label: gtk4::Label,
     step: Rc<RefCell<TxStep>>,
+    /// Set-and-forget upkeep controls (category "updates").
+    auto_bools: Vec<(String, gtk4::Switch)>,
+    auto_strs: Vec<(String, gtk4::Entry)>,
     queue_list: gtk4::ListBox,
     results_label: gtk4::Label,
     results_list: gtk4::ListBox,
@@ -213,6 +216,55 @@ impl UpdatesPage {
         step_label.add_css_class("dim-label");
         page.append(&step_label);
 
+        // Automatic upkeep (set-and-forget defaults; category "updates").
+        let automatic_card = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+        automatic_card.add_css_class("card");
+        automatic_card.set_margin_top(6);
+        let automatic_heading = gtk4::Label::new(Some("Automatic"));
+        automatic_heading.add_css_class("heading");
+        automatic_heading.set_xalign(0.0);
+        let automatic_blurb = gtk4::Label::new(Some(
+            "Set-and-forget upkeep. These apply with the rest of your changes \
+             when you prepare and apply them.",
+        ));
+        automatic_blurb.set_xalign(0.0);
+        automatic_blurb.set_wrap(true);
+        automatic_blurb.add_css_class("dim-label");
+        let automatic_box = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+        automatic_box.set_margin_top(4);
+        let mut auto_bools = Vec::new();
+        let mut auto_strs = Vec::new();
+        for spec in crate::settings::SPECS
+            .iter()
+            .filter(|s| s.category == "updates")
+        {
+            let label = gtk4::Label::new(Some(spec.label));
+            label.set_xalign(0.0);
+            let blurb = gtk4::Label::new(Some(spec.blurb));
+            blurb.set_xalign(0.0);
+            blurb.set_wrap(true);
+            blurb.add_css_class("dim-label");
+            if spec.kind == crate::settings::ValueKind::Boolean {
+                let sw = gtk4::Switch::new();
+                sw.set_halign(gtk4::Align::Start);
+                automatic_box.append(&label);
+                automatic_box.append(&sw);
+                automatic_box.append(&blurb);
+                auto_bools.push((spec.key.to_string(), sw));
+            } else {
+                let entry = gtk4::Entry::new();
+                entry.set_placeholder_text(Some("(system default)"));
+                automatic_box.append(&label);
+                automatic_box.append(&entry);
+                automatic_box.append(&blurb);
+                auto_strs.push((spec.key.to_string(), entry));
+            }
+        }
+        automatic_card.append(&automatic_heading);
+        automatic_card.append(&automatic_blurb);
+        automatic_card.append(&automatic_box);
+        page.append(&automatic_card);
+
         let queue_list = gtk4::ListBox::new();
         page.append(&queue_list);
 
@@ -275,6 +327,8 @@ impl UpdatesPage {
             page,
             step_label,
             step,
+            auto_bools,
+            auto_strs,
             queue_list,
             results_label,
             results_list,
@@ -337,7 +391,56 @@ impl UpdatesPage {
         queue: &Rc<RefCell<ChangeQueue>>,
         desired: &Rc<RefCell<DesiredDoc>>,
         nix: &Option<std::path::PathBuf>,
+        save: Rc<dyn Fn()>,
     ) {
+        // Automatic upkeep controls: load, then persist on change.
+        {
+            let doc = desired.borrow();
+            for (key, sw) in &self.auto_bools {
+                sw.set_active(matches!(
+                    doc.settings.get(key),
+                    Some(SettingValue::Bool(true))
+                ));
+            }
+            for (key, entry) in &self.auto_strs {
+                if let Some(SettingValue::Str(s)) = doc.settings.get(key) {
+                    entry.set_text(s);
+                }
+            }
+        }
+        for (key, sw) in self.auto_bools.clone() {
+            let desired = desired.clone();
+            let save = save.clone();
+            sw.connect_state_set(move |_, active| {
+                if active {
+                    desired
+                        .borrow_mut()
+                        .settings
+                        .insert(key.clone(), SettingValue::Bool(true));
+                } else {
+                    desired.borrow_mut().settings.remove(&key);
+                }
+                save();
+                glib::Propagation::Proceed
+            });
+        }
+        for (key, entry) in self.auto_strs.clone() {
+            let desired = desired.clone();
+            let save = save.clone();
+            entry.connect_changed(move |entry| {
+                let text = entry.text().to_string();
+                if text.trim().is_empty() {
+                    desired.borrow_mut().settings.remove(&key);
+                } else {
+                    desired
+                        .borrow_mut()
+                        .settings
+                        .insert(key.clone(), SettingValue::Str(text));
+                }
+                save();
+            });
+        }
+
         // Clone shared state for both Prepare and Apply handlers
         let queue_for_prepare = queue.clone();
         let desired_for_prepare = desired.clone();

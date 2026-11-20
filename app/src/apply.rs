@@ -606,10 +606,17 @@ mod tests {
         } else {
             doc.set_user(&account, vec!["hello".into()]);
         }
-        // a user-set setting must render as a valid app-wins override
+        // user-set settings must render as valid app-wins overrides; include
+        // an upkeep (category "updates") option to prove it evaluates too
+        use crate::desired_state::SettingValue;
         doc.settings.insert(
             "networking.hostName".into(),
-            crate::desired_state::SettingValue::Str("nix-pilot-scratch".into()),
+            SettingValue::Str("nix-pilot-scratch".into()),
+        );
+        doc.settings.insert("nix.gc.automatic".into(), SettingValue::Bool(true));
+        doc.settings.insert(
+            "system.autoUpgrade.enable".into(),
+            SettingValue::Bool(true),
         );
         let dir = std::env::temp_dir().join(format!("np-live-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
