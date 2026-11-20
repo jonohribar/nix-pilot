@@ -304,7 +304,7 @@ mod tests {
     #[test]
     fn upkeep_validators_accept_sensible_and_reject_junk() {
         // automatic-upkeep workflows (category "updates")
-        let ok = |key, value| settings::validate(key, &SettingValue::Str(value.into()));
+        let ok = |key, value| validate(key, &SettingValue::Str(value.into()));
         assert!(ok("system.autoUpgrade.dates", "02:00").is_ok());
         assert!(ok("system.autoUpgrade.dates", "25:00").is_err());
         assert!(ok("system.autoUpgrade.operation", "boot").is_ok());
