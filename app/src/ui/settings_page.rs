@@ -8,7 +8,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc;
 
-use glib::MainContext;
 use gtk4::prelude::*;
 
 use crate::config_value::{read_config_value, ConfigValue, ConfigValueError};
@@ -518,17 +517,28 @@ impl SettingsPage {
         // Drop the original sender so the receiver knows when all senders are done
         drop(tx);
 
-        // Poll the receiver on the main context
-        let ctx = MainContext::default();
+        // Poll the receiver on the main context instead of blocking on it: an
+        // async `for (_,_) in rx` runs on the GTK thread and freezes the UI
+        // until every nix-instantiate thread finishes. This fill-in poll is
+        // non-blocking and shows each value as its read lands.
         let rows = self.rows.clone();
-        ctx.spawn_local(async move {
-            for (key, text) in rx {
-                // Find the row for this key and update its label
-                if let Some(row) = rows.iter().find(|r| r.key == key) {
-                    row.current_label.set_text(&text);
-                    row.current_label.set_visible(true);
+        glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+            loop {
+                match rx.try_recv() {
+                    Ok((key, text)) => {
+                        if let Some(row) = rows.iter().find(|r| r.key == key) {
+                            row.current_label.set_text(&text);
+                            row.current_label.set_visible(true);
+                        }
+                    }
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    // The channel closes only when every producer thread has
+                    // finished (all sender clones dropped), so stop polling —
+                    // every read result has arrived by now.
+                    Err(mpsc::TryRecvError::Disconnected) => return glib::ControlFlow::Break,
                 }
             }
+            glib::ControlFlow::Continue
         });
     }
 }

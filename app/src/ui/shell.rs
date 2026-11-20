@@ -169,6 +169,17 @@ fn wire_search_shortcut(search: &gtk4::SearchEntry, window: &gtk4::ApplicationWi
     window.add_controller(keys);
 }
 
+/// Wrap a page root in a vertical scrolled window so content taller than the
+/// window (Settings home, Updates with its upkeep cards, the recipe list) is
+/// reachable by scrolling rather than clipped off-screen.
+fn scrolled_page(child: &impl IsA<gtk4::Widget>) -> gtk4::ScrolledWindow {
+    gtk4::ScrolledWindow::builder()
+        .child(child)
+        .vexpand(true)
+        .hscrollbar_policy(gtk4::PolicyType::Never)
+        .build()
+}
+
 /// A sidebar nav button that switches the stack and (for Updates) refreshes it.
 fn nav_button(
     label: &str,
@@ -534,9 +545,11 @@ pub fn run(
     stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
     stack.add_named(&catalogue.page, Some("list"));
     stack.add_named(&detail.page, Some("detail"));
-    stack.add_named(&updates.page, Some("updates"));
-    stack.add_named(&settings.page, Some("settings"));
-    stack.add_named(&your_system.page, Some("your-system"));
+    // Tall surfaces scroll; a plain Box would push content below the window
+    // edge with no way to reach it (onz). Wrap them so everything is shown.
+    stack.add_named(&scrolled_page(&updates.page), Some("updates"));
+    stack.add_named(&scrolled_page(&settings.page), Some("settings"));
+    stack.add_named(&scrolled_page(&your_system.page), Some("your-system"));
     stack.set_visible_child_name("list");
 
     // Load current config values when Settings page becomes visible (lazy, non-blocking)
