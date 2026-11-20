@@ -25,6 +25,10 @@ pub struct UpdatesPage {
     estimate_btn: gtk4::Button,
     cleanup_btn: gtk4::Button,
     optimise_btn: gtk4::Button,
+    /// System versions (7wo.8): generations list + rollback surface.
+    gens_list: gtk4::ListBox,
+    gens_result: gtk4::Label,
+    rollback_btn: gtk4::Button,
     queue_list: gtk4::ListBox,
     results_label: gtk4::Label,
     results_list: gtk4::ListBox,
@@ -394,6 +398,37 @@ impl UpdatesPage {
         storage_card.append(&storage_btns);
         page.append(&storage_card);
 
+        // System versions (7wo.8): read-only generations list + go-back
+        // control. Rollback goes to the previous generation; every earlier
+        // one stays on the boot menu as the recovery path (REQ-4).
+        let gens_card = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+        gens_card.add_css_class("card");
+        gens_card.set_margin_top(6);
+        let gens_heading = gtk4::Label::new(Some("System versions"));
+        gens_heading.add_css_class("heading");
+        gens_heading.set_xalign(0.0);
+        let gens_blurb = gtk4::Label::new(Some(
+            "Every change keeps a copy of the way things were. The version \
+             you are on now is marked; older ones stay on the start menu \
+             until they are cleaned up.",
+        ));
+        gens_blurb.set_xalign(0.0);
+        gens_blurb.set_wrap(true);
+        gens_blurb.add_css_class("dim-label");
+        let gens_list = gtk4::ListBox::new();
+        let gens_result = gtk4::Label::new(None);
+        gens_result.set_xalign(0.0);
+        gens_result.set_wrap(true);
+        gens_result.add_css_class("dim-label");
+        let rollback_btn = gtk4::Button::with_label("Go back to the previous version");
+        rollback_btn.set_halign(gtk4::Align::Start);
+        gens_card.append(&gens_heading);
+        gens_card.append(&gens_blurb);
+        gens_card.append(&gens_list);
+        gens_card.append(&gens_result);
+        gens_card.append(&rollback_btn);
+        page.append(&gens_card);
+
         let queue_list = gtk4::ListBox::new();
         page.append(&queue_list);
 
@@ -463,6 +498,9 @@ impl UpdatesPage {
             estimate_btn,
             cleanup_btn,
             optimise_btn,
+            gens_list,
+            gens_result,
+            rollback_btn,
             queue_list,
             results_label,
             results_list,
@@ -499,11 +537,57 @@ impl UpdatesPage {
         });
     }
 
+    /// Repopulate the system-versions list (read-only, shown when the page
+    /// opens). Runs on the GTK thread; the listing itself is a cheap read of
+    /// world-readable profile symlinks.
+    fn refresh_generations(&self) {
+        while let Some(child) = self.gens_list.first_child() {
+            self.gens_list.remove(&child);
+        }
+        let gens = apply::list_generations();
+        if gens.is_empty() {
+            let l = gtk4::Label::new(Some("No system versions could be read on this computer."));
+            l.set_xalign(0.0);
+            l.add_css_class("dim-label");
+            self.gens_list.append(&l);
+            return;
+        }
+        for gen in &gens {
+            let text = if gen.current {
+                format!(
+                    "{} — {}  (current)",
+                    gen.date,
+                    gen.version.as_deref().unwrap_or("unknown build")
+                )
+            } else {
+                format!(
+                    "{} — {}",
+                    gen.date,
+                    gen.version.as_deref().unwrap_or("unknown build")
+                )
+            };
+            let l = gtk4::Label::new(Some(&text));
+            l.set_xalign(0.0);
+            if gen.current {
+                l.add_css_class("heading");
+            } else {
+                l.add_css_class("dim-label");
+            }
+            let row = gtk4::ListBoxRow::new();
+            row.set_selectable(false);
+            row.set_activatable(false);
+            row.set_child(Some(&l));
+            self.gens_list.append(&row);
+        }
+    }
+
     /// Reset then repopulate the queued-change list (call when shown).
     pub fn refresh(&self, queue: &Rc<RefCell<ChangeQueue>>) {
         self.reset();
         self.refresh_storage_usage();
         self.storage_result.set_text("");
+        self.refresh_generations();
+        self.gens_result.set_text("");
         while let Some(child) = self.queue_list.first_child() {
             self.queue_list.remove(&child);
         }
@@ -622,6 +706,51 @@ impl UpdatesPage {
             }));
         }
         wire_storage_buttons(&storage_result, &estimate_btn, &cleanup_btn, &optimise_btn);
+
+        // System versions: go back to the previous generation, gated exactly
+        // like the storage/apply actions (module + flag). Rollback reuses the
+        // helper's fixed `rollback` action (no helper change needed).
+        let gens_result = self.gens_result.clone();
+        let gens_rollback = self.rollback_btn.clone();
+        gens_rollback.set_sensitive(activate);
+        gens_rollback.set_tooltip_text(Some(match activate {
+            true => "Starts the previous system version now (root).",
+            false => {
+                "Rollback runs through the nix-pilot system module; activate it \
+                 (NIX_PILOT_ALLOW_SWITCH) to enable it."
+            }
+        }));
+        let doc_rc = desired.clone();
+        gens_rollback.connect_clicked(move |b| {
+            b.set_sensitive(false);
+            gens_result.set_text("Starting the previous version…");
+            let (tx, rx) = std::sync::mpsc::channel::<apply::ActivateResult>();
+            let doc = doc_rc.borrow().clone();
+            std::thread::spawn(move || {
+                let r = apply::activate(
+                    apply::ActivateAction::Rollback,
+                    &doc,
+                    std::time::Duration::from_secs(900),
+                );
+                let _ = tx.send(r);
+            });
+            let res = gens_result.clone();
+            let btn = b.clone();
+            glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+                match rx.try_recv() {
+                    Ok(r) => {
+                        res.set_text(&r.note);
+                        btn.set_sensitive(apply::can_activate());
+                        glib::ControlFlow::Break
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                    Err(_) => {
+                        btn.set_sensitive(apply::can_activate());
+                        glib::ControlFlow::Break
+                    }
+                }
+            });
+        });
 
         // Clone shared state for both Prepare and Apply handlers
         let queue_for_prepare = queue.clone();

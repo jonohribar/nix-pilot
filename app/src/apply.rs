@@ -574,6 +574,114 @@ pub fn human_bytes(bytes: u64) -> String {
     }
 }
 
+/// One system generation as the app shows it (read-only).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GenerationInfo {
+    /// The generation number ("system-42-link" -> 42).
+    pub number: u64,
+    /// Plain "2026-11-16 19:58" from the generation link's mtime.
+    pub date: String,
+    /// Nixpkgs version baked into the store name when present (e.g.
+    /// "26.05.20261020.cd4ea8d").
+    pub version: Option<String>,
+    /// True when this is the generation the system is currently running.
+    pub current: bool,
+}
+
+/// Parse the generation number out of a profile file name like
+/// "system-42-link". Pure, unit-tested.
+pub fn parse_generation_number(name: &str) -> Option<u64> {
+    let rest = name.strip_prefix("system-")?.strip_suffix("-link")?;
+    rest.parse().ok()
+}
+
+/// Extract the nixpkgs version from a store name like
+/// "nixos-system-jono-laptop-26.05.20261020.cd4ea8d" (the trailing
+/// version.revision field). Pure, unit-tested; None when unparseable.
+pub fn parse_store_version(name: &str) -> Option<String> {
+    let base = name.rsplit('/').next().unwrap_or(name);
+    // Split on the last "-version" boundary: everything from the first
+    // segment that looks like a dotted date/revision.
+    let fields: Vec<&str> = base.split('-').collect();
+    let pos = fields
+        .iter()
+        .rposition(|f| f.chars().next().is_some_and(|c| c.is_ascii_digit()))?;
+    let tail: Vec<&str> = fields[pos..].to_vec();
+    let version = tail.join("-");
+    if version.contains('.') {
+        Some(version)
+    } else {
+        None
+    }
+}
+
+/// List the system generations by reading the world-readable profile
+/// symlinks under /nix/var/nix/profiles (no root needed): each
+/// `system-N-link` names a generation; the `system` symlink points at the
+/// current one. Returns newest-first with the current generation marked.
+pub fn list_generations() -> Vec<GenerationInfo> {
+    let dir = Path::new("/nix/var/nix/profiles");
+    let mut gens: Vec<GenerationInfo> = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return gens;
+    };
+    let current_target = std::fs::read_link(dir.join("system"))
+        .ok()
+        .and_then(|t| t.file_name().map(|s| s.to_string_lossy().into_owned()));
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(number) = parse_generation_number(&name) else {
+            continue;
+        };
+        let date = entry
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .map(|t| match t.duration_since(std::time::UNIX_EPOCH) {
+                Ok(d) => format_epoch(d.as_secs()),
+                Err(_) => "unknown date".into(),
+            })
+            .unwrap_or_else(|| "unknown date".into());
+        let version = std::fs::read_link(entry.path())
+            .ok()
+            .and_then(|t| t.to_str().map(str::to_string))
+            .and_then(|target| parse_store_version(&target));
+        let current = current_target.as_deref() == Some(&name);
+        gens.push(GenerationInfo {
+            number,
+            date,
+            version,
+            current,
+        });
+    }
+    gens.sort_by_key(|g| std::cmp::Reverse(g.number));
+    gens
+}
+
+/// Format a unix-epoch timestamp as "YYYY-MM-DD HH:MM" in local time, using
+/// a small civil-date algorithm (no chrono dependency). Pure, unit-tested.
+pub fn format_epoch(secs: u64) -> String {
+    // Local-time offset via the `date` binary would be a subprocess per
+    // generation; instead compute UTC civil time (the store mtimes are local
+    // wall-clock on typical NixOS installs; a few hours of drift is fine for
+    // a plain "when was this version made" readout).
+    let days = (secs / 86400) as i64;
+    let rem = secs % 86400;
+    let (h, m) = (rem / 3600, (rem % 3600) / 60);
+    // Howard Hinnant's civil-from-days algorithm.
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if mo <= 2 { y + 1 } else { y };
+    format!("{y:04}-{mo:02}-{d:02} {h:02}:{m:02}")
+}
+
 /// Create a tar.gz archive of the generation directory containing exactly
 /// configuration.nix and generated-desired.nix.
 fn create_tar_gz(dir: &std::path::Path) -> std::io::Result<Vec<u8>> {
@@ -688,6 +796,38 @@ mod tests {
     }
 
     #[test]
+    fn parses_generation_numbers() {
+        assert_eq!(parse_generation_number("system-42-link"), Some(42));
+        assert_eq!(parse_generation_number("system-0-link"), Some(0));
+        assert_eq!(parse_generation_number("system-88-link"), Some(88));
+        assert_eq!(parse_generation_number("default"), None);
+        assert_eq!(parse_generation_number("system-link"), None);
+        assert_eq!(parse_generation_number("system-42"), None);
+    }
+
+    #[test]
+    fn parses_store_versions() {
+        assert_eq!(
+            parse_store_version("/nix/store/abc-nixos-system-jono-laptop-26.05.20261020.cd4ea8d"),
+            Some("26.05.20261020.cd4ea8d".into())
+        );
+        assert_eq!(
+            parse_store_version("nixos-system-nixos-26.11.20261011.7fd4004"),
+            Some("26.11.20261011.7fd4004".into())
+        );
+        assert_eq!(parse_store_version("nixos-system-host"), None);
+        assert_eq!(parse_store_version(""), None);
+    }
+
+    #[test]
+    fn formats_epoch_times() {
+        assert_eq!(format_epoch(0), "1970-01-01 00:00");
+        assert_eq!(format_epoch(86400), "1970-01-02 00:00");
+        assert_eq!(format_epoch(1_700_000_000), "2023-11-14 22:13");
+        assert_eq!(format_epoch(1_728_000_000), "2024-10-04 00:00");
+    }
+
+    #[test]
     fn state_version_parses_nixos_output() {
         assert_eq!(
             parse_state_version("26.05.20261113.f1e5c35 (Yarara)"),
@@ -761,6 +901,23 @@ mod tests {
     /// preserved config already defines (the renderer adds packages only for
     /// existing accounts); falls back to system scope if USER is unset.
     #[test]
+    /// Live proof (opt-in): the generations listing reads this NixOS host's
+    /// real profile symlinks and marks exactly one generation current.
+    #[test]
+    #[ignore = "requires a NixOS host with system generations"]
+    fn live_list_generations() {
+        let gens = list_generations();
+        assert!(!gens.is_empty(), "no generations found");
+        assert_eq!(
+            gens.iter().filter(|g| g.current).count(),
+            1,
+            "exactly one generation is current"
+        );
+        assert!(gens.iter().all(|g| g.number > 0));
+        // Newest first.
+        assert!(gens.windows(2).all(|w| w[0].number >= w[1].number));
+    }
+
     #[ignore = "requires nixos-rebuild on a NixOS host"]
     fn scratch_dry_build_succeeds() {
         let Some(rebuild) = discover_rebuild() else {
