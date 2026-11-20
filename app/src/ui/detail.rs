@@ -352,7 +352,12 @@ pub fn wire(
             Some(a) => a,
             None => return,
         };
-        match *d.state.borrow() {
+        // Snapshot the state so `d.state` is not held borrowed across the
+        // match (its temporaries live until the end of the match), which
+        // would otherwise re-borrow panics in arms that mutate it (e.g. the
+        // Idle/Unavailable arm's start_availability_check).
+        let state = *d.state.borrow();
+        match state {
             InstallState::Checking => {}
             InstallState::Added => {
                 queue_click.borrow_mut().remove(&attr);
