@@ -301,6 +301,42 @@ pub enum ActivateAction {
     Rollback,
 }
 
+/// Storage upkeep action requested by the UI (7wo.9). Each maps to one
+/// fixed, argument-free helper subcommand; the helper owns the exact
+/// command (D24).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CleanupAction {
+    /// Delete old generations and garbage-collect (keep recent ones).
+    Gc,
+    /// Hard-link identical store files to save space.
+    Optimise,
+    /// Dry-run of `Gc`: report what would be freed, change nothing.
+    GcEstimate,
+}
+
+impl CleanupAction {
+    /// The exact helper subcommand this action maps to.
+    pub fn subcommand(self) -> &'static str {
+        match self {
+            CleanupAction::Gc => "gc",
+            CleanupAction::Optimise => "optimise",
+            CleanupAction::GcEstimate => "gc-estimate",
+        }
+    }
+}
+
+/// Result of a storage-upkeep attempt. Reuses the activation result shape
+/// (ok / plain note / technical log).
+#[derive(Debug, Clone)]
+pub struct CleanupResult {
+    pub ok: bool,
+    pub note: String,
+    pub log: String,
+    /// Parsed from the dry-run output when available: e.g. "1056 store paths
+    /// would be deleted".
+    pub summary: Option<String>,
+}
+
 /// Result of an activation attempt.
 #[derive(Debug, Clone)]
 pub struct ActivateResult {
@@ -432,6 +468,112 @@ pub fn activate(
     }
 }
 
+/// Run a storage-upkeep action: `pkexec nix-pilot-apply <fixed subcommand>`
+/// with no stdin. Fails closed on `can_activate()`; maps every action to the
+/// exact fixed subcommand from the enum, so the elevated helper never
+/// receives caller-supplied text (D24).
+pub fn cleanup(action: CleanupAction, timeout: std::time::Duration) -> CleanupResult {
+    if !can_activate() {
+        return CleanupResult {
+            ok: false,
+            note: "storage upkeep is not enabled on this system".into(),
+            log: "set NIX_PILOT_ALLOW_SWITCH only with the nix-pilot system module installed."
+                .into(),
+            summary: None,
+        };
+    }
+    let Some(helper) = which_apply_helper() else {
+        return CleanupResult {
+            ok: false,
+            note: "nix-pilot-apply helper not found".into(),
+            log: String::new(),
+            summary: None,
+        };
+    };
+    let mut cmd = std::process::Command::new("pkexec");
+    cmd.arg(&helper).arg(action.subcommand());
+    match run_with_stdin(&mut cmd, &[], timeout) {
+        Ok(output) => {
+            let combined = format!("{}\n{}", output.stdout, output.stderr);
+            let ok = output.status.success();
+            let summary = parse_gc_estimate(&combined);
+            CleanupResult {
+                ok,
+                note: if ok {
+                    match action {
+                        CleanupAction::Gc => "old versions were cleaned up".into(),
+                        CleanupAction::Optimise => "storage was reclaimed".into(),
+                        CleanupAction::GcEstimate => "here is what cleaning would free".into(),
+                    }
+                } else {
+                    "storage upkeep failed".into()
+                },
+                log: combined
+                    .lines()
+                    .rev()
+                    .take(12)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                summary,
+            }
+        }
+        Err(e) => CleanupResult {
+            ok: false,
+            note: "storage upkeep failed".into(),
+            log: e.to_string(),
+            summary: None,
+        },
+    }
+}
+
+/// Extract the human summary line from `nix-collect-garbage --dry-run`
+/// output (e.g. "1056 store paths would be deleted"). Pure, unit-tested.
+pub fn parse_gc_estimate(output: &str) -> Option<String> {
+    output
+        .lines()
+        .map(str::trim)
+        .find(|l| l.ends_with("would be deleted"))
+        .map(str::to_string)
+}
+
+/// Read-only size of the Nix store in bytes (du of /nix/store). Never
+/// elevated; plain data the app shows as "in use on this computer".
+pub fn store_usage_bytes() -> Option<u64> {
+    let out = std::process::Command::new("du")
+        .arg("-s")
+        .arg("-b")
+        .arg("/nix/store")
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let first = String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .next()?
+        .to_string();
+    first.parse::<u64>().ok()
+}
+
+/// Format a byte count in a short human unit (B, MiB, GiB).
+pub fn human_bytes(bytes: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = KIB * 1024;
+    const GIB: u64 = MIB * 1024;
+    if bytes >= GIB {
+        format!("{:.1} GiB", bytes as f64 / GIB as f64)
+    } else if bytes >= MIB {
+        format!("{:.1} MiB", bytes as f64 / MIB as f64)
+    } else if bytes >= KIB {
+        format!("{:.1} KiB", bytes as f64 / KIB as f64)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 /// Create a tar.gz archive of the generation directory containing exactly
 /// configuration.nix and generated-desired.nix.
 fn create_tar_gz(dir: &std::path::Path) -> std::io::Result<Vec<u8>> {
@@ -515,6 +657,35 @@ fn run_with_stdin(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_gc_estimate_summary() {
+        assert_eq!(
+            parse_gc_estimate("removing stale link...\n1056 store paths would be deleted"),
+            Some("1056 store paths would be deleted".into())
+        );
+        assert_eq!(
+            parse_gc_estimate("determining live/dead paths...\n0 store paths would be deleted\n"),
+            Some("0 store paths would be deleted".into())
+        );
+        assert_eq!(parse_gc_estimate("nothing here"), None);
+        assert_eq!(parse_gc_estimate(""), None);
+    }
+
+    #[test]
+    fn cleanup_action_subcommands_are_fixed() {
+        assert_eq!(CleanupAction::Gc.subcommand(), "gc");
+        assert_eq!(CleanupAction::Optimise.subcommand(), "optimise");
+        assert_eq!(CleanupAction::GcEstimate.subcommand(), "gc-estimate");
+    }
+
+    #[test]
+    fn formats_human_bytes() {
+        assert_eq!(human_bytes(0), "0 B");
+        assert_eq!(human_bytes(1536), "1.5 KiB");
+        assert_eq!(human_bytes(5 * 1024 * 1024), "5.0 MiB");
+        assert_eq!(human_bytes(2 * 1024 * 1024 * 1024), "2.0 GiB");
+    }
 
     #[test]
     fn state_version_parses_nixos_output() {

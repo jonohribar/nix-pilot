@@ -138,7 +138,13 @@ impl SettingsPage {
 
         let mut cat_pages: std::collections::BTreeMap<&'static str, gtk4::Box> =
             std::collections::BTreeMap::new();
-        for (child, title) in categories {
+        // Categories are (label, child-id) pairs: the page title is the label
+        // and the stack/map key is the id, so the nav buttons (which set the
+        // visible child by id) and the card appends (which key by spec
+        // category id) agree. (Fixed 2026-11-20: the first release bound
+        // these swapped and the map was keyed by labels, panicking on the
+        // first non-updates spec.)
+        for (title, child) in categories {
             let page = category_page(&stack, title);
             stack.add_named(&page, Some(child));
             cat_pages.insert(child, page);

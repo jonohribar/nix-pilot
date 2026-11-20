@@ -19,6 +19,12 @@ pub struct UpdatesPage {
     /// Set-and-forget upkeep controls (category "updates").
     auto_bools: Vec<(String, gtk4::Switch)>,
     auto_strs: Vec<(String, gtk4::Entry)>,
+    /// Storage upkeep (7wo.9): read-only usage readout + run-now buttons.
+    storage_usage: gtk4::Label,
+    storage_result: gtk4::Label,
+    estimate_btn: gtk4::Button,
+    cleanup_btn: gtk4::Button,
+    optimise_btn: gtk4::Button,
     queue_list: gtk4::ListBox,
     results_label: gtk4::Label,
     results_list: gtk4::ListBox,
@@ -64,6 +70,94 @@ fn prepare_changes(
         None
     };
     PrepareResult { report, candidate }
+}
+
+/// Wire the Storage card's three run-now buttons: each runs elevated through
+/// `apply::cleanup` on a worker thread (only Send values cross the thread
+/// boundary; widgets are re-touched on the GTK thread via a short poll).
+fn wire_storage_buttons(
+    result: &gtk4::Label,
+    estimate: &gtk4::Button,
+    cleanup: &gtk4::Button,
+    optimise: &gtk4::Button,
+) {
+    let est_r = result.clone();
+    let cln_r = result.clone();
+    let opt_r = result.clone();
+
+    let (est, cln, opt) = (estimate.clone(), cleanup.clone(), optimise.clone());
+    estimate.connect_clicked(move |_| {
+        run_storage_action(
+            &est_r,
+            &est,
+            &cln,
+            &opt,
+            apply::CleanupAction::GcEstimate,
+            false,
+        )
+    });
+    let (est, cln, opt) = (estimate.clone(), cleanup.clone(), optimise.clone());
+    cleanup.connect_clicked(move |_| {
+        run_storage_action(&cln_r, &est, &cln, &opt, apply::CleanupAction::Gc, true)
+    });
+    let (est, cln, opt) = (estimate.clone(), cleanup.clone(), optimise.clone());
+    optimise.connect_clicked(move |_| {
+        run_storage_action(
+            &opt_r,
+            &est,
+            &cln,
+            &opt,
+            apply::CleanupAction::Optimise,
+            true,
+        )
+    });
+}
+
+/// Run one storage action: disable the buttons, run elevated on a worker,
+/// then post the outcome back on the GTK thread (poll with a short timeout).
+fn run_storage_action(
+    result: &gtk4::Label,
+    estimate: &gtk4::Button,
+    cleanup: &gtk4::Button,
+    optimise: &gtk4::Button,
+    action: apply::CleanupAction,
+    busy: bool,
+) {
+    result.set_text("Running…");
+    for b in [estimate, cleanup, optimise] {
+        b.set_sensitive(false);
+    }
+    let (tx, rx) = std::sync::mpsc::channel::<apply::CleanupResult>();
+    std::thread::spawn(move || {
+        let r = apply::cleanup(action, std::time::Duration::from_secs(600));
+        let _ = tx.send(r);
+    });
+    let result = result.clone();
+    let (estimate, cleanup, optimise) = (estimate.clone(), cleanup.clone(), optimise.clone());
+    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+        match rx.try_recv() {
+            Ok(r) => {
+                let text = match r.summary {
+                    Some(s) => format!("{s} — {}", r.note),
+                    None => r.note,
+                };
+                let text = if !r.ok && !r.log.is_empty() {
+                    format!("{text} ({})", r.log.lines().next().unwrap_or(""))
+                } else {
+                    text
+                };
+                result.set_text(&text);
+                if !busy {
+                    for b in [&estimate, &cleanup, &optimise] {
+                        b.set_sensitive(apply::can_activate());
+                    }
+                }
+                glib::ControlFlow::Break
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(_) => glib::ControlFlow::Break,
+        }
+    });
 }
 
 /// Outcome classification for a prepare run (pure, unit-testable).
@@ -265,6 +359,41 @@ impl UpdatesPage {
         automatic_card.append(&automatic_box);
         page.append(&automatic_card);
 
+        // Storage upkeep (7wo.9): read-only usage readout + run-now actions,
+        // gated on activation (the cleanup runs elevated through the helper).
+        let storage_card = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+        storage_card.add_css_class("card");
+        storage_card.set_margin_top(6);
+        let storage_heading = gtk4::Label::new(Some("Storage"));
+        storage_heading.add_css_class("heading");
+        storage_heading.set_xalign(0.0);
+        let storage_usage = gtk4::Label::new(Some("Checking how much the store holds…"));
+        storage_usage.set_xalign(0.0);
+        storage_usage.set_wrap(true);
+        storage_usage.add_css_class("dim-label");
+        let storage_result = gtk4::Label::new(None);
+        storage_result.set_xalign(0.0);
+        storage_result.set_wrap(true);
+        storage_result.add_css_class("dim-label");
+        let storage_btns = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        storage_btns.set_halign(gtk4::Align::Start);
+        let estimate_btn = gtk4::Button::with_label("Check what cleaning would free");
+        let cleanup_btn = gtk4::Button::with_label("Clean up old versions");
+        let optimise_btn = gtk4::Button::with_label("Reclaim storage");
+        for b in [&estimate_btn, &cleanup_btn, &optimise_btn] {
+            b.set_sensitive(false);
+            b.set_tooltip_text(Some(
+                "Storage upkeep runs through the nix-pilot system module; activate it \
+                 (NIX_PILOT_ALLOW_SWITCH) to enable these.",
+            ));
+            storage_btns.append(b);
+        }
+        storage_card.append(&storage_heading);
+        storage_card.append(&storage_usage);
+        storage_card.append(&storage_result);
+        storage_card.append(&storage_btns);
+        page.append(&storage_card);
+
         let queue_list = gtk4::ListBox::new();
         page.append(&queue_list);
 
@@ -329,6 +458,11 @@ impl UpdatesPage {
             step,
             auto_bools,
             auto_strs,
+            storage_usage,
+            storage_result,
+            estimate_btn,
+            cleanup_btn,
+            optimise_btn,
             queue_list,
             results_label,
             results_list,
@@ -338,9 +472,38 @@ impl UpdatesPage {
         }
     }
 
+    /// Read the store size on a worker thread and show it (read-only).
+    /// The widget never crosses the thread boundary: the worker sends a plain
+    /// String back and the GTK thread polls for it.
+    fn refresh_storage_usage(&self) {
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        std::thread::spawn(move || {
+            let _ = tx.send(match apply::store_usage_bytes() {
+                Some(bytes) => format!(
+                    "The package store holds {} on this computer.",
+                    apply::human_bytes(bytes)
+                ),
+                None => "Could not read the store size on this computer.".to_string(),
+            });
+        });
+        let label = self.storage_usage.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+            match rx.try_recv() {
+                Ok(text) => {
+                    label.set_text(&text);
+                    glib::ControlFlow::Break
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(_) => glib::ControlFlow::Break,
+            }
+        });
+    }
+
     /// Reset then repopulate the queued-change list (call when shown).
     pub fn refresh(&self, queue: &Rc<RefCell<ChangeQueue>>) {
         self.reset();
+        self.refresh_storage_usage();
+        self.storage_result.set_text("");
         while let Some(child) = self.queue_list.first_child() {
             self.queue_list.remove(&child);
         }
@@ -440,6 +603,25 @@ impl UpdatesPage {
                 save();
             });
         }
+
+        // Storage upkeep: the run-now actions route through the sanctioned
+        // helper, so they are enabled only when activation is (module+flag).
+        let storage_result = self.storage_result.clone();
+        let estimate_btn = self.estimate_btn.clone();
+        let cleanup_btn = self.cleanup_btn.clone();
+        let optimise_btn = self.optimise_btn.clone();
+        let activate = apply::can_activate();
+        for b in [&estimate_btn, &cleanup_btn, &optimise_btn] {
+            b.set_sensitive(activate);
+            b.set_tooltip_text(Some(match activate {
+                true => "Runs through the nix-pilot-apply helper (root).",
+                false => {
+                    "Storage upkeep runs through the nix-pilot system module; \
+                     activate it (NIX_PILOT_ALLOW_SWITCH) to enable these."
+                }
+            }));
+        }
+        wire_storage_buttons(&storage_result, &estimate_btn, &cleanup_btn, &optimise_btn);
 
         // Clone shared state for both Prepare and Apply handlers
         let queue_for_prepare = queue.clone();

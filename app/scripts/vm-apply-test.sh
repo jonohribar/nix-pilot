@@ -81,6 +81,18 @@ pkgs.testers.runNixOSTest {
     low2 = out2.lower()
     assert "not authorized" not in low2, "rollback denied: " + out2
     print("rollback path authorized (rc={})".format(status2))
+
+    # storage upkeep subcommands are argument-free fixed actions, authorized
+    # through the same polkit action (7wo.9)
+    status3, out3 = machine.execute(
+        "su -l tester -c 'pkexec nix-pilot-apply gc-estimate'")
+    low3 = out3.lower()
+    assert "not authorized" not in low3, "gc-estimate denied: " + out3
+    assert "store" in low3 or "freed" in low3, "gc-estimate odd output: " + out3
+    print("gc-estimate runs via pkexec (rc={})".format(status3))
+    status4, _ = machine.execute(
+        "su -l tester -c 'pkexec nix-pilot-apply optimise'")
+    print("optimise runs via pkexec (rc={})".format(status4))
   '';
 }
 EOF

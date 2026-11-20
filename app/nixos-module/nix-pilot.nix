@@ -17,7 +17,7 @@ let
   # The root-only operations the desktop app is allowed to request.
   nix-pilot-apply = pkgs.writeShellApplication {
     name = "nix-pilot-apply";
-    runtimeInputs = [ pkgs.gnutar pkgs.nixos-rebuild ];
+    runtimeInputs = [ pkgs.gnutar pkgs.nixos-rebuild pkgs.nix ];
     text = ''
       set -euo pipefail
       area=/etc/nix-pilot/generated
@@ -45,8 +45,21 @@ let
           ensure_area
           nixos-rebuild --rollback
           ;;
+        # Storage upkeep (7wo.9): fixed, argument-free actions only. Estimates
+        # and actual cleanup never take parameters from the caller; the app
+        # asks for a fixed action and the helper decides the exact command.
+        gc)
+          nix-collect-garbage --delete-old
+          ;;
+        optimise)
+          nix store optimise
+          ;;
+        gc-estimate)
+          nix-collect-garbage --delete-old --dry-run
+          ;;
         *)
-          echo "nix-pilot-apply: unknown subcommand '$1' (build|switch|rollback)" >&2
+          echo "nix-pilot-apply: unknown subcommand '$1' \
+(build|switch|rollback|gc|optimise|gc-estimate)" >&2
           exit 2
           ;;
       esac
