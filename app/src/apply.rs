@@ -613,11 +613,18 @@ mod tests {
             "networking.hostName".into(),
             SettingValue::Str("nix-pilot-scratch".into()),
         );
-        doc.settings.insert("nix.gc.automatic".into(), SettingValue::Bool(true));
+        doc.settings
+            .insert("nix.gc.automatic".into(), SettingValue::Bool(true));
+        doc.settings
+            .insert("system.autoUpgrade.enable".into(), SettingValue::Bool(true));
+        doc.settings
+            .insert("hardware.bluetooth.enable".into(), SettingValue::Bool(true));
         doc.settings.insert(
-            "system.autoUpgrade.enable".into(),
-            SettingValue::Bool(true),
+            "hardware.bluetooth.powerOnBoot".into(),
+            SettingValue::Bool(false),
         );
+        doc.settings
+            .insert("services.pipewire.enable".into(), SettingValue::Bool(true));
         let dir = std::env::temp_dir().join(format!("np-live-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let outer = write_generation(&dir, &doc, &sv, cfg.as_deref(), hw.as_deref()).unwrap();

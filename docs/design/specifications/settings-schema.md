@@ -44,10 +44,13 @@ Shipped in `app/src/settings.rs` (single-value overrides, verified against the p
 |---|---|---|---|
 | Device name | `networking.hostName` | string | device name on the network |
 | Network connections | `networking.networkmanager.enable` | boolean | manage Wi-Fi/wired via NetworkManager |
+| Bluetooth | `hardware.bluetooth.enable` | boolean | use Bluetooth devices (headphones, mice, keyboards) |
+| Bluetooth at startup | `hardware.bluetooth.powerOnBoot` | boolean | turn Bluetooth on at start (needs it enabled) |
 | Time zone | `time.timeZone` | string | the time zone used for times and dates |
 | Language and region | `i18n.defaultLocale` | string | language for messages, dates and numbers |
 | Printing | `services.printing.enable` | boolean | start the printing service |
 | Power management | `powerManagement.enable` | boolean | suspend and power-saving features |
+| Sound | `services.pipewire.enable` | boolean | play and record sound through the desktop (PipeWire) |
 | Remote access (SSH) | `services.openssh.enable` | boolean | allow connecting to this computer remotely |
 | Remote access keys (SSH) | `users.users.<name>.openssh.authorizedKeys.keys` | list of strings (per user) | the public keys allowed to log into this computer, one per line (add/remove) |
 

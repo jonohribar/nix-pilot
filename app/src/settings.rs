@@ -54,8 +54,9 @@ const fn str_spec(
 
 /// The owned surface, in display order (first-release, verified on the
 /// pinned nixpkgs: networking.hostName, networking.networkmanager.enable,
-/// time.timeZone, i18n.defaultLocale, services.printing.enable,
-/// powerManagement.enable, services.openssh.enable).
+/// hardware.bluetooth.enable, hardware.bluetooth.powerOnBoot, time.timeZone,
+/// i18n.defaultLocale, services.printing.enable, powerManagement.enable,
+/// services.pipewire.enable, services.openssh.enable).
 pub static SPECS: &[Spec] = &[
     str_spec(
         "system",
@@ -77,6 +78,19 @@ pub static SPECS: &[Spec] = &[
         "networking.networkmanager.enable",
         "Network connections",
         "Manage Wi-Fi and wired connections (NetworkManager) instead of static settings.",
+    ),
+    bool_spec(
+        "network",
+        "hardware.bluetooth.enable",
+        "Bluetooth",
+        "Use Bluetooth devices (headphones, mice, keyboards).",
+    ),
+    bool_spec(
+        "network",
+        "hardware.bluetooth.powerOnBoot",
+        "Bluetooth at startup",
+        "Turn Bluetooth on when the computer starts (needs Bluetooth to be \
+         enabled).",
     ),
     str_spec(
         "time",
@@ -118,6 +132,12 @@ pub static SPECS: &[Spec] = &[
         "powerManagement.enable",
         "Power management",
         "Enable suspend and power-saving features (mainly for laptops).",
+    ),
+    bool_spec(
+        "system",
+        "services.pipewire.enable",
+        "Sound",
+        "Play and record sound through the desktop (PipeWire).",
     ),
     bool_spec(
         "privacy",
