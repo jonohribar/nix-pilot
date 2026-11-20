@@ -900,7 +900,6 @@ mod tests {
     /// Uses the real OS user so the per-user entry merges into an account the
     /// preserved config already defines (the renderer adds packages only for
     /// existing accounts); falls back to system scope if USER is unset.
-    #[test]
     /// Live proof (opt-in): the generations listing reads this NixOS host's
     /// real profile symlinks and marks exactly one generation current.
     #[test]
@@ -918,6 +917,7 @@ mod tests {
         assert!(gens.windows(2).all(|w| w[0].number >= w[1].number));
     }
 
+    #[test]
     #[ignore = "requires nixos-rebuild on a NixOS host"]
     fn scratch_dry_build_succeeds() {
         let Some(rebuild) = discover_rebuild() else {
