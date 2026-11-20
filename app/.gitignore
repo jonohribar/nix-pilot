@@ -4,3 +4,7 @@
 # nix build/vm artifacts
 /result
 *.qcow2
+
+# python in the a11y test harness
+__pycache__/
+*.pyc
