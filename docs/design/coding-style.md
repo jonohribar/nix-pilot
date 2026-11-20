@@ -29,6 +29,8 @@ Repeated string-valued categories are enums, not raw strings: package class and 
 
 GTK widgets are not `Send`; only plain data crosses threads (std `mpsc` + a main-loop `timeout_add_local` poller). A finished check carries the requested attribute so a stale result never updates the card of a different selection.
 
+Never `match` on `cell.borrow()` when any arm might mutate the same cell: the borrow's temporary lives to the end of the `match`, so the arm's `borrow_mut()` panics (`RefCell already borrowed` — the Install-click crash, 2026-11-20). Snapshot the value first (`let state = *cell.borrow();`) when the type is `Copy`, or re-borrow inside the arms otherwise.
+
 ## Tests and the gate
 
 Pure logic carries unit tests next to the code. Live nix behaviour is covered by `#[ignore]` integration tests run explicitly. The repeatable gate is
