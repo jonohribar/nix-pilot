@@ -16,6 +16,10 @@ use crate::desired_state::SettingValue;
 pub enum ValueKind {
     String,
     Boolean,
+    /// A small product-authored value set rendered as a dropdown (S3/D14
+    /// authored control, C2: raw option values never shown as free text).
+    /// Each item is (stored value, plain-language label).
+    Choice(&'static [(&'static str, &'static str)]),
 }
 
 /// One owned setting workflow: how it presents and how its value validates.
@@ -154,19 +158,15 @@ pub static SPECS: &[Spec] = &[
         "Regularly remove packages and files nothing needs anymore, so the \
          system does not fill up over time.",
     ),
-    str_spec(
+    choice_spec(
         "updates",
         "nix.gc.options",
         "What cleanup keeps",
-        "How old a version must be before cleanup removes it (empty = the \
-         system's default).",
-        |v| {
-            if v.is_empty() || v.starts_with("--") {
-                Ok(())
-            } else {
-                Err("leave empty, or use a flag like --delete-older-than 7d".into())
-            }
-        },
+        "How old a version must be before cleanup removes it.",
+        &[
+            ("--delete-older-than 7d", "Keep about 7 days"),
+            ("--delete-older-than 30d", "Keep about 30 days"),
+        ],
     ),
     bool_spec(
         "updates",
@@ -204,47 +204,37 @@ pub static SPECS: &[Spec] = &[
             }
         },
     ),
-    str_spec(
+    choice_spec(
         "updates",
         "system.autoUpgrade.randomizedDelaySec",
         "Update delay",
-        "Spread out updates within a window so they do not all happen at \
-         once, like 45min (empty = no spread).",
-        |v| {
-            if v.is_empty()
-                || (v.chars().all(|c| c.is_ascii_digit()) && v.parse::<u64>().is_ok_and(|x| x > 0))
-            {
-                Ok(())
-            } else {
-                Err("use a length of time like 45min (or leave empty)".into())
-            }
-        },
+        "Spread updates out within a window so they do not all happen at once.",
+        &[
+            ("300", "Within about 5 minutes"),
+            ("1800", "Within about 30 minutes"),
+        ],
     ),
-    str_spec(
+    choice_spec(
         "updates",
         "system.autoUpgrade.operation",
         "Update action",
-        "switch = apply the new version right away; boot = apply at the next \
-         restart (empty = the system's default).",
-        |v| {
-            if v.is_empty() || matches!(v, "switch" | "boot") {
-                Ok(())
-            } else {
-                Err("use switch or boot (or leave empty)".into())
-            }
-        },
+        "What happens after a new version is checked and built.",
+        &[
+            ("switch", "Apply right away"),
+            ("boot", "Apply at the next restart"),
+        ],
     ),
     str_spec(
         "updates",
         "system.autoUpgrade.flake",
         "System configuration",
-        "The flake that defines this system, so updates follow it (empty = \
-         the standard layout).",
+        "Which description of this computer automatic updates follow (empty = \
+         this computer's standard setup).",
         |v| {
             if v.is_empty() || !v.chars().any(char::is_whitespace) {
                 Ok(())
             } else {
-                Err("use a path or URL without spaces, or leave empty".into())
+                Err("use a location without spaces, or leave empty".into())
             }
         },
     ),
@@ -266,6 +256,27 @@ const fn bool_spec(
     }
 }
 
+/// A choice setting: plain-language dropdown of authored values. Empty always
+/// means "leave to the system default" and is prepended automatically.
+const fn choice_spec(
+    category: &'static str,
+    key: &'static str,
+    label: &'static str,
+    blurb: &'static str,
+    options: &'static [(&'static str, &'static str)],
+) -> Spec {
+    Spec {
+        key,
+        label,
+        blurb,
+        kind: ValueKind::Choice(options),
+        category,
+        // Choice values are validated centrally against the kind's options
+        // (the fn-pointer field cannot capture `options`).
+        validate: |_| Ok(()),
+    }
+}
+
 /// Validate a value for the given key (returns a plain-language reason).
 pub fn validate(key: &str, value: &SettingValue) -> Result<(), String> {
     let Some(spec) = SPECS.iter().find(|s| s.key == key) else {
@@ -274,8 +285,17 @@ pub fn validate(key: &str, value: &SettingValue) -> Result<(), String> {
     match (spec.kind, value) {
         (ValueKind::Boolean, SettingValue::Bool(_)) => Ok(()),
         (ValueKind::String, SettingValue::Str(s)) => (spec.validate)(s),
+        (ValueKind::Choice(options), SettingValue::Str(s)) => {
+            if s.is_empty() || options.iter().any(|(v, _)| *v == s) {
+                Ok(())
+            } else {
+                Err("choose one of the listed options (or leave empty)".into())
+            }
+        }
         (ValueKind::Boolean, SettingValue::Str(_)) => Err("expected a true/false value".into()),
-        (ValueKind::String, SettingValue::Bool(_)) => Err("expected a text value".into()),
+        (ValueKind::String | ValueKind::Choice(_), SettingValue::Bool(_)) => {
+            Err("expected a text value".into())
+        }
     }
 }
 
@@ -331,6 +351,9 @@ mod tests {
         assert!(ok("system.autoUpgrade.operation", "explode").is_err());
         assert!(ok("nix.gc.options", "--delete-older-than 7d").is_ok());
         assert!(ok("nix.gc.options", "rm -rf /").is_err());
+        // Authored choices: only the listed values pass.
+        assert!(ok("system.autoUpgrade.randomizedDelaySec", "1800").is_ok());
+        assert!(ok("system.autoUpgrade.randomizedDelaySec", "45min").is_err());
         assert!(ok("system.autoUpgrade.flake", "github:user/nixos-config").is_ok());
         assert!(ok("system.autoUpgrade.flake", "a b").is_err());
     }

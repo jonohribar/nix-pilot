@@ -21,6 +21,11 @@ The requirements the product must meet. This document owns the requirement set. 
 - **C9. Package universe.** User-relevant applications are exposed by default; libraries and low-level tools stay out of ordinary browsing.
 - **C10. Unfree applications.** Unfree applications are listed by default, with an optional user filter to hide them (decision [D1](../research/04-recommendations.md#decision-log)).
 
+## Browsing (added 2026-11-20)
+
+- **B1.** The default browse view shows applications first: ordinary browsing starts from what a consumer would recognise (C9), not an alphabetical slice of the whole catalogue. Command-line tools and unverified entries stay reachable through search and an explicit filter, never as the first screen.
+- **B2.** Browse and search results de-duplicate rows for the same package name and version; multiple variants (e.g. firmware builds for different hypervisors) collapse to one row with the variant named, not repeated.
+
 ## Non-goals for the initial product
 
 - Teaching users Nix, Nix expressions, flakes or the module system.

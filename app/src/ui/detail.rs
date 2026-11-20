@@ -28,6 +28,10 @@ pub struct DetailUi {
     pub sub: gtk4::Label,
     pub desc: gtk4::Label,
     pub scope: gtk4::Switch,
+    /// The system-wide scope toggle row (hidden when install is unavailable).
+    pub scope_row: gtk4::Box,
+    /// The card holding the install button + scope toggle.
+    pub install_card: gtk4::Box,
     pub meta: gtk4::Box,
     pub home: gtk4::Button,
     pub page: gtk4::Box,
@@ -138,6 +142,8 @@ impl DetailUi {
             sub,
             desc,
             scope,
+            scope_row: scope_h,
+            install_card: card,
             meta,
             home,
             page,
@@ -224,11 +230,24 @@ impl DetailUi {
             self.home.set_tooltip_text(None);
         }
 
-        // install card reset (the queue re-syncs this via sync_added after)
+        // install card reset (the queue re-syncs this via sync_added after).
+        // Known-unavailable entries (linux_ok=false from the catalogue) are a
+        // first-class state (architecture.md): the install action is not
+        // offered, never an enabled CTA beside a "cannot be installed" note.
         *self.state.borrow_mut() = InstallState::Idle;
         *self.current_attr.borrow_mut() = Some(e.attr.clone());
-        self.btn_install.set_sensitive(true);
-        self.btn_install.set_label("Install for me");
+        if e.linux_ok {
+            self.btn_install.set_sensitive(true);
+            self.btn_install.set_label("Install for me");
+            self.install_card.set_visible(true);
+            self.scope_row.set_visible(true);
+        } else {
+            self.btn_install.set_sensitive(false);
+            self.btn_install.set_label("Not available on this system");
+            // The scope toggle is part of the install offer; with no install
+            // it is noise, so the whole card steps aside.
+            self.install_card.set_visible(false);
+        }
         self.status.set_text("");
         self.expander.set_visible(false);
         self.expander.set_expanded(false);

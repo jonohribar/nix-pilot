@@ -67,12 +67,14 @@ impl Default for Tier {
 impl Tier {
     pub fn label(self) -> &'static str {
         match self {
-            Tier::Rich => "Verified — rich metadata",
-            Tier::Basic => "Verified — desktop entry",
-            Tier::UnfreeDeferred => "Unfree — listed, no cache evidence",
-            Tier::Unverified => "Unverified — no desktop evidence",
+            // Consumer-language tier labels (C2/C8, sje): what the user can
+            // rely on, not the generator's internal classification.
+            Tier::Rich => "Verified download",
+            Tier::Basic => "Verified app",
+            Tier::UnfreeDeferred => "Listed — licence restricted",
+            Tier::Unverified => "Not yet verified",
             // the generator's heuristic tier (and any future unknown) lands
-            Tier::Other => "Heuristic — not cache-verified",
+            Tier::Other => "Not yet verified",
         }
     }
 }
@@ -162,16 +164,16 @@ mod tests {
     fn tier_deserializes_and_labels() {
         let t: Tier = serde_json::from_str("\"unfree-deferred\"").unwrap();
         assert_eq!(t, Tier::UnfreeDeferred);
-        assert!(t.label().contains("Unfree"));
+        assert!(t.label().contains("licence restricted"));
     }
 
     #[test]
     fn heuristic_tier_falls_back_to_other_label() {
         // the index's generator tier 'heuristic' is not a cache-evidence tier;
-        // it must deserialize (fallback) and label honestly
+        // it must deserialize (fallback) and label honestly — in consumer
+        // language (sje): not "verified", never generator jargon
         let t: Tier = serde_json::from_str("\"heuristic\"").unwrap();
         assert_eq!(t, Tier::Other);
-        assert!(t.label().contains("Heuristic"));
-        assert!(!t.label().contains("Verified"));
+        assert_eq!(t.label(), "Not yet verified");
     }
 }

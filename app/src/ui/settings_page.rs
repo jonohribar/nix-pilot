@@ -17,6 +17,8 @@ use crate::settings::{self, ValueKind};
 enum Control {
     Entry(gtk4::Entry),
     Switch(gtk4::Switch),
+    /// Product-authored dropdown (settings::ValueKind::Choice).
+    Dropdown(gtk4::ComboBoxText),
 }
 
 impl Clone for Control {
@@ -24,6 +26,7 @@ impl Clone for Control {
         match self {
             Control::Entry(e) => Control::Entry(e.clone()),
             Control::Switch(s) => Control::Switch(s.clone()),
+            Control::Dropdown(c) => Control::Dropdown(c.clone()),
         }
     }
 }
@@ -83,8 +86,12 @@ impl SettingsPage {
         profile.set_halign(gtk4::Align::Fill);
         profile.add_css_class("card");
         let avatar = gtk4::Label::new(Some(&initial_of(account)));
-        avatar.add_css_class("avatar");
-        avatar.set_margin_end(12);
+        avatar.add_css_class("title-3");
+        avatar.set_width_chars(2);
+        avatar.set_margin_start(12);
+        avatar.set_margin_end(6);
+        avatar.set_margin_top(8);
+        avatar.set_margin_bottom(8);
         let name_col = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
         let name_label = gtk4::Label::new(Some(&full_name_of(account)));
         name_label.add_css_class("heading");
@@ -94,7 +101,7 @@ impl SettingsPage {
         acc_label.set_xalign(0.0);
         name_col.append(&name_label);
         name_col.append(&acc_label);
-        let profile_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+        let profile_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
         profile_row.append(&avatar);
         profile_row.append(&name_col);
         profile.set_child(Some(&profile_row));
@@ -106,35 +113,55 @@ impl SettingsPage {
 
         // Category navigation (familiar names shared across desktop shells).
         // Updates is a top-level sidebar surface, never duplicated here
-        // (single-topping, fyq).
-        let categories: [(&str, &str); 6] = [
-            ("System", "system"),
-            ("Network & internet", "network"),
-            ("Accounts", "accounts"),
-            ("Time & language", "time"),
-            ("Personalisation", "appearance"),
-            ("Privacy & security", "privacy"),
+        // (single-topping, fyq). Each row states what lives inside it (hd9):
+        // icon + label + summary, like the shells this layout mirrors.
+        let categories: [(&str, &str, &str); 6] = [
+            ("System", "Device name, printing, power, sound", "system"),
+            ("Network & internet", "Wi-Fi, wired, Bluetooth", "network"),
+            ("Accounts", "Accounts and remote access keys", "accounts"),
+            ("Time & language", "Time zone, language and region", "time"),
+            (
+                "Personalisation",
+                "Where your desktop's own settings live",
+                "appearance",
+            ),
+            ("Privacy & security", "Remote access (SSH)", "privacy"),
         ];
-        for (label, child) in categories {
-            let btn = gtk4::Button::with_label(label);
+        for (label, summary, child) in &categories {
+            let btn = gtk4::Button::new();
             btn.set_halign(gtk4::Align::Fill);
             btn.add_css_class("nav-item");
-            let s = stack.clone();
+            let row = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+            row.set_margin_top(8);
+            row.set_margin_bottom(8);
+            row.set_margin_start(14);
+            row.set_margin_end(14);
+            let l = gtk4::Label::new(Some(label));
+            l.add_css_class("heading");
+            l.set_xalign(0.0);
+            let s = gtk4::Label::new(Some(summary));
+            s.add_css_class("dim-label");
+            s.set_xalign(0.0);
+            s.set_wrap(true);
+            row.append(&l);
+            row.append(&s);
+            btn.set_child(Some(&row));
+            let st = stack.clone();
             let child = child.to_string();
-            btn.connect_clicked(move |_| s.set_visible_child_name(&child));
+            btn.connect_clicked(move |_| st.set_visible_child_name(&child));
             home.append(&btn);
         }
         stack.add_named(&home, Some("home"));
 
         let mut cat_pages: std::collections::BTreeMap<&'static str, gtk4::Box> =
             std::collections::BTreeMap::new();
-        // Categories are (label, child-id) pairs: the page title is the label
-        // and the stack/map key is the id, so the nav buttons (which set the
-        // visible child by id) and the card appends (which key by spec
-        // category id) agree. (Fixed 2026-11-20: the first release bound
-        // these swapped and the map was keyed by labels, panicking on the
-        // first non-updates spec.)
-        for (title, child) in categories {
+        // Categories are (label, summary, child-id) triples: the page title
+        // is the label and the stack/map key is the id, so the nav buttons
+        // (which set the visible child by id) and the card appends (which
+        // key by spec category id) agree. (Fixed 2026-11-20: the first
+        // release bound these swapped and the map was keyed by labels,
+        // panicking on the first non-updates spec.)
+        for (title, _summary, child) in categories {
             let page = category_page(&stack, title);
             stack.add_named(&page, Some(child));
             cat_pages.insert(child, page);
@@ -157,19 +184,34 @@ impl SettingsPage {
             card.append(&label);
             card.append(&blurb);
 
-            // bool settings render as a switch; string settings as an entry
-            let control = if spec.kind == ValueKind::Boolean {
-                let sw = gtk4::Switch::new();
-                sw.set_halign(gtk4::Align::Start);
-                sw.set_margin_top(4);
-                card.append(&sw);
-                Control::Switch(sw)
-            } else {
-                let entry = gtk4::Entry::new();
-                entry.set_placeholder_text(Some("(not set — uses your system default)"));
-                entry.set_margin_top(4);
-                card.append(&entry);
-                Control::Entry(entry)
+            // bool → switch; authored value set → dropdown; other strings
+            // → free-text entry (S3/D14 authored controls, C2).
+            let control = match spec.kind {
+                ValueKind::Boolean => {
+                    let sw = gtk4::Switch::new();
+                    sw.set_halign(gtk4::Align::Start);
+                    sw.set_margin_top(4);
+                    card.append(&sw);
+                    Control::Switch(sw)
+                }
+                ValueKind::Choice(options) => {
+                    let combo = gtk4::ComboBoxText::new();
+                    combo.append(None, "(system default)");
+                    for (value, plain) in options {
+                        combo.append(Some(value), plain);
+                    }
+                    combo.set_active(Some(0));
+                    combo.set_margin_top(4);
+                    card.append(&combo);
+                    Control::Dropdown(combo)
+                }
+                ValueKind::String => {
+                    let entry = gtk4::Entry::new();
+                    entry.set_placeholder_text(Some("(not set — uses your system default)"));
+                    entry.set_margin_top(4);
+                    card.append(&entry);
+                    Control::Entry(entry)
+                }
             };
 
             // Current value label (dim, shown under the control)
@@ -356,6 +398,32 @@ impl SettingsPage {
                         glib::Propagation::Proceed
                     });
                 }
+                Control::Dropdown(combo) => {
+                    // Load current choice; empty/absent = system default.
+                    let current = desired.borrow().settings.get(key).cloned();
+                    if let Some(SettingValue::Str(s)) = current {
+                        combo.set_active_id(Some(&s));
+                    } else {
+                        combo.set_active(Some(0));
+                    }
+                    let desired = desired.clone();
+                    let save = save.clone();
+                    combo.connect_changed(move |c| {
+                        let chosen = c.active_id().map(|g| g.to_string());
+                        match chosen {
+                            Some(v) if !v.is_empty() => {
+                                desired
+                                    .borrow_mut()
+                                    .settings
+                                    .insert(key.to_string(), SettingValue::Str(v));
+                            }
+                            _ => {
+                                desired.borrow_mut().settings.remove(key);
+                            }
+                        }
+                        save();
+                    });
+                }
             }
         }
 
@@ -509,7 +577,10 @@ impl SettingsPage {
 fn category_page(stack: &gtk4::Stack, title: &str) -> gtk4::Box {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
     page.set_vexpand(true);
+    // Compact back control (hd9): navigation, not a full-width content row.
     let back = gtk4::Button::with_label("‹ Settings");
+    back.add_css_class("flat");
+    back.set_halign(gtk4::Align::Start);
     let s = stack.clone();
     back.connect_clicked(move |_| s.set_visible_child_name("home"));
     page.append(&back);

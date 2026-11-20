@@ -65,6 +65,14 @@ changes always ride the system generation with boot-menu recovery.
 - Rollback is "go back to yesterday's system", not a technical operation. No Nix vocabulary.
 - When a change applied but the user wants the previous state, or an applied generation partially changed the system, the app performs the return itself and explains what was undone: which application was removed, which setting reverted.
 
+### System-versions list presentation (added 2026-11-20, from the visual review)
+
+The "System versions" card (the REQ-4 history surface) shows the system's previous states in a reassuring, browsable form:
+
+- Bounded: the ~10 most recent states, with a "Show older" expander — an unbounded wall of near-identical rows is noise, not history.
+- The current state is clearly marked ("this system now" badge/highlight), always in the visible set.
+- Human dates ("Today", "Yesterday", then dates); the underlying nixpkgs revision string is demoted to a secondary line or tooltip, never the row's main content (C2 — hashes are Nix concepts).
+
 ## Tested guarantee
 
 A failed build or apply never leaves the system partially applied, and a user whose change fails can recover to a working system without a terminal and without reading Nix output.

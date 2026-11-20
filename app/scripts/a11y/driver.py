@@ -326,11 +326,14 @@ def find_search_entry(driver: AtspiDriver) -> Optional[Atspi.Accessible]:
 
     The app now has two search entries: the app-wide one at the top of the
     sidebar (fyq) and the store-local one inside the Apps tab. The store one
-    is the entry whose ancestor page also holds the "Hide non-free" filter
+    is the entry whose ancestor page also holds the licence-restriction
+    filter ("Hide apps with licence restrictions").
     check box, so we locate that check box and take the first entry inside
     its page subtree.
     """
-    check = driver.find_by_role_and_name(driver.app, "check box", "Hide non-free")
+    check = driver.find_by_role_and_name(
+        driver.app, "check box", "Hide apps with licence restrictions"
+    )
     scope = None
     if check is not None:
         # Walk up to a container that holds an entry (the store page box).

@@ -97,7 +97,7 @@ flowchart LR
 
 - The catalogue is an independent generator product, not a side effect of the application.
 - It consumes a pinned Nixpkgs revision and upstream metadata, produces one versioned, universal index with per-entry architecture availability flags, and publishes it on a periodic regeneration cadence; pipeline details are in [catalogue-pipeline.md](specifications/catalogue-pipeline.md) and revision drift is risk [R07](../risks.md#r07) and risk [R12](../risks.md#r12).
-- The desktop application consumes the artifacts and keeps a local searchable cache; when a listed package does not match the running system, "unavailable on your system" is a first-class UI state, not an error (risk [R07](../risks.md#r07)).
+- The desktop application consumes the artifacts and keeps a local searchable cache; when a listed package does not match the running system, "unavailable on your system" is a first-class UI state, not an error (risk [R07](../risks.md#r07)). First-class means the install action is not offered: when unavailability is already known from the catalogue (architecture/OS mismatch), the detail page shows the reason with no enabled install button — an enabled call-to-action beside a "cannot be installed" message is a contradiction, not a state.
 - Catalogue content is generated only: no hand-maintained per-package entries, and curated behaviour (featuring, categories, ranking) stays explainable and never required for installation (decision [D4](../../research/04-recommendations.md#decision-log)).
 
 ## Cross-cutting

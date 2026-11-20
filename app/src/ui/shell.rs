@@ -19,9 +19,34 @@ const MAX_ROWS: usize = 60;
 /// Group order for global search results (D16/D18 labelled groups).
 const GROUP_ORDER: [Class; 4] = [Class::App, Class::Unverified, Class::TermApp, Class::Cli];
 
-/// Rank + render the list. Empty query: bounded browse in index order. Search:
-/// ranked by search::rank, bucketed into the D16/D18 labelled groups, capped.
-/// Writes the visible row order into `shown` so row-index maps back to entries.
+/// The browse set (B1/B2, requirements.md): applications only — ordinary
+/// browsing starts from what a consumer recognises; CLI/terminal tools and
+/// unverified entries stay reachable through search — de-duplicated by
+/// package name + version so firmware-style variants don't repeat.
+fn browse_entries(all: &[IndexEntry]) -> Vec<IndexEntry> {
+    let mut seen = std::collections::HashSet::new();
+    let mut apps: Vec<IndexEntry> = all
+        .iter()
+        .filter(|e| e.class == Class::App)
+        .filter(|e| {
+            let key = format!(
+                "{}|{}",
+                e.pname.clone().unwrap_or_else(|| e.attr.clone()),
+                e.version.clone().unwrap_or_default()
+            );
+            seen.insert(key)
+        })
+        .cloned()
+        .collect();
+    // Alphabetical browse: an index-order slice reads as arbitrary noise.
+    apps.sort_by_key(|e| e.display_name().to_lowercase());
+    apps
+}
+
+/// Rank + render the list. Empty query: bounded browse over the applications
+/// (B1). Search: ranked by search::rank, bucketed into the D16/D18 labelled
+/// groups, capped. Writes the visible row order into `shown` so row-index
+/// maps back to entries.
 fn rebuild_list(
     listbox: &gtk4::ListBox,
     all: &[IndexEntry],
@@ -34,14 +59,27 @@ fn rebuild_list(
     }
     let mut rows: Vec<Option<IndexEntry>> = Vec::new();
     if query.trim().is_empty() {
-        for e in all.iter().take(MAX_ROWS) {
-            listbox.append(&widgets::entry_row(e));
-            rows.push(Some(e.clone()));
+        for e in browse_entries(all).into_iter().take(MAX_ROWS) {
+            listbox.append(&widgets::entry_row(&e));
+            rows.push(Some(e));
         }
     } else {
         let picked: Vec<&IndexEntry> = search::rank(query, texts, MAX_ROWS)
             .into_iter()
             .map(|i| &all[i])
+            .collect();
+        // B2: search results de-duplicate the same name+version rows too.
+        let mut seen = std::collections::HashSet::new();
+        let picked: Vec<&IndexEntry> = picked
+            .into_iter()
+            .filter(|e| {
+                let key = format!(
+                    "{}|{}",
+                    e.pname.clone().unwrap_or_else(|| e.attr.clone()),
+                    e.version.clone().unwrap_or_default()
+                );
+                seen.insert(key)
+            })
             .collect();
         let mut groups: Vec<(Class, Vec<&IndexEntry>)> = Vec::new();
         for c in GROUP_ORDER {
@@ -165,6 +203,11 @@ struct GlobalSearch {
     page: gtk4::Box,
     listbox: gtk4::ListBox,
     summary: gtk4::Label,
+    /// Row payloads of the current render (activation maps rows to targets).
+    shown: Rc<RefCell<Vec<Option<GlobalRow>>>>,
+    /// Groups the user expanded past GROUP_CAP (cleared per query change? no:
+    /// persists while typing so an expanded group stays open).
+    expanded: Rc<RefCell<std::collections::HashSet<&'static str>>>,
 }
 
 fn build_global_search() -> GlobalSearch {
@@ -189,6 +232,8 @@ fn build_global_search() -> GlobalSearch {
         page,
         listbox,
         summary,
+        shown: Rc::new(RefCell::new(Vec::new())),
+        expanded: Rc::new(RefCell::new(std::collections::HashSet::new())),
     }
 }
 
@@ -198,81 +243,176 @@ fn build_global_search() -> GlobalSearch {
 enum GlobalRow {
     App(IndexEntry),
     Setting(&'static crate::settings::Spec),
+    /// A capped group header; activating it expands that group in place.
+    GroupHeader(&'static str),
 }
 
-/// Rank + render the global results: app groups (D16/D18 labels) then a
-/// Settings group. Writes the row payloads into `shown` so activation maps a
-/// row index back to its target.
+/// Rows shown per result group before "show all" (D28 review rule: settings
+/// and app hits must not be buried under ~55 command-line rows).
+const GROUP_CAP: usize = 5;
+
+/// Rank + render the global results into `g`: groups in user-value order —
+/// Applications, Unverified, Settings, Terminal, Command-line, other — each
+/// capped at GROUP_CAP rows until its header is clicked. Returns the result
+/// row count (headers excluded).
 fn rebuild_global(
-    listbox: &gtk4::ListBox,
+    g: &GlobalSearch,
     all: &[IndexEntry],
     texts: &[SearchText],
-    shown: &RefCell<Vec<Option<GlobalRow>>>,
     query: &str,
 ) -> usize {
-    while let Some(child) = listbox.first_child() {
-        listbox.remove(&child);
+    while let Some(child) = g.listbox.first_child() {
+        g.listbox.remove(&child);
     }
+    let listbox = &g.listbox;
+    let expanded = g.expanded.borrow();
     let mut rows: Vec<Option<GlobalRow>> = Vec::new();
+
+    // One named result group: header + capped rows. Capped headers
+    // re-render the whole list with that group expanded when clicked.
+    macro_rules! push_group {
+        ($key:expr, $label:expr, $items:expr, $mk_widget:expr, $mk_row:expr) => {{
+            let items: Vec<_> = $items;
+            if !items.is_empty() {
+                let key: &'static str = $key;
+                let capped = items.len() > GROUP_CAP && !expanded.contains(key);
+                let header = widgets::group_header_row($label, items.len());
+                if items.len() > GROUP_CAP {
+                    header.set_activatable(true);
+                    header.set_tooltip_text(Some("Click to show every result in this group"));
+                }
+                listbox.append(&header);
+                rows.push(Some(GlobalRow::GroupHeader(key)));
+                let take = if capped { GROUP_CAP } else { items.len() };
+                for item in items.into_iter().take(take) {
+                    let row = ($mk_widget)(&item);
+                    listbox.append(&row);
+                    rows.push(Some(($mk_row)(&item)));
+                }
+            }
+        }};
+    }
 
     let apps: Vec<&IndexEntry> = search::rank(query, texts, MAX_ROWS)
         .into_iter()
         .map(|i| &all[i])
         .collect();
-    let mut groups: Vec<(Class, Vec<&IndexEntry>)> = Vec::new();
-    for c in GROUP_ORDER {
-        let v: Vec<&IndexEntry> = apps.iter().filter(|e| e.class == c).cloned().collect();
-        if !v.is_empty() {
-            groups.push((c, v));
-        }
-    }
+    let by_class =
+        |c: Class| -> Vec<&IndexEntry> { apps.iter().filter(|e| e.class == c).cloned().collect() };
+    // Applications and unverified first (consumer value), then the Settings
+    // group, then terminal/CLI noise (global-search.md group order rule).
+    push_group!(
+        "app",
+        Class::App.group_label(),
+        by_class(Class::App),
+        |e: &IndexEntry| widgets::entry_row(e),
+        |e: &IndexEntry| GlobalRow::App(e.clone())
+    );
+    push_group!(
+        "unverified",
+        Class::Unverified.group_label(),
+        by_class(Class::Unverified),
+        |e: &IndexEntry| widgets::entry_row(e),
+        |e: &IndexEntry| GlobalRow::App(e.clone())
+    );
+    let settings = search::rank_settings(query, crate::settings::SPECS, 20);
+    push_group!(
+        "settings",
+        "Settings",
+        settings,
+        |i: &usize| widgets::setting_row(&crate::settings::SPECS[*i]),
+        |i: &usize| GlobalRow::Setting(&crate::settings::SPECS[*i])
+    );
+    push_group!(
+        "termapp",
+        Class::TermApp.group_label(),
+        by_class(Class::TermApp),
+        |e: &IndexEntry| widgets::entry_row(e),
+        |e: &IndexEntry| GlobalRow::App(e.clone())
+    );
+    push_group!(
+        "cli",
+        Class::Cli.group_label(),
+        by_class(Class::Cli),
+        |e: &IndexEntry| widgets::entry_row(e),
+        |e: &IndexEntry| GlobalRow::App(e.clone())
+    );
     let others: Vec<&IndexEntry> = apps
         .iter()
-        .filter(|e| !GROUP_ORDER.contains(&e.class))
+        .filter(|e| {
+            !matches!(
+                e.class,
+                Class::App | Class::Unverified | Class::TermApp | Class::Cli
+            )
+        })
         .cloned()
         .collect();
-    if !others.is_empty() {
-        groups.push((Class::Other, others));
-    }
-    for (c, v) in groups {
-        listbox.append(&widgets::group_header_row(c.group_label(), v.len()));
-        rows.push(None);
-        for e in v {
-            listbox.append(&widgets::entry_row(e));
-            rows.push(Some(GlobalRow::App(e.clone())));
-        }
-    }
-
-    let settings = search::rank_settings(query, crate::settings::SPECS, 20);
-    if !settings.is_empty() {
-        listbox.append(&widgets::group_header_row("Settings", settings.len()));
-        rows.push(None);
-        for i in settings {
-            let spec = &crate::settings::SPECS[i];
-            listbox.append(&widgets::setting_row(spec));
-            rows.push(Some(GlobalRow::Setting(spec)));
-        }
-    }
+    push_group!(
+        "other",
+        Class::Other.group_label(),
+        others,
+        |e: &IndexEntry| widgets::entry_row(e),
+        |e: &IndexEntry| GlobalRow::App(e.clone())
+    );
 
     let n = rows.iter().filter(|r| r.is_some()).count();
-    *shown.borrow_mut() = rows;
+    *g.shown.borrow_mut() = rows;
     n
 }
 
+impl GlobalSearch {
+    /// Widget-handle clone: shared Rc state, fresh widget references (gtk4
+    /// widget clones are cheap handles to the same object).
+    fn clone_handles(&self) -> GlobalSearch {
+        GlobalSearch {
+            entry: self.entry.clone(),
+            page: self.page.clone(),
+            listbox: self.listbox.clone(),
+            summary: self.summary.clone(),
+            shown: self.shown.clone(),
+            expanded: self.expanded.clone(),
+        }
+    }
+
+    /// Re-render for the entry's current query and refresh the summary line.
+    fn render(&self, all: &[IndexEntry], texts: &[SearchText]) {
+        let query = self.entry.text();
+        let count = rebuild_global(self, all, texts, &query);
+        if count == 0 && !query.trim().is_empty() {
+            self.summary.set_text(&format!(
+                "No results for \"{}\" — try a different name",
+                query.trim()
+            ));
+        } else if query.trim().is_empty() {
+            self.summary.set_text("Search apps and settings");
+        } else {
+            self.summary.set_text(&format!("{count} shown"));
+        }
+    }
+}
+
 fn wire_global_activation(
-    listbox: &gtk4::ListBox,
-    shown: &Rc<RefCell<Vec<Option<GlobalRow>>>>,
+    g: &GlobalSearch,
     detail: &Rc<detail::DetailUi>,
     queue: &Rc<RefCell<ChangeQueue>>,
     stack: &gtk4::Stack,
     settings: &Rc<settings_page::SettingsPage>,
+    all: &Rc<RefCell<Vec<IndexEntry>>>,
+    texts: &Rc<RefCell<Vec<SearchText>>>,
 ) {
     let detail = detail.clone();
     let stack = stack.clone();
-    let shown = shown.clone();
+    let shown = g.shown.clone();
     let queue = queue.clone();
     let settings = settings.clone();
-    listbox.connect_row_activated(move |_, row| {
+    let expanded = g.expanded.clone();
+    let rerender = {
+        let g = g.clone_handles();
+        let all = all.clone();
+        let texts = texts.clone();
+        Rc::new(move || g.render(&all.borrow(), &texts.borrow()))
+    };
+    g.listbox.connect_row_activated(move |_, row| {
         let index = row.index();
         if index < 0 {
             return;
@@ -290,6 +430,14 @@ fn wire_global_activation(
                 settings.show_category(spec.category);
                 stack.set_visible_child_name("settings");
             }
+            GlobalRow::GroupHeader(key) => {
+                // Capped group header: toggle that group between the 5-row
+                // cap and the full result set, then re-render in place.
+                if !expanded.borrow_mut().insert(key) {
+                    expanded.borrow_mut().remove(key);
+                }
+                rerender();
+            }
         }
     });
 }
@@ -298,52 +446,28 @@ fn wire_global_activation(
 /// page and shows grouped app + setting results; Esc clears the query and a
 /// further stop returns to the Apps list.
 fn wire_global_search(
-    search: &gtk4::SearchEntry,
-    listbox: &gtk4::ListBox,
+    g: &GlobalSearch,
     stack: &gtk4::Stack,
-    summary: &gtk4::Label,
     all: &Rc<RefCell<Vec<IndexEntry>>>,
     texts: &Rc<RefCell<Vec<SearchText>>>,
-    shown: &Rc<RefCell<Vec<Option<GlobalRow>>>>,
 ) {
     let stack_for_changes = stack.clone();
-    let summary_for_changes = summary.clone();
-    let listbox_for_changes = listbox.clone();
+    let g_changes = g.clone_handles();
     let all_for_changes = all.clone();
     let texts_for_changes = texts.clone();
-    let shown_for_changes = shown.clone();
-    search.connect_search_changed(move |search| {
-        let query = search.text();
-        let count = rebuild_global(
-            &listbox_for_changes,
-            &all_for_changes.borrow(),
-            &texts_for_changes.borrow(),
-            &shown_for_changes,
-            &query,
-        );
-        if count == 0 && !query.trim().is_empty() {
-            summary_for_changes.set_text(&format!(
-                "No results for \"{}\" — try a different name",
-                query.trim()
-            ));
-        } else if query.trim().is_empty() {
-            summary_for_changes.set_text("Search apps and settings");
-        } else {
-            summary_for_changes.set_text(&format!("{count} shown"));
-        }
+    g.entry.connect_search_changed(move |_| {
+        g_changes.render(&all_for_changes.borrow(), &texts_for_changes.borrow());
         stack_for_changes.set_visible_child_name("global-search");
     });
 
-    let listbox_for_stop = listbox.clone();
     let stack_for_stop = stack.clone();
-    search.connect_stop_search(move |search| {
+    g.entry.connect_stop_search(move |search| {
         // Escape first clears the query; another stop returns to the Apps list.
         if !search.text().is_empty() {
             search.set_text("");
             return;
         }
         stack_for_stop.set_visible_child_name("list");
-        let _ = &listbox_for_stop;
     });
 }
 
@@ -426,10 +550,17 @@ fn build_catalogue_list() -> CatalogueList {
     // Store-local search (fyq): the bar that scopes to the catalogue lives
     // inside the Apps tab; the app-wide search sits atop the sidebar.
     let search = gtk4::SearchEntry::new();
+    // dxy: the two search boxes must read differently at a glance — the
+    // sidebar one says what it spans; this one is store-scoped (D28).
     search.set_placeholder_text(Some("Search apps…"));
+    search.set_tooltip_text(Some("Searches the app catalogue only"));
     search.set_hexpand(true);
     // optional non-free filter (decision D1): off by default
-    let unfree_filter = gtk4::CheckButton::with_label("Hide non-free");
+    // x6r/D1: consumer wording, not packaging jargon.
+    let unfree_filter = gtk4::CheckButton::with_label("Hide apps with licence restrictions");
+    unfree_filter.set_tooltip_text(Some(
+        "Some apps carry licences your system may refuse; this hides them",
+    ));
     let filter_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     filter_row.append(&search);
     filter_row.append(&unfree_filter);
@@ -620,7 +751,8 @@ fn build_sidebar(
     search_box.set_margin_bottom(4);
     search_box.set_margin_start(8);
     search_box.set_margin_end(8);
-    global_search.set_placeholder_text(Some("Search everything…"));
+    global_search.set_placeholder_text(Some("Search apps and settings…"));
+    global_search.set_tooltip_text(Some("Searches apps and settings everywhere"));
     search_box.append(global_search);
     sidebar.append(&search_box);
     sidebar.append(&nav_button("Apps", "list", stack, None));
@@ -660,19 +792,12 @@ fn set_catalogue_summary(summary: &gtk4::Label, entries: &[IndexEntry], error: O
         return;
     }
 
-    let mut counts = [0usize; 4];
-    for entry in entries {
-        let index = match entry.class {
-            Class::App => 0,
-            Class::Unverified => 1,
-            Class::TermApp => 2,
-            _ => 3,
-        };
-        counts[index] += 1;
-    }
+    // Plain-language browse summary (sqi): what the list shows, not a class
+    // breakdown of internal tiers.
+    let apps = browse_entries(entries).len();
+    let showing = apps.min(MAX_ROWS);
     summary.set_text(&format!(
-        "{} entries · {} application · {} unverified · {} terminal · {} command-line — click a result for details",
-        entries.len(), counts[0], counts[1], counts[2], counts[3]
+        "Showing {showing} of {apps} applications — search or scroll for more"
     ));
 }
 
@@ -703,7 +828,6 @@ pub fn run(
         *t = a.iter().map(SearchText::build).collect();
     }
     let shown = Rc::new(RefCell::new(Vec::<Option<IndexEntry>>::new()));
-    let global_shown = Rc::new(RefCell::new(Vec::<Option<GlobalRow>>::new()));
     let queue = Rc::new(RefCell::new(ChangeQueue::new()));
 
     let account = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
@@ -804,23 +928,8 @@ pub fn run(
         &shown,
     );
     wire_search_shortcut(&global.entry, &window);
-    wire_global_search(
-        &global.entry,
-        &global.listbox,
-        &stack,
-        &global.summary,
-        &all,
-        &texts,
-        &global_shown,
-    );
-    wire_global_activation(
-        &global.listbox,
-        &global_shown,
-        &detail,
-        &queue,
-        &stack,
-        &settings,
-    );
+    wire_global_search(&global, &stack, &all, &texts);
+    wire_global_activation(&global, &detail, &queue, &stack, &settings, &all, &texts);
 
     // Non-free filter (D1): flipping re-filters the full set and rebuilds.
     {

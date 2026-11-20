@@ -22,6 +22,8 @@ Each setting workflow is versioned record with the following fields:
 | Presentation | Friendly name, plain-language behaviour, and the outcome statement shown to the user before the change is applied (REQ-3) |
 | Mapping | The single owned mapping to the backing NixOS option(s); one option per setting, never a per-desktop fork |
 | Supported actions | The operations the workflow supports (enable, disable, configure a value) and their valid ranges |
+| Control | The user-facing control the workflow renders (toggle, text field, or — for options with a small fixed value set — a plain-language dropdown). An option whose values are product-authored choices (an enum, like update timing "apply right away vs at next restart") must not be a free-text field exposing raw option values (C2); it is authored as a dropdown whose choices map to the backing values. |
+| Presentation rule | Blurbs, placeholders and examples must be valid input: an example shown to the user must pass the workflow's own validator, and no Nix concept (flags, flake paths, rebuild verbs, hashes) may appear in user-facing strings (C2, REQ-6). Internal metadata (evidence tiers, cache state) is never shown in the normal experience (C8). |
 | Scope | System-wide; the value is applied through the backend's generation transaction |
 | Search | Human-readable name, synonyms and supported actions, so the setting is findable and grouped by type (S1, S2) |
 | Currency | How the setting tracks the backing option across Nixpkgs revisions |
@@ -63,6 +65,8 @@ set-and-forget "Automatic" card; verified against the pinned nixpkgs):
 | Reclaim storage | `nix.optimise.automatic` | boolean | hard-link duplicates to save space |
 | Automatic system updates | `system.autoUpgrade.enable` | boolean | check and switch on a schedule |
 | Update schedule / delay / action / config | `system.autoUpgrade.dates`, `.randomizedDelaySec`, `.operation`, `.flake` | strings | when and how updates run |
+
+Presentation debt on the upkeep card (filed from the 2026-11-20 visual review, to fix with the authored-controls work): the Update action blurb exposes `switch`/`boot` raw values and should become a dropdown ("apply right away / apply at next restart"); the Update delay blurb's example `45min` is rejected by its own validator (seconds only) — the example must become a valid one (or the validator accepts durations); the cleanup retention string entry expects raw `nix-collect-garbage` flags and should become a plain "keep 7 / 30 / 90 days" choice; "the flake that defines this system" uses Nix jargon and should be reworded or the setting reconsidered against C6 (configuration ownership — the app implies the system's config rather than asking for it).
 
 Candidates explicitly excluded after verification: `programs.nix-index-database.comma.enable` does not exist in the pinned nixpkgs snapshot; home-manager auto-update options exist only where the home-manager module is enabled (D23 gating, pending detection decision).
 

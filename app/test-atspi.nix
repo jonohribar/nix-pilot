@@ -37,6 +37,7 @@ pkgs.mkShell {
     imagemagick
     xorg.xwininfo
     xorg.xwd
+    xdotool
     # AT-SPI test dependencies
     python3
     python3Packages.pygobject3

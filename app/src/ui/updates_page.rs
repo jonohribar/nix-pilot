@@ -592,6 +592,18 @@ impl UpdatesPage {
             self.queue_list.remove(&child);
         }
         let q = queue.borrow();
+        // Queue-driven status (rqe): the Ready label must not claim changes
+        // are ready when none are.
+        if *self.step.borrow() == TxStep::Ready {
+            let label = if q.is_empty() {
+                "No changes waiting."
+            } else {
+                let n = q.len();
+                let suffix = if n == 1 { "" } else { "s" };
+                &format!("{n} change{suffix} ready — nothing has been applied yet")
+            };
+            self.step_label.set_text(label);
+        }
         if q.is_empty() {
             let l = gtk4::Label::new(Some(
                 "Nothing ready to change yet — add apps from the store.",
