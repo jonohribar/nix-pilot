@@ -41,18 +41,6 @@ struct RowData {
 type UpdatesCallback = Rc<dyn Fn()>;
 type UpdatesCallbackCell = Rc<RefCell<Option<UpdatesCallback>>>;
 
-/// Settings-category per SPECS index (familiar desktop-settings surfaces:
-/// GNOME / macOS / Windows share System, Network, Time, Accounts, Privacy).
-const SPECS_CATEGORY: [&str; 7] = [
-    "system",  // networking.hostName (device name)
-    "network", // networking.networkmanager.enable
-    "time",    // time.timeZone
-    "time",    // i18n.defaultLocale
-    "system",  // services.printing.enable
-    "system",  // powerManagement.enable
-    "privacy", // services.openssh.enable (remote access)
-];
-
 pub struct SettingsPage {
     /// The settings-internal stack: home + one subpage per category.
     pub page: gtk4::Stack,
@@ -157,7 +145,9 @@ impl SettingsPage {
         }
 
         let mut rows = Vec::new();
-        for spec in settings::SPECS {
+        // The upkeep settings (category "updates") render on the Updates page,
+        // not here; this surface builds only its own categories.
+        for spec in settings::SPECS.iter().filter(|s| s.category != "updates") {
             let card = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
             card.add_css_class("card");
             card.set_margin_top(6);
@@ -199,7 +189,7 @@ impl SettingsPage {
                 control,
                 current_label,
             });
-            cat_pages[SPECS_CATEGORY[rows.len() - 1]].append(&card);
+            cat_pages[spec.category].append(&card);
         }
 
         let keys_card = gtk4::Box::new(gtk4::Orientation::Vertical, 2);

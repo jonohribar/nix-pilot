@@ -28,10 +28,15 @@ pub struct Spec {
     pub blurb: &'static str,
     /// Value type, shared by validation and UI construction.
     pub kind: ValueKind,
+    /// Category page that owns this setting ("system", "network", "time",
+    /// "privacy" in Settings, "updates" on the Updates surface).
+    pub category: &'static str,
     validate: fn(&str) -> Result<(), String>,
 }
 
+#[allow(clippy::too_many_arguments)]
 const fn str_spec(
+    category: &'static str,
     key: &'static str,
     label: &'static str,
     blurb: &'static str,
@@ -42,6 +47,7 @@ const fn str_spec(
         label,
         blurb,
         kind: ValueKind::String,
+        category,
         validate,
     }
 }
@@ -52,6 +58,7 @@ const fn str_spec(
 /// powerManagement.enable, services.openssh.enable).
 pub static SPECS: &[Spec] = &[
     str_spec(
+        "system",
         "networking.hostName",
         "Device name",
         "The machine's name on the network (a simple name, no domain or spaces).",
@@ -66,11 +73,13 @@ pub static SPECS: &[Spec] = &[
         },
     ),
     bool_spec(
+        "network",
         "networking.networkmanager.enable",
         "Network connections",
         "Manage Wi-Fi and wired connections (NetworkManager) instead of static settings.",
     ),
     str_spec(
+        "time",
         "time.timeZone",
         "Time zone",
         "The time zone used for times and dates (like Europe/Berlin).",
@@ -83,6 +92,7 @@ pub static SPECS: &[Spec] = &[
         },
     ),
     str_spec(
+        "time",
         "i18n.defaultLocale",
         "Language and region",
         "The language for messages, dates and numbers (like en_US.UTF-8).",
@@ -98,28 +108,140 @@ pub static SPECS: &[Spec] = &[
         },
     ),
     bool_spec(
+        "system",
         "services.printing.enable",
         "Printing",
         "Start the printing service so the machine can use and share printers.",
     ),
     bool_spec(
+        "system",
         "powerManagement.enable",
         "Power management",
         "Enable suspend and power-saving features (mainly for laptops).",
     ),
     bool_spec(
+        "privacy",
         "services.openssh.enable",
         "Remote access (SSH)",
         "Allow connecting to this computer from elsewhere (remote shell).",
     ),
+    // Automatic upkeep (category "updates", rendered on the Updates page).
+    // All options verified to exist in the pinned nixpkgs snapshot.
+    bool_spec(
+        "updates",
+        "nix.gc.automatic",
+        "Automatic cleanup",
+        "Regularly remove packages and files nothing needs anymore, so the \
+         system does not fill up over time.",
+    ),
+    str_spec(
+        "updates",
+        "nix.gc.options",
+        "What cleanup keeps",
+        "How old a version must be before cleanup removes it (empty = the \
+         system's default).",
+        |v| {
+            if v.is_empty() || v.starts_with("--") {
+                Ok(())
+            } else {
+                Err("leave empty, or use a flag like --delete-older-than 7d".into())
+            }
+        },
+    ),
+    bool_spec(
+        "updates",
+        "nix.optimise.automatic",
+        "Reclaim storage",
+        "Periodically link identical files together to save disk space.",
+    ),
+    bool_spec(
+        "updates",
+        "system.autoUpgrade.enable",
+        "Automatic system updates",
+        "Check for and switch to new system versions on a schedule.",
+    ),
+    str_spec(
+        "updates",
+        "system.autoUpgrade.dates",
+        "Update schedule",
+        "When to check for updates, like 02:00 (empty = the system's \
+         default schedule).",
+        |v| {
+            fn valid(t: &str) -> bool {
+                let mut parts = t.split(':');
+                match (parts.next(), parts.next()) {
+                    (Some(h), Some(m)) => {
+                        h.parse::<u32>().is_ok_and(|x| x < 24)
+                            && m.parse::<u32>().is_ok_and(|x| x < 60)
+                    }
+                    _ => false,
+                }
+            }
+            if v.is_empty() || valid(v) {
+                Ok(())
+            } else {
+                Err("use 24-hour time like 02:00".into())
+            }
+        },
+    ),
+    str_spec(
+        "updates",
+        "system.autoUpgrade.randomizedDelaySec",
+        "Update delay",
+        "Spread out updates within a window so they do not all happen at \
+         once, like 45min (empty = no spread).",
+        |v| {
+            if v.is_empty()
+                || (v.chars().all(|c| c.is_ascii_digit()) && v.parse::<u64>().is_ok_and(|x| x > 0))
+            {
+                Ok(())
+            } else {
+                Err("use a length of time like 45min (or leave empty)".into())
+            }
+        },
+    ),
+    str_spec(
+        "updates",
+        "system.autoUpgrade.operation",
+        "Update action",
+        "switch = apply the new version right away; boot = apply at the next \
+         restart (empty = the system's default).",
+        |v| {
+            if v.is_empty() || matches!(v, "switch" | "boot") {
+                Ok(())
+            } else {
+                Err("use switch or boot (or leave empty)".into())
+            }
+        },
+    ),
+    str_spec(
+        "updates",
+        "system.autoUpgrade.flake",
+        "System configuration",
+        "The flake that defines this system, so updates follow it (empty = \
+         the standard layout).",
+        |v| {
+            if v.is_empty() || !v.chars().any(char::is_whitespace) {
+                Ok(())
+            } else {
+                Err("use a path or URL without spaces, or leave empty".into())
+            }
+        },
+    ),
 ];
 
-const fn bool_spec(key: &'static str, label: &'static str, blurb: &'static str) -> Spec {
+const fn bool_spec(
+    category: &'static str,
+    key: &'static str,
+    label: &'static str,
+    blurb: &'static str,
+) -> Spec {
     Spec {
         key,
         label,
         blurb,
         kind: ValueKind::Boolean,
+        category,
         validate: |_| Ok(()),
     }
 }
@@ -178,6 +300,20 @@ pub fn render_block(settings: &BTreeMap<String, SettingValue>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn upkeep_validators_accept_sensible_and_reject_junk() {
+        // automatic-upkeep workflows (category "updates")
+        let ok = |key, value| settings::validate(key, &SettingValue::Str(value.into()));
+        assert!(ok("system.autoUpgrade.dates", "02:00").is_ok());
+        assert!(ok("system.autoUpgrade.dates", "25:00").is_err());
+        assert!(ok("system.autoUpgrade.operation", "boot").is_ok());
+        assert!(ok("system.autoUpgrade.operation", "explode").is_err());
+        assert!(ok("nix.gc.options", "--delete-older-than 7d").is_ok());
+        assert!(ok("nix.gc.options", "rm -rf /").is_err());
+        assert!(ok("system.autoUpgrade.flake", "github:user/nixos-config").is_ok());
+        assert!(ok("system.autoUpgrade.flake", "a b").is_err());
+    }
 
     #[test]
     fn render_block_escapes_interpolation() {
