@@ -76,7 +76,7 @@ set-and-forget "Automatic" card; verified against the pinned nixpkgs):
 | Automatic system updates | `system.autoUpgrade.enable` | boolean | check and switch on a schedule |
 | Update schedule / delay / action / config | `system.autoUpgrade.dates`, `.randomizedDelaySec`, `.operation`, `.flake` | strings | when and how updates run |
 
-Presentation debt on the upkeep card (filed from the 2026-11-20 visual review, to fix with the authored-controls work): the Update action blurb exposes `switch`/`boot` raw values and should become a dropdown ("apply right away / apply at next restart"); the Update delay blurb's example `45min` is rejected by its own validator (seconds only) — the example must become a valid one (or the validator accepts durations); the cleanup retention string entry expects raw `nix-collect-garbage` flags and should become a plain "keep 7 / 30 / 90 days" choice; "the flake that defines this system" uses Nix jargon and should be reworded or the setting reconsidered against C6 (configuration ownership — the app implies the system's config rather than asking for it).
+All four upkeep-card presentation debts raised in the 2026-11-20 visual review were resolved with the authored-controls work: the update action, update delay, and cleanup retention now render as plain-language Choice dropdowns (`system.autoUpgrade.operation`, `system.autoUpgrade.randomizedDelaySec`, `nix.gc.options`), and the flake setting's blurb was reworded to plain language (`system.autoUpgrade.flake`).
 
 Candidates explicitly excluded after verification: `programs.nix-index-database.comma.enable` does not exist in the pinned nixpkgs snapshot; home-manager auto-update options exist only where the home-manager module is enabled (D23 gating, pending detection decision).
 
