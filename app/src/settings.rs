@@ -1,10 +1,10 @@
-//! Settings surface v1 (9f3.8, settings-schema.md + decision D14): the app's
+//! Settings surface v1 (settings-schema.md, decision D14): the app's
 //! set of *owned* settings. Pure product data, validation, and Nix-text
 //! rendering — no GTK, Nix evaluation, or external I/O.
 //!
 //! Boundary: a setting is owned only when it maps to a stable NixOS option,
-//! means the same thing on every desktop, and the app owns its versioning
-//! (D14). Only settings the user actively changed are stored (in
+//! means the same thing on every desktop, and the app owns its versioning (D14).
+//! Only settings the user actively changed are stored (in
 //! `DesiredDoc.settings`); everything else is untouched and falls back to the
 //! system config. Rendered settings use `lib.mkOverride 10`, a priority a
 //! step above `mkForce`, so "what you change in the app always wins".
@@ -20,7 +20,7 @@ pub enum ValueKind {
     /// A true/false setting represented by a switch.
     Boolean,
     /// A small product-authored value set rendered as a dropdown (S3/D14
-    /// authored control, C2: raw option values never shown as free text).
+    /// authored control; C2: raw option values never shown as free text).
     /// Each item is (stored value, plain-language label).
     Choice(&'static [(&'static str, &'static str)]),
 }

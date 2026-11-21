@@ -1,5 +1,5 @@
-//! Settings page — the product-authored settings surface (settings-schema.md,
-//! D14). First-release workflows (settings::SPECS): device name, network
+//! Settings page — the product-authored settings surface (settings-schema.md, D14).
+//! First-release workflows (settings::SPECS): device name, network
 //! connections, time zone, language/region, printing, power, remote access.
 //! Plain-language only; a change stores the value in the desired state (the
 //! app owns it) and every value renders as an app-wins `mkOverride` line into
@@ -116,9 +116,8 @@ impl SettingsPage {
         home.append(&profile);
 
         // Category navigation (familiar names shared across desktop shells).
-        // Updates is a top-level sidebar surface, never duplicated here
-        // (single-topping, fyq). Each row states what lives inside it (hd9):
-        // icon + label + summary, like the shells this layout mirrors.
+        // Updates is a top-level sidebar surface, never duplicated here.
+        // Each row is icon + label + summary, like the shells this mirrors.
         let categories: [(&str, &str, &str); 6] = [
             ("System", "Device name, printing, power, sound", "system"),
             ("Network & internet", "Wi-Fi, wired, Bluetooth", "network"),
@@ -162,9 +161,7 @@ impl SettingsPage {
         // Categories are (label, summary, child-id) triples: the page title
         // is the label and the stack/map key is the id, so the nav buttons
         // (which set the visible child by id) and the card appends (which
-        // key by spec category id) agree. (Fixed 2026-11-20: the first
-        // release bound these swapped and the map was keyed by labels,
-        // panicking on the first non-updates spec.)
+        // key by spec category id) agree.
         for (title, _summary, child) in categories {
             let page = category_page(&stack, title);
             stack.add_named(&page, Some(child));
@@ -644,7 +641,7 @@ impl SettingsPage {
 fn category_page(stack: &gtk4::Stack, title: &str) -> gtk4::Box {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
     page.set_vexpand(true);
-    // Compact back control (hd9): navigation, not a full-width content row.
+    // Compact back control: navigation, not a full-width content row.
     let back = gtk4::Button::with_label("‹ Settings");
     back.add_css_class("flat");
     back.set_halign(gtk4::Align::Start);

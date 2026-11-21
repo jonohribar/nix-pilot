@@ -210,8 +210,8 @@ fn build_sidebar(
 ) -> gtk4::Box {
     let sidebar = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     sidebar.set_width_request(220);
-    // The app-wide search sits atop the sidebar, above the surface nav
-    // (fyq): it spans apps + settings, so it cannot live inside one surface.
+    // The app-wide search sits atop the sidebar, above the surface nav; it
+    // spans apps + settings, so it cannot live inside one surface.
     let search_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     search_box.set_margin_top(8);
     search_box.set_margin_bottom(4);
@@ -327,7 +327,7 @@ pub fn run(
     stack.add_named(&detail.page, Some("detail"));
     stack.add_named(&scrolled_page(&global.page), Some("global-search"));
     // Tall surfaces scroll; a plain Box would push content below the window
-    // edge with no way to reach it (onz). Wrap them so everything is shown.
+    // edge with no way to reach it. Wrap them so everything is shown.
     stack.add_named(&scrolled_page(&updates.page), Some("updates"));
     stack.add_named(&scrolled_page(&settings.page), Some("settings"));
     stack.add_named(&scrolled_page(&your_system.page), Some("your-system"));

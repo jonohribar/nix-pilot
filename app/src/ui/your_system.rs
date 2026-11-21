@@ -1,4 +1,4 @@
-//! "Your system" surface (9f3.14): a plain view of what the app is asked to
+//! "Your system" surface: a plain view of what the app is asked to
 //! install and set — the desired-state recipe — with remove/clear actions.
 //! Read-only in the sense that it never invents content: every row comes from
 //! the persisted DesiredDoc (system apps, this account's apps, owned

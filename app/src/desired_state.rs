@@ -1,6 +1,6 @@
-//! Desired-state model (7wo.2): the app owns *what the user wants*, and the
-//! NixOS configuration is generated output (architecture / Product model,
-//! decision D9). This module is the persisted source of truth plus a pure
+//! Desired-state model: the app owns *what the user wants*, and the
+//! NixOS configuration is generated output (see architecture.md; decision D9). This
+//! module is the persisted source of truth plus a pure
 //! config renderer. This module performs no external I/O; the candidate-build
 //! adapter consumes the rendered module, while activation is handled
 //! separately. Per-user scope targets `users.users.<name>.packages` or, when

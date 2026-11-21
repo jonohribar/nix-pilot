@@ -1,4 +1,4 @@
-//! Catalogue consumption (7wo.4, first slice): resolve where the catalogue
+//! Catalogue consumption: resolve where the catalogue
 //! index comes from and load it honestly.
 //!
 //! Sources, in precedence order: the first CLI argument, then

@@ -1,11 +1,11 @@
 //! Install backend adapter (v1 — intent flow).
 //!
 //! A Store install is a desired *system change*, applied as one transaction
-//! through the Updates surface (architecture "Install and system-state model",
-//! D9; failure-and-recovery.md). Nothing in this module mutates the system.
+//! through the Updates surface (failure-and-recovery.md; decision D9). Nothing in this
+//! module mutates the system.
 //! Its job is the front half: check a catalogue attribute against the system's
 //! configured nixpkgs and return a structured outcome, with "unavailable on
-//! your system" as a first-class state (revision drift, risk R07) and the raw
+//! your system" as a first-class state (revision drift, risk R07; see risks.md) and the raw
 //! technical detail one click away. The dry-run below never downloads or
 //! builds; verdicts reflect what the system's own configuration will actually
 //! allow (an unfree refusal is "not allowed", not "installable").

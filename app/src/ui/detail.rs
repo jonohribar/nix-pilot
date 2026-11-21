@@ -210,10 +210,10 @@ impl DetailUi {
             "Free licence"
         };
         // R07 surface: an entry with no Linux availability in the index is
-        // first-class "not available on this system", not a blank field
-        // linux_ok is a yes/no from the catalogue; the index carries no
-        // per-architecture data, so the label must not claim specific arches.
-        // Real per-arch availability surfaces later via the install check.
+        // first-class "not available on this system", not a blank field. linux_ok is a
+        // yes/no from the catalogue; the index carries no per-architecture
+        // data, so the label must not claim specific arches. Real per-arch
+        // availability surfaces later via the install check.
         let platforms = if e.linux_ok {
             "Linux"
         } else {

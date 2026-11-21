@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 7wo.3 packaging check: the nix-pilot NixOS module must evaluate cleanly when
+# Packaging check: the nix-pilot NixOS module must evaluate cleanly when
 # enabled. Uses nixos-rebuild dry-build of a scratch, VM-shaped config that
 # imports the module (evaluation only — nothing builds, touches the host, or
 # activates). Run via: just app module-check

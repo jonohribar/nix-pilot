@@ -112,8 +112,8 @@ fn rank_by(
     scored.into_iter().take(max).map(|(_, i)| i).collect()
 }
 
-/// Ranked indices of the authored settings specs matching the query (S1/S3):
-/// same scorer as the catalogue, so a global query reads consistently over
+/// Ranked indices of the authored settings specs matching the query (S1/S3), using
+/// the same scorer as the catalogue so a global query reads consistently over
 /// both document types (S2 — "ssh" surfaces the Remote Access setting beside
 /// the OpenSSH application). name=label, pn=option key, desc=blurb + the
 /// spec's authored `tags` (consumer synonyms like "wifi" for Network

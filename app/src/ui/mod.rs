@@ -91,13 +91,13 @@ mod tree_probe {
         let u = all_text(&updates.page);
         let y = all_text(&your_system.page);
 
-        // Updates is a top-level sidebar surface only (fyq): the Settings
+        // Updates is a top-level sidebar surface only: the Settings
         // home must not duplicate it as a category row or an "Open Updates"
         // cross-link card.
         let s_hay = s.join("\n");
         assert!(
             !s_hay.contains("\nUpdates\n") && !s_hay.contains("Open Updates"),
-            "settings page must not topline Updates (fyq single-topping)\n---\n{s_hay}"
+            "settings page must not topline Updates\n---\n{s_hay}"
         );
         assert!(
             s_hay.contains("System") && s_hay.contains("Network & internet"),

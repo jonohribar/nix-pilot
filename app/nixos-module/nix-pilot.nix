@@ -1,4 +1,4 @@
-# nix-pilot NixOS module — the app's system integration (7wo.3 packaging).
+# nix-pilot NixOS module — the app's system integration.
 #
 # Installs the sanctioned apply helper and a polkit action so a *future* app
 # codepath can have the user write the app-owned configuration area and
@@ -6,8 +6,8 @@
 # interface. Nothing here parses or edits the user's configuration; the
 # generated config area is the app's own and the switch always targets
 # exactly /etc/nix-pilot/generated/configuration.nix (decision D21 pointer
-# import; apply-activation.md). Per decision D20 no product code calls these
-# yet — the helper is the spec+test surface (VM harness) for activation.
+# import; see apply-activation.md). Per decision D20, no product code calls
+# these yet — the helper is the spec + test surface (VM harness) for activation.
 #
 # Enable with: services.nix-pilot.enable = true;  (in the user's flake/modules)
 { config, lib, pkgs, ... }:
@@ -23,7 +23,7 @@ let
       area=/etc/nix-pilot/generated
       config=$area/configuration.nix
       ensure_area() { mkdir -p "$area"; }
-      # D26 in-band publish-before-switch: the generated area (a tar of
+      # In-band publish-before-switch (D26): the generated area (a tar of
       # configuration.nix + generated-desired.nix) arrives on stdin and is
       # written into the app-owned area before anything builds/switches. Empty
       # stdin fails closed — there is never a stale or missing config to
@@ -45,7 +45,7 @@ let
           ensure_area
           nixos-rebuild --rollback
           ;;
-        # Storage upkeep (7wo.9): fixed, argument-free actions only. Estimates
+        # Storage upkeep: fixed, argument-free actions only. Estimates
         # and actual cleanup never take parameters from the caller; the app
         # asks for a fixed action and the helper decides the exact command.
         gc)

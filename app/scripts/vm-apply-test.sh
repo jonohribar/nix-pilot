@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 7wo.3 installed-module harness: prove the *installed* nix-pilot module's
+# Installed-module harness: prove the *installed* nix-pilot module's
 # helper and polkit authorization work, in an isolated QEMU VM.
 #
 # vm-activation-test.sh already proves the raw activation primitives
@@ -83,7 +83,7 @@ pkgs.testers.runNixOSTest {
     print("rollback path authorized (rc={})".format(status2))
 
     # storage upkeep subcommands are argument-free fixed actions, authorized
-    # through the same polkit action (7wo.9)
+    # through the same polkit action
     status3, out3 = machine.execute(
         "su -l tester -c 'pkexec nix-pilot-apply gc-estimate'")
     low3 = out3.lower()

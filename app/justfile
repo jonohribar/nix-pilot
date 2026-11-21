@@ -30,10 +30,10 @@ wireframes *states: build
 smoke: build
     @if command -v xvfb-run >/dev/null 2>&1 && command -v xwininfo >/dev/null 2>&1; then ./scripts/smoke.sh; else nix-shell ./shell.nix --run './scripts/smoke.sh'; fi
 
-# 7wo.3 activation harness: prove switch+rollback in an isolated QEMU VM
+# Activation harness: prove switch+rollback in an isolated QEMU VM
 # (uses the NixOS test driver; never touches the host config or system; qemu
 # stays out of the main dev shell)
-# 7wo.3 installed-module harness: proves polkit pkexec authorizes the helper
+# Installed-module harness: proves polkit pkexec authorizes the helper
 # and the area gets published (isolated QEMU VM; does not switch the host)
 vm-apply:
     @if command -v qemu-system-x86_64 >/dev/null 2>&1; then ./scripts/vm-apply-test.sh; else nix-shell -p qemu openssh --run './scripts/vm-apply-test.sh'; fi
@@ -41,7 +41,7 @@ vm-apply:
 vm-probe:
     @if command -v qemu-system-x86_64 >/dev/null 2>&1; then ./scripts/vm-activation-test.sh; else nix-shell -p qemu openssh --run './scripts/vm-activation-test.sh'; fi
 
-# 7wo.3 packaging check: the nix-pilot NixOS module must evaluate when enabled
+# Packaging check: the nix-pilot NixOS module must evaluate when enabled
 module-check:
     @if command -v nix-instantiate >/dev/null 2>&1; then ./scripts/module-check.sh; else nix-shell ./shell.nix --run './scripts/module-check.sh'; fi
 

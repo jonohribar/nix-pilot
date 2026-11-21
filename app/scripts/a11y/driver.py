@@ -332,7 +332,7 @@ def find_search_entry(driver: AtspiDriver) -> Optional[Atspi.Accessible]:
     """Find the store-local search entry (the one scoped to the catalogue).
 
     The app now has two search entries: the app-wide one at the top of the
-    sidebar (fyq) and the store-local one inside the Packages tab. The store one
+    sidebar and the store-local one inside the Packages tab. The store one
     is the entry whose ancestor page also holds the licence-restriction
     filter ("Hide packages with licence restrictions").
     check box, so we locate that check box and take the first entry inside

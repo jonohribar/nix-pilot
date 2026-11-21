@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 7wo.3 activation harness: prove switch + rollback of an app-built candidate
-# generation, using the NixOS test driver (an isolated QEMU VM).
+# Prove switch + rollback of an app-built candidate generation using the
+# NixOS test driver (an isolated QEMU VM).
 #
 # Never touches the host: the VM is a minimal test system from the same
 # pinned nixpkgs, and the candidate generation is built on the host (build

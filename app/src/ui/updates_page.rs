@@ -22,13 +22,13 @@ pub struct UpdatesPage {
     /// Set-and-forget upkeep controls (category "updates").
     auto_bools: Vec<(String, gtk4::Switch)>,
     auto_strs: Vec<(String, gtk4::Entry)>,
-    /// Storage upkeep (7wo.9): read-only usage readout + run-now buttons.
+    /// Storage upkeep: read-only usage readout + run-now buttons.
     storage_usage: gtk4::Label,
     storage_result: gtk4::Label,
     estimate_btn: gtk4::Button,
     cleanup_btn: gtk4::Button,
     optimise_btn: gtk4::Button,
-    /// System versions (7wo.8): generations list + rollback surface.
+    /// System versions: generations list + rollback surface.
     gens_list: gtk4::ListBox,
     gens_result: gtk4::Label,
     rollback_btn: gtk4::Button,
@@ -395,7 +395,7 @@ impl UpdatesPage {
         automatic_card.append(&automatic_box);
         page.append(&automatic_card);
 
-        // Storage upkeep (7wo.9): read-only usage readout + run-now actions,
+        // Storage upkeep: read-only usage readout + run-now actions,
         // gated on activation (the cleanup runs elevated through the helper).
         let storage_card = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
         storage_card.add_css_class("card");
@@ -430,9 +430,9 @@ impl UpdatesPage {
         storage_card.append(&storage_btns);
         page.append(&storage_card);
 
-        // System versions (7wo.8): read-only generations list + go-back
-        // control. Rollback goes to the previous generation; every earlier
-        // one stays on the boot menu as the recovery path (REQ-4).
+        // System versions: read-only generations list + go-back control.
+        // Rollback goes to the previous generation; every earlier one stays
+        // on the boot menu as the recovery path (REQ-4).
         let gens_card = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
         gens_card.add_css_class("card");
         gens_card.set_margin_top(6);
