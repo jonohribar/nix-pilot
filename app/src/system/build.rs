@@ -381,6 +381,7 @@ mod tests {
             ("hardware.bluetooth.enable", SettingValue::Bool(true)),
             ("hardware.bluetooth.powerOnBoot", SettingValue::Bool(false)),
             ("services.pipewire.enable", SettingValue::Bool(true)),
+            ("nixpkgs.config.allowUnfree", SettingValue::Bool(true)),
         ] {
             doc.settings.insert(key.into(), value);
         }

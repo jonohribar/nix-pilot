@@ -362,9 +362,9 @@ fn start_availability_check(
                         button.set_label("Check again");
                         let message = match outcome {
                             install::Outcome::UnfreeEvalBlocked => {
-                                "This app is free to use but carries a licence your system's \
-                                 software settings refuse, so nothing was installed. Its \
-                                 licence is marked unfree."
+                                "This app is free to use but carries a licence your system \
+                                 refuses, so nothing was installed. Turn on 'Restricted-licence \
+                                 software' in Settings -> Software to allow it."
                                     .to_string()
                             }
                             install::Outcome::Unavailable => {

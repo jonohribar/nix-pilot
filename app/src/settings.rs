@@ -186,6 +186,21 @@ pub static SPECS: &[Spec] = &[
         "Allow connecting to this computer from elsewhere (remote shell).",
     )
     .with_tags(&["ssh", "remote", "remote shell", "secure shell"]),
+    bool_spec(
+        "software",
+        "nixpkgs.config.allowUnfree",
+        "Restricted-licence software",
+        "Allow installing apps whose licence restricts redistribution or \
+         modification (for example proprietary apps); off, a restricted \
+         app cannot be installed.",
+    )
+    .with_tags(&[
+        "unfree",
+        "proprietary",
+        "closed source",
+        "licence restrictions",
+        "allow restricted",
+    ]),
     // Automatic upkeep (category "updates", rendered on the Updates page).
     // All options verified to exist in the pinned nixpkgs snapshot.
     bool_spec(
@@ -492,6 +507,31 @@ mod tests {
         .is_err());
         assert!(validate("time.timeZone", &SettingValue::Str("Europe/Berlin".into())).is_ok());
         assert!(validate("time.timeZone", &SettingValue::Str("Europe Berlin".into())).is_err());
+    }
+
+    #[test]
+    fn allow_unfree_is_an_owned_boolean_setting() {
+        let mut m = BTreeMap::new();
+        m.insert(
+            "nixpkgs.config.allowUnfree".into(),
+            SettingValue::Bool(true),
+        );
+        assert!(validate("nixpkgs.config.allowUnfree", &SettingValue::Bool(true)).is_ok());
+        assert!(validate(
+            "nixpkgs.config.allowUnfree",
+            &SettingValue::Str("true".into())
+        )
+        .is_err());
+        let out = render_block(&m);
+        assert!(out.contains("  nixpkgs.config.allowUnfree = lib.mkOverride 10 true;\n"));
+        // Search + category placement are wired through the spec table.
+        let spec = SPECS
+            .iter()
+            .find(|s| s.key == "nixpkgs.config.allowUnfree")
+            .unwrap();
+        assert_eq!(spec.category, "software");
+        assert!(spec.tags.contains(&"proprietary"));
+        assert!(spec.tags.contains(&"licence restrictions"));
     }
 
     #[test]

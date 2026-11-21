@@ -56,6 +56,16 @@ Shipped in `app/src/settings.rs` (single-value overrides, verified against the p
 | Remote access (SSH) | `services.openssh.enable` | boolean | allow connecting to this computer remotely |
 | Remote access keys (SSH) | `users.users.<name>.openssh.authorizedKeys.keys` | list of strings (per user) | the public keys allowed to log into this computer, one per line (add/remove) |
 
+Software (category `software`, rendered on the Settings page):
+
+| Setting | NixOS option | Type | Plain label |
+|---|---|---|---|
+| Restricted-licence software | `nixpkgs.config.allowUnfree` | boolean | allow installing apps whose licence restricts redistribution (for example proprietary apps) |
+
+This closes the gap where an unfree install was refused with no owned
+switch; when it is off, an unfree install is refused and the guidance sentence
+points here instead of a dead end.
+
 Automatic upkeep (category `updates`, rendered on the Updates page as the
 set-and-forget "Automatic" card; verified against the pinned nixpkgs):
 

@@ -216,7 +216,9 @@ pub fn verify_package_intents(
         let ok = matches!(r.outcome, install::Outcome::ConfirmedAvailable { .. });
         let note = match r.outcome {
             install::Outcome::ConfirmedAvailable { note } => note,
-            install::Outcome::UnfreeEvalBlocked => "unfree — blocked on this system".to_string(),
+            install::Outcome::UnfreeEvalBlocked => {
+                "Restricted licence — allow it in Settings -> Software".to_string()
+            }
             install::Outcome::Unavailable => "not available for this system".to_string(),
             install::Outcome::CheckFailed { reason } => reason,
         };

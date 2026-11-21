@@ -118,8 +118,9 @@ impl SettingsPage {
         // Category navigation (familiar names shared across desktop shells).
         // Updates is a top-level sidebar surface, never duplicated here.
         // Each row is icon + label + summary, like the shells this mirrors.
-        let categories: [(&str, &str, &str); 6] = [
+        let categories: [(&str, &str, &str); 7] = [
             ("System", "Device name, printing, power, sound", "system"),
+            ("Software", "Installs and licence choices", "software"),
             ("Network & internet", "Wi-Fi, wired, Bluetooth", "network"),
             ("Accounts", "Accounts and remote access keys", "accounts"),
             ("Time & language", "Time zone, language and region", "time"),
