@@ -12,6 +12,54 @@ use crate::model::PackageNames;
 use crate::system::{activation, build, generation, storage};
 use crate::updates::{self, TxEvent, TxStep};
 
+/// How many recent generations the System-versions card shows by default
+/// (the rest sit behind the "Show older" expander).
+const RECENT_GENERATIONS: usize = 10;
+
+/// One System-versions row: a human day label with the current generation
+/// marked, and the nixpkgs revision demoted to a tooltip (never the main
+/// content).
+fn generation_row(gen: &generation::GenerationInfo, now: u64) -> gtk4::ListBoxRow {
+    let day = generation::humanize_day(&gen.date, now);
+    let text = if gen.current {
+        format!("{day} — this system now")
+    } else {
+        day
+    };
+    let l = gtk4::Label::new(Some(&text));
+    l.set_xalign(0.0);
+    if gen.current {
+        l.add_css_class("heading");
+    } else {
+        l.add_css_class("dim-label");
+    }
+    let row = gtk4::ListBoxRow::new();
+    row.set_selectable(false);
+    row.set_activatable(false);
+    row.set_child(Some(&l));
+    if let Some(version) = gen.version.as_deref() {
+        row.set_tooltip_text(Some(version));
+    }
+    row
+}
+
+/// The "Show older" expander that reveals every remaining generation, so the
+/// card stays a bounded, browsable history instead of an unbounded wall.
+fn show_older_rows(older: &[generation::GenerationInfo], now: u64) -> gtk4::ListBoxRow {
+    let inner = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    for gen in older {
+        inner.append(&generation_row(gen, now));
+    }
+    let label = format!("Show older — {} more", older.len());
+    let expander = gtk4::Expander::new(Some(label.as_str()));
+    expander.set_child(Some(&inner));
+    let row = gtk4::ListBoxRow::new();
+    row.set_selectable(false);
+    row.set_activatable(false);
+    row.set_child(Some(&expander));
+    row
+}
+
 /// Review, prepare, and (when enabled) apply desired system changes.
 pub struct UpdatesPage {
     /// Root widget for the Updates surface.
@@ -582,9 +630,10 @@ impl UpdatesPage {
         });
     }
 
-    /// Repopulate the system-versions list (read-only, shown when the page
-    /// opens). Runs on the GTK thread; the listing itself is a cheap read of
-    /// world-readable profile symlinks.
+    /// Repopulate the System-versions card (read-only, shown when the page
+    /// opens). Runs on the GTK thread; the listing is a cheap read of
+    /// world-readable profile symlinks. Shows the newest few generations with
+    /// the rest behind a "Show older" expander, per the recovery spec.
     fn refresh_generations(&self) {
         while let Some(child) = self.gens_list.first_child() {
             self.gens_list.remove(&child);
@@ -597,32 +646,18 @@ impl UpdatesPage {
             self.gens_list.append(&l);
             return;
         }
-        for gen in &gens {
-            let text = if gen.current {
-                format!(
-                    "{} — {}  (current)",
-                    gen.date,
-                    gen.version.as_deref().unwrap_or("unknown build")
-                )
-            } else {
-                format!(
-                    "{} — {}",
-                    gen.date,
-                    gen.version.as_deref().unwrap_or("unknown build")
-                )
-            };
-            let l = gtk4::Label::new(Some(&text));
-            l.set_xalign(0.0);
-            if gen.current {
-                l.add_css_class("heading");
-            } else {
-                l.add_css_class("dim-label");
-            }
-            let row = gtk4::ListBoxRow::new();
-            row.set_selectable(false);
-            row.set_activatable(false);
-            row.set_child(Some(&l));
-            self.gens_list.append(&row);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let mut by_number = gens.into_iter();
+        let recent: Vec<_> = by_number.by_ref().take(RECENT_GENERATIONS).collect();
+        let older: Vec<_> = by_number.collect();
+        for gen in &recent {
+            self.gens_list.append(&generation_row(gen, now));
+        }
+        if !older.is_empty() {
+            self.gens_list.append(&show_older_rows(&older, now));
         }
     }
 

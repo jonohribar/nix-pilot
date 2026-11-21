@@ -106,6 +106,27 @@ pub fn format_epoch(secs: u64) -> String {
     format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}")
 }
 
+/// Give a generation's `YYYY-MM-DD HH:MM` date a human day label.
+///
+/// Returns `Today HH:MM` or `Yesterday HH:MM` when the generation was
+/// modified on the reference day or the day before it, otherwise the
+/// original date. The reference uses the same UTC day as [`format_epoch`],
+/// so a caller passes `now` as epoch seconds without a date library.
+pub fn humanize_day(date: &str, now: u64) -> String {
+    let Some(day) = date.get(..10) else {
+        return date.to_string();
+    };
+    let today = &format_epoch(now)[..10];
+    if day == today {
+        return format!("Today{}", &date[10..]);
+    }
+    let yesterday = &format_epoch(now.saturating_sub(86400))[..10];
+    if day == yesterday {
+        return format!("Yesterday{}", &date[10..]);
+    }
+    date.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,6 +152,18 @@ mod tests {
         );
         assert_eq!(parse_store_version("nixos-system-host"), None);
         assert_eq!(parse_store_version(""), None);
+    }
+
+    #[test]
+    fn humanizes_relative_days() {
+        // A fixed reference day (2024-10-04 00:00 UTC): same-day, previous-day,
+        // and older timestamps get Today / Yesterday / the raw date.
+        let now = 1_728_000_000;
+        assert_eq!(humanize_day("2024-10-04 12:35", now), "Today 12:35");
+        assert_eq!(humanize_day("2024-10-03 09:05", now), "Yesterday 09:05");
+        assert_eq!(humanize_day("2024-10-01 22:00", now), "2024-10-01 22:00");
+        // Malformed input passes through unchanged.
+        assert_eq!(humanize_day("unknown date", now), "unknown date");
     }
 
     #[test]
