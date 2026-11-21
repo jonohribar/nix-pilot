@@ -1143,6 +1143,27 @@ mod tests {
     }
 
     #[test]
+    fn module_renders_licence_setting_and_overlays_together() {
+        let mut doc = DesiredDoc::current();
+        use crate::setting_value::SettingValue;
+        doc.settings.insert(
+            "nixpkgs.config.allowUnfree".into(),
+            SettingValue::Bool(true),
+        );
+        doc.sources.insert(
+            "firefox".into(),
+            PerAppSource {
+                rev: "a".repeat(40),
+                nar_hash: None,
+            },
+        );
+        let nix = doc.render_module(UserBackend::NixUsers).unwrap();
+        assert!(nix.contains("nixpkgs.overlays = [ (import ./per-app-overlays.nix) ];"));
+        assert!(nix.contains("nixpkgs.config.allowUnfree = lib.mkOverride 10 true;"));
+        assert!(doc.validate().is_ok());
+    }
+
+    #[test]
     fn per_app_overlays_group_by_rev_and_are_deterministic() {
         let mut sources = BTreeMap::new();
         sources.insert(
