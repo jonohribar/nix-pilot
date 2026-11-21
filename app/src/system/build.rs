@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use crate::desired_state::DesiredDoc;
+use crate::desired_state::{render_per_app_overlays, DesiredDoc, PER_APP_OVERLAY_NAME};
 use crate::process;
 
 /// Name of the generated desired-state module inside a generation directory.
@@ -102,6 +102,12 @@ pub fn write_generation(
         .render_module(detect_user_backend())
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     std::fs::write(dir.join(DESIRED_MODULE_NAME), desired_module)?;
+    if !doc.sources.is_empty() {
+        std::fs::write(
+            dir.join(PER_APP_OVERLAY_NAME),
+            render_per_app_overlays(&doc.sources),
+        )?;
+    }
 
     let mut imports = Vec::new();
     if let Some(user_config) = preserved_config {

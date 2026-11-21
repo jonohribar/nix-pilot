@@ -38,6 +38,24 @@ pub const CURRENT_SCHEMA: u8 = 1;
 /// The NixOS account that owns a per-user package selection.
 pub type Account = String;
 
+/// Name of the per-app source overlay written next to the generated module.
+/// The generated module imports it via `nixpkgs.overlays` when per-app
+/// sources exist; `build.rs` writes the file with this name.
+pub const PER_APP_OVERLAY_NAME: &str = "per-app-overlays.nix";
+
+/// Which input a named app is sourced from (version-selection, D27).
+/// Absence means the app uses the system's channel (the default); presence
+/// sources that one app from a pinned unstable nixpkgs revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PerAppSource {
+    /// Pinned nixpkgs revision the app is sourced from (the "newest" channel).
+    pub rev: String,
+    /// Fixed-output hash for the pinned revision, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nar_hash: Option<String>,
+}
+
 /// Which per-user package mechanism the render targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UserBackend {
@@ -132,6 +150,11 @@ pub struct DesiredDoc {
     /// pre-existing v1 files parse unchanged.
     #[serde(default)]
     pub accounts: BTreeMap<Account, AccountProfile>,
+    /// Per-app source inputs (version-selection): which apps come from a
+    /// pinned second nixpkgs revision instead of the system channel. Additive
+    /// and optional; pre-existing v1 files parse unchanged.
+    #[serde(default)]
+    pub sources: BTreeMap<String, PerAppSource>,
 }
 
 impl Default for DesiredDoc {
@@ -143,6 +166,7 @@ impl Default for DesiredDoc {
             settings: BTreeMap::new(),
             authorized_keys: BTreeMap::new(),
             accounts: BTreeMap::new(),
+            sources: BTreeMap::new(),
         }
     }
 }
@@ -326,6 +350,20 @@ impl DesiredDoc {
                 }
             })?;
         }
+        for (attr, source) in &self.sources {
+            if !is_nix_identifier(attr)
+                || attr.contains('.')
+                || attr.chars().next().is_some_and(|c| c.is_ascii_digit())
+            {
+                return Err(StateValidationError::SourceAttribute(attr.clone()));
+            }
+            if source.rev.is_empty() || source.rev.chars().any(char::is_whitespace) {
+                return Err(StateValidationError::Setting {
+                    key: format!("sources.{attr}"),
+                    reason: "a pinned revision must be a non-empty, whitespace-free string".into(),
+                });
+            }
+        }
         Ok(())
     }
 
@@ -414,6 +452,12 @@ impl DesiredDoc {
             body.push('\n');
         }
         body.push_str(&crate::settings::render_block(&self.settings));
+        if !self.sources.is_empty() {
+            body.insert_str(
+                0,
+                &format!("  nixpkgs.overlays = [ (import ./{PER_APP_OVERLAY_NAME}) ];\n"),
+            );
+        }
         if body.is_empty() {
             body.push_str("  # no packages selected\n");
         }
@@ -421,6 +465,57 @@ impl DesiredDoc {
     }
 }
 
+/// Render the per-app source overlay consumed by the generated module.
+///
+/// Each pinned revision is imported once (`builtins.fetchTree`); the named
+/// apps are overridden from it. Deterministic over the sorted source map.
+/// This is the shared per-package pin surface later reused by update recovery.
+pub fn render_per_app_overlays(sources: &BTreeMap<String, PerAppSource>) -> String {
+    let mut by_rev: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut hash_of: BTreeMap<String, Option<String>> = BTreeMap::new();
+    for (attr, source) in sources {
+        by_rev
+            .entry(source.rev.clone())
+            .or_default()
+            .push(attr.clone());
+        let slot = hash_of.entry(source.rev.clone()).or_insert(None);
+        if slot.is_none() {
+            *slot = source.nar_hash.clone();
+        }
+    }
+
+    let mut out = String::from("# generated per-app source overlay\nfinal: prev: let\n");
+    let mut import_of: BTreeMap<String, String> = BTreeMap::new();
+    for rev in by_rev.keys() {
+        let name = format!("p{}", import_of.len());
+        let hash_line = match hash_of.get(rev.as_str()) {
+            Some(Some(hash)) => format!("      narHash = \"{hash}\";\n"),
+            _ => String::new(),
+        };
+        out.push_str(&format!(
+            "  {name} = import (builtins.fetchTree {{
+                type = \"github\";
+                owner = \"NixOS\";
+                repo = \"nixpkgs\";
+                rev = \"{rev}\";
+                {hash_line}
+              }}) {{
+                system = prev.stdenv.hostPlatform.system;
+              }};
+"
+        ));
+        import_of.insert(rev.clone(), name);
+    }
+    out.push_str("in {\n");
+    for (rev, attrs) in &by_rev {
+        let name = import_of.get(rev.as_str()).expect("rev imported above");
+        for attr in attrs {
+            out.push_str(&format!("  {attr} = {name}.{attr};\n"));
+        }
+    }
+    out.push_str("}\n");
+    out
+}
 fn is_nix_identifier(value: &str) -> bool {
     let mut chars = value.chars();
     matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
@@ -482,6 +577,8 @@ pub enum StateValidationError {
     Account(String),
     /// A setting value failed its setting-specific validation rule.
     Setting { key: String, reason: String },
+    /// A per-app source key is not a valid top-level nixpkgs attribute name.
+    SourceAttribute(String),
 }
 
 impl fmt::Display for StateValidationError {
@@ -495,6 +592,12 @@ impl fmt::Display for StateValidationError {
             }
             Self::Setting { key, reason } => {
                 write!(f, "setting {key} is invalid: {reason}")
+            }
+            Self::SourceAttribute(attr) => {
+                write!(
+                    f,
+                    "per-app source key is not a valid top-level attribute: {attr:?}"
+                )
             }
         }
     }
@@ -1018,6 +1121,115 @@ mod tests {
         assert_eq!(
             desired_path_in(Path::new("/base")),
             Path::new("/base/nix-pilot/desired-state.json")
+        );
+    }
+
+    #[test]
+    fn render_module_emits_overlays_only_when_sources_exist() {
+        let plain = DesiredDoc::default();
+        let without = plain.render_module(UserBackend::NixUsers).unwrap();
+        assert!(!without.contains("nixpkgs.overlays"));
+
+        let mut doc = DesiredDoc::default();
+        doc.sources.insert(
+            "firefox".into(),
+            PerAppSource {
+                rev: "a".repeat(40),
+                nar_hash: Some("sha256-abc".into()),
+            },
+        );
+        let with = doc.render_module(UserBackend::NixUsers).unwrap();
+        assert!(with.contains("nixpkgs.overlays = [ (import ./per-app-overlays.nix) ];"));
+    }
+
+    #[test]
+    fn per_app_overlays_group_by_rev_and_are_deterministic() {
+        let mut sources = BTreeMap::new();
+        sources.insert(
+            "firefox".into(),
+            PerAppSource {
+                rev: "a".repeat(40),
+                nar_hash: Some("sha256-abc".into()),
+            },
+        );
+        sources.insert(
+            "gimp".into(),
+            PerAppSource {
+                rev: "a".repeat(40),
+                nar_hash: None,
+            },
+        );
+        sources.insert(
+            "vscode".into(),
+            PerAppSource {
+                rev: "b".repeat(40),
+                nar_hash: None,
+            },
+        );
+        let overlay = render_per_app_overlays(&sources);
+        assert!(overlay.starts_with("# generated per-app source overlay"));
+        assert!(overlay.contains("builtins.fetchTree"));
+        // Same rev imports once; two distinct revs -> two imports.
+        assert_eq!(
+            overlay.lines().filter(|l| l.contains("fetchTree")).count(),
+            2
+        );
+        // Shorter (lexicographically earlier) rev imports first (p0) and keeps
+        // the hash; firefox and gimp share p0, vscode comes from p1.
+        let rev_a = "a".repeat(40);
+        let rev_b = "b".repeat(40);
+        assert!(overlay.contains(&format!("rev = \"{rev_a}\";")));
+        assert!(overlay.contains(&format!("rev = \"{rev_b}\";")));
+        assert!(overlay.contains("narHash = \"sha256-abc\";"));
+        assert!(overlay.contains("firefox = p0.firefox;"));
+        assert!(overlay.contains("gimp = p0.gimp;"));
+        assert!(overlay.contains("vscode = p1.vscode;"));
+        assert_eq!(overlay, render_per_app_overlays(&sources));
+    }
+
+    #[test]
+    fn validate_rejects_unsafe_source_keys() {
+        let mut doc = DesiredDoc::default();
+        doc.sources.insert(
+            "python3Packages.requests".into(),
+            PerAppSource {
+                rev: "a".repeat(40),
+                nar_hash: None,
+            },
+        );
+        assert!(matches!(
+            doc.validate(),
+            Err(StateValidationError::SourceAttribute(_))
+        ));
+    }
+
+    /// Live proof (opt-in): the rendered per-app overlay is *valid Nix*
+    /// syntax. `--parse` never evaluates `fetchTree`, so no network is used.
+    #[test]
+    #[ignore = "requires nix-instantiate on PATH"]
+    fn per_app_overlay_parses_with_nix() {
+        let mut sources = BTreeMap::new();
+        sources.insert(
+            "firefox".into(),
+            PerAppSource {
+                rev: "a".repeat(40),
+                nar_hash: Some("sha256-abc".into()),
+            },
+        );
+        let overlay = render_per_app_overlays(&sources);
+        let mut path = std::env::temp_dir();
+        path.push(format!("nix-pilot-overlay-{}.nix", std::process::id()));
+        std::fs::write(&path, &overlay).unwrap();
+        let out = std::process::Command::new("nix-instantiate")
+            .arg("--parse")
+            .arg(&path)
+            .output();
+        let _ = std::fs::remove_file(&path);
+        let out = out.expect("run nix-instantiate");
+        assert!(
+            out.status.success(),
+            "per-app overlay did not parse:\n{}",
+            String::from_utf8_lossy(&out.stderr)
         );
     }
 
