@@ -35,7 +35,19 @@ pub struct Spec {
     /// Category page that owns this setting ("system", "network", "time",
     /// "privacy" in Settings, "updates" on the Updates surface).
     pub category: &'static str,
+    /// Consumer search aliases for the global search: words a user might
+    /// type instead of the label ("wifi" for Network connections).
+    pub tags: &'static [&'static str],
     validate: fn(&str) -> Result<(), String>,
+}
+
+impl Spec {
+    /// Attach consumer search aliases (see [`Spec::tags`]); const so it works
+    /// in the static SPECS table.
+    pub const fn with_tags(mut self, tags: &'static [&'static str]) -> Spec {
+        self.tags = tags;
+        self
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -52,6 +64,7 @@ const fn str_spec(
         blurb,
         kind: ValueKind::String,
         category,
+        tags: &[],
         validate,
     }
 }
@@ -76,26 +89,36 @@ pub static SPECS: &[Spec] = &[
                 Ok(())
             }
         },
-    ),
+    )
+    .with_tags(&["hostname", "rename", "computer name", "machine name"]),
     bool_spec(
         "network",
         "networking.networkmanager.enable",
         "Network connections",
         "Manage Wi-Fi and wired connections (NetworkManager) instead of static settings.",
-    ),
+    )
+    .with_tags(&[
+        "wifi",
+        "wireless",
+        "ethernet",
+        "internet",
+        "network manager",
+    ]),
     bool_spec(
         "network",
         "hardware.bluetooth.enable",
         "Bluetooth",
         "Use Bluetooth devices (headphones, mice, keyboards).",
-    ),
+    )
+    .with_tags(&["wireless", "headphones", "mice", "keyboards"]),
     bool_spec(
         "network",
         "hardware.bluetooth.powerOnBoot",
         "Bluetooth at startup",
         "Turn Bluetooth on when the computer starts (needs Bluetooth to be \
          enabled).",
-    ),
+    )
+    .with_tags(&["boot", "start up", "wireless"]),
     str_spec(
         "time",
         "time.timeZone",
@@ -108,7 +131,8 @@ pub static SPECS: &[Spec] = &[
                 Ok(())
             }
         },
-    ),
+    )
+    .with_tags(&["clock", "timezone", "time"]),
     str_spec(
         "time",
         "i18n.defaultLocale",
@@ -124,31 +148,36 @@ pub static SPECS: &[Spec] = &[
                 Err("use a locale name like en_US.UTF-8".into())
             }
         },
-    ),
+    )
+    .with_tags(&["locale", "language", "region", "numbers", "dates"]),
     bool_spec(
         "system",
         "services.printing.enable",
         "Printing",
         "Start the printing service so the machine can use and share printers.",
-    ),
+    )
+    .with_tags(&["printer", "print"]),
     bool_spec(
         "system",
         "powerManagement.enable",
         "Power management",
         "Enable suspend and power-saving features (mainly for laptops).",
-    ),
+    )
+    .with_tags(&["battery", "suspend", "sleep", "power saving"]),
     bool_spec(
         "system",
         "services.pipewire.enable",
         "Sound",
         "Play and record sound through the desktop (PipeWire).",
-    ),
+    )
+    .with_tags(&["audio", "speakers", "microphone", "volume"]),
     bool_spec(
         "privacy",
         "services.openssh.enable",
         "Remote access (SSH)",
         "Allow connecting to this computer from elsewhere (remote shell).",
-    ),
+    )
+    .with_tags(&["ssh", "remote", "remote shell", "secure shell"]),
     // Automatic upkeep (category "updates", rendered on the Updates page).
     // All options verified to exist in the pinned nixpkgs snapshot.
     bool_spec(
@@ -157,7 +186,8 @@ pub static SPECS: &[Spec] = &[
         "Automatic cleanup",
         "Regularly remove packages and files nothing needs anymore, so the \
          system does not fill up over time.",
-    ),
+    )
+    .with_tags(&["garbage", "disk space", "free space", "delete files"]),
     choice_spec(
         "updates",
         "nix.gc.options",
@@ -167,19 +197,22 @@ pub static SPECS: &[Spec] = &[
             ("--delete-older-than 7d", "Keep about 7 days"),
             ("--delete-older-than 30d", "Keep about 30 days"),
         ],
-    ),
+    )
+    .with_tags(&["retention", "older versions", "delete older", "disk space"]),
     bool_spec(
         "updates",
         "nix.optimise.automatic",
         "Reclaim storage",
         "Periodically link identical files together to save disk space.",
-    ),
+    )
+    .with_tags(&["disk space", "deduplicate", "same files", "compact"]),
     bool_spec(
         "updates",
         "system.autoUpgrade.enable",
         "Automatic system updates",
         "Check for and switch to new system versions on a schedule.",
-    ),
+    )
+    .with_tags(&["upgrade", "security", "patches", "new version"]),
     str_spec(
         "updates",
         "system.autoUpgrade.dates",
@@ -203,7 +236,8 @@ pub static SPECS: &[Spec] = &[
                 Err("use 24-hour time like 02:00".into())
             }
         },
-    ),
+    )
+    .with_tags(&["when", "daily", "frequency", "time of day"]),
     choice_spec(
         "updates",
         "system.autoUpgrade.randomizedDelaySec",
@@ -213,7 +247,8 @@ pub static SPECS: &[Spec] = &[
             ("300", "Within about 5 minutes"),
             ("1800", "Within about 30 minutes"),
         ],
-    ),
+    )
+    .with_tags(&["random", "spread out", "stagger"]),
     choice_spec(
         "updates",
         "system.autoUpgrade.operation",
@@ -223,7 +258,8 @@ pub static SPECS: &[Spec] = &[
             ("switch", "Apply right away"),
             ("boot", "Apply at the next restart"),
         ],
-    ),
+    )
+    .with_tags(&["switch", "restart", "apply"]),
     str_spec(
         "updates",
         "system.autoUpgrade.flake",
@@ -237,7 +273,8 @@ pub static SPECS: &[Spec] = &[
                 Err("use a location without spaces, or leave empty".into())
             }
         },
-    ),
+    )
+    .with_tags(&["flake", "configuration", "description"]),
 ];
 
 const fn bool_spec(
@@ -252,6 +289,7 @@ const fn bool_spec(
         blurb,
         kind: ValueKind::Boolean,
         category,
+        tags: &[],
         validate: |_| Ok(()),
     }
 }
@@ -271,6 +309,7 @@ const fn choice_spec(
         blurb,
         kind: ValueKind::Choice(options),
         category,
+        tags: &[],
         // Choice values are validated centrally against the kind's options
         // (the fn-pointer field cannot capture `options`).
         validate: |_| Ok(()),

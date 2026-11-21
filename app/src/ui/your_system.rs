@@ -32,7 +32,7 @@ impl YourSystemPage {
         page.append(&heading);
 
         let blurb = gtk4::Label::new(Some(
-            "The apps to install and the settings to apply, in plain words. \
+            "The packages to install and the settings to apply, in plain words. \
              Nothing here changes this computer until you prepare and apply \
              your changes on the Updates page.",
         ));
@@ -89,7 +89,7 @@ impl YourSystemPage {
         }
         if rows.is_empty() {
             let l = gtk4::Label::new(Some(
-                "Nothing chosen yet — add apps from the store, or change a \
+                "Nothing chosen yet — add packages from the store, or change a \
                  setting in Settings.",
             ));
             l.set_xalign(0.0);

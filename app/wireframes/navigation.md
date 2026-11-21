@@ -5,10 +5,10 @@ sidebar + stack pages. This map is the at-a-glance route diagram; the PNGs are
 the rendered states.
 
 **Real-app parity (2026-11-20):** the app's live window now matches this layout
-— a sidebar (Apps / Settings / Updates / Your system) over a stack. The
-sidebar carries the app-wide search at its top (D28, fyq): it searches apps +
+— a sidebar (Packages / Settings / Updates / Your system) over a stack. The
+sidebar carries the app-wide search at its top (D28, fyq): it searches packages +
 settings and always keeps that scope regardless of surface. The store's
-scoped search + Hide non-free filter live inside the Apps page. Updates is a
+scoped search + Hide non-free filter live inside the Packages page. Updates is a
 top-level surface only (the Settings home no longer duplicates it). The
 Updates page's Prepare-and-build runs the real candidate build (build-only,
 store never activated); updates/settings rollback state pages are capture-only
@@ -20,12 +20,12 @@ Note: `just app` lists the app recipes; `just app proto` opens the prototype.
 
 ```mermaid
 flowchart LR
-    START([Sidebar]) --> HOME[Apps · home]
+    START([Sidebar]) --> HOME[Packages · home]
     HOME -->|"click an app card"| DETAIL[Application detail]
     DETAIL -->|"Back"| HOME
-    HOME -->|"type in the Apps search"| RESULTS[App results · grouped]
+    HOME -->|"type in the Packages search"| RESULTS[App results · grouped]
     RESULTS -->|"clear search / Back"| HOME
-    START -->|"type in the sidebar search"| GSTART[Global search · apps + settings]
+    START -->|"type in the sidebar search"| GSTART[Global search · packages + settings]
     GSTART -->|"an app result"| DETAIL
     GSTART -->|"a setting result"| SETCAT[Settings category]
     START -->|"Settings"| SET[Settings · home]

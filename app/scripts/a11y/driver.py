@@ -281,14 +281,14 @@ def get_sidebar(driver: AtspiDriver) -> Optional[Atspi.Accessible]:
             for grandchild in _iter_children(child):
                 if grandchild.get_role_name() == "panel":
                     for btn in _iter_children(grandchild):
-                        if btn.get_role_name() == "button" and btn.get_name() in ("Apps", "Settings", "Updates", "Your system"):
+                        if btn.get_role_name() == "button" and btn.get_name() in ("Packages", "Settings", "Updates", "Your system"):
                             return grandchild
             # Also allow a single nested panel under a grouping (tree shape
             # seen in the live dump: frame -> panel -> panel { buttons }).
             for group in _iter_children(child):
                 if group.get_role_name() == "panel":
                     for btn in _iter_children(group):
-                        if btn.get_role_name() == "button" and btn.get_name() in ("Apps", "Settings", "Updates", "Your system"):
+                        if btn.get_role_name() == "button" and btn.get_name() in ("Packages", "Settings", "Updates", "Your system"):
                             return group
     return None
 
@@ -325,14 +325,14 @@ def find_search_entry(driver: AtspiDriver) -> Optional[Atspi.Accessible]:
     """Find the store-local search entry (the one scoped to the catalogue).
 
     The app now has two search entries: the app-wide one at the top of the
-    sidebar (fyq) and the store-local one inside the Apps tab. The store one
+    sidebar (fyq) and the store-local one inside the Packages tab. The store one
     is the entry whose ancestor page also holds the licence-restriction
-    filter ("Hide apps with licence restrictions").
+    filter ("Hide packages with licence restrictions").
     check box, so we locate that check box and take the first entry inside
     its page subtree.
     """
     check = driver.find_by_role_and_name(
-        driver.app, "check box", "Hide apps with licence restrictions"
+        driver.app, "check box", "Hide packages with licence restrictions"
     )
     scope = None
     if check is not None:

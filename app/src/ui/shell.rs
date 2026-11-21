@@ -384,7 +384,7 @@ impl GlobalSearch {
                 query.trim()
             ));
         } else if query.trim().is_empty() {
-            self.summary.set_text("Search apps and settings");
+            self.summary.set_text("Search packages and settings");
         } else {
             self.summary.set_text(&format!("{count} shown"));
         }
@@ -548,18 +548,18 @@ struct CatalogueList {
 
 fn build_catalogue_list() -> CatalogueList {
     // Store-local search (fyq): the bar that scopes to the catalogue lives
-    // inside the Apps tab; the app-wide search sits atop the sidebar.
+    // inside the Packages tab; the app-wide search sits atop the sidebar.
     let search = gtk4::SearchEntry::new();
     // dxy: the two search boxes must read differently at a glance — the
     // sidebar one says what it spans; this one is store-scoped (D28).
-    search.set_placeholder_text(Some("Search apps…"));
-    search.set_tooltip_text(Some("Searches the app catalogue only"));
+    search.set_placeholder_text(Some("Search packages…"));
+    search.set_tooltip_text(Some("Searches the package catalogue only"));
     search.set_hexpand(true);
     // optional non-free filter (decision D1): off by default
     // x6r/D1: consumer wording, not packaging jargon.
-    let unfree_filter = gtk4::CheckButton::with_label("Hide apps with licence restrictions");
+    let unfree_filter = gtk4::CheckButton::with_label("Hide packages with licence restrictions");
     unfree_filter.set_tooltip_text(Some(
-        "Some apps carry licences your system may refuse; this hides them",
+        "Some packages carry licences your system may refuse; this hides them",
     ));
     let filter_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     filter_row.append(&search);
@@ -751,11 +751,11 @@ fn build_sidebar(
     search_box.set_margin_bottom(4);
     search_box.set_margin_start(8);
     search_box.set_margin_end(8);
-    global_search.set_placeholder_text(Some("Search apps and settings…"));
-    global_search.set_tooltip_text(Some("Searches apps and settings everywhere"));
+    global_search.set_placeholder_text(Some("Search packages and settings…"));
+    global_search.set_tooltip_text(Some("Searches packages and settings everywhere"));
     search_box.append(global_search);
     sidebar.append(&search_box);
-    sidebar.append(&nav_button("Apps", "list", stack, None));
+    sidebar.append(&nav_button("Packages", "list", stack, None));
     sidebar.append(&nav_button("Settings", "settings", stack, None));
 
     let updates = updates.clone();
@@ -797,7 +797,7 @@ fn set_catalogue_summary(summary: &gtk4::Label, entries: &[IndexEntry], error: O
     let apps = browse_entries(entries).len();
     let showing = apps.min(MAX_ROWS);
     summary.set_text(&format!(
-        "Showing {showing} of {apps} applications — search or scroll for more"
+        "Showing {showing} of {apps} packages — search or scroll for more"
     ));
 }
 

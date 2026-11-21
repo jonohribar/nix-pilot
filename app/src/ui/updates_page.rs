@@ -606,7 +606,7 @@ impl UpdatesPage {
         }
         if q.is_empty() {
             let l = gtk4::Label::new(Some(
-                "Nothing ready to change yet — add apps from the store.",
+                "Nothing ready to change yet — add packages from the store.",
             ));
             l.set_xalign(0.0);
             l.add_css_class("dim-label");

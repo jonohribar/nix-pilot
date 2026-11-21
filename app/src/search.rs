@@ -53,14 +53,23 @@ pub fn rank(query: &str, texts: &[SearchText], max: usize) -> Vec<usize> {
 /// Ranked indices of the authored settings specs matching the query (S1/S3):
 /// same scorer as the catalogue, so a global query reads consistently over
 /// both document types (S2 — "ssh" surfaces the Remote Access setting beside
-/// the OpenSSH application). name=label, pn=option key, desc=blurb.
+/// the OpenSSH application). name=label, pn=option key, desc=blurb + the
+/// spec's authored `tags` (consumer synonyms like "wifi" for Network
+/// connections), so natural-language queries hit the right setting.
 pub fn rank_settings(query: &str, specs: &[crate::settings::Spec], max: usize) -> Vec<usize> {
     let texts: Vec<SearchText> = specs
         .iter()
         .map(|s| SearchText {
             name: s.label.to_lowercase(),
             pn: s.key.to_lowercase(),
-            desc: s.blurb.to_lowercase(),
+            desc: {
+                let mut d = s.blurb.to_lowercase();
+                for t in s.tags {
+                    d.push(' ');
+                    d.push_str(t);
+                }
+                d
+            },
         })
         .collect();
     rank(query, &texts, max)
@@ -193,6 +202,28 @@ mod tests {
         assert!(
             ssh.contains(&"services.openssh.enable"),
             "ssh query must match the SSH setting, got {ssh:?}"
+        );
+    }
+
+    #[test]
+    fn rank_settings_matches_authored_tags() {
+        // Tags are the consumer vocabulary a setting's label does not carry:
+        // "wifi" must surface Network connections, "rename" the Device name.
+        let wifi = rank_settings("wifi", crate::settings::SPECS, 10)
+            .into_iter()
+            .map(|i| crate::settings::SPECS[i].key)
+            .collect::<Vec<_>>();
+        assert!(
+            wifi.contains(&"networking.networkmanager.enable"),
+            "wifi query must match Network connections via its tags, got {wifi:?}"
+        );
+        let rename = rank_settings("rename", crate::settings::SPECS, 10)
+            .into_iter()
+            .map(|i| crate::settings::SPECS[i].key)
+            .collect::<Vec<_>>();
+        assert!(
+            rename.contains(&"networking.hostName"),
+            "rename query must match the Device name setting via its tags, got {rename:?}"
         );
     }
 
