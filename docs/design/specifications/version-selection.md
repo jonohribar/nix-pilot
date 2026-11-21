@@ -93,6 +93,16 @@ newer version exists and can source the newest channel, and the documented
 scoped D23 exception for that channel. Free-form custom version input stays
 out.
 
+## Mechanism plumbing (decided)
+
+The per-app overlay is app-side, through the generated config the app owns
+(decision D23 scoped exception), with no change to the user's flake module:
+`render_module` emits `nixpkgs.overlays = [ (import ./per-app-overlays.nix) ]`
+into the generated module only when per-app sources exist, the overlay file is
+written beside it, and the switch/activation archive carries the overlay file
+alongside the module so the relative import resolves from the extracted config.
+The no-sources path is byte-identical and stays untouched.
+
 ## Future directions (deferred, not scheduled)
 
 Possibilities for exact or older per-app versions, and for choosing how widely
