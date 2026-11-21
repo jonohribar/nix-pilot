@@ -11,7 +11,7 @@ use std::time::Duration;
 use super::build;
 use super::helper::{self, HelperAction};
 use crate::config_source;
-use crate::desired_state::DesiredDoc;
+use crate::desired_state::{DesiredDoc, PER_APP_OVERLAY_NAME};
 use crate::process;
 
 /// Activation action requested by the Updates page.
@@ -150,11 +150,21 @@ fn activate_in_directory(
 
 fn create_tar_gz(directory: &Path, timeout: Duration) -> Result<Vec<u8>, String> {
     let archive = directory.join("activation.tar.gz");
+    // The generated module rel-imports `./per-app-overlays.nix` when per-app
+    // sources exist; that file must travel with the module so the switch,
+    // which runs from the extracted tar, can resolve it.
+    let mut files = vec![
+        build::OUTER_CONFIG_NAME.to_string(),
+        build::DESIRED_MODULE_NAME.to_string(),
+    ];
+    if directory.join(PER_APP_OVERLAY_NAME).is_file() {
+        files.push(PER_APP_OVERLAY_NAME.to_string());
+    }
     let mut command = Command::new("tar");
     command
         .arg("-czf")
         .arg(&archive)
-        .args([build::OUTER_CONFIG_NAME, build::DESIRED_MODULE_NAME])
+        .args(&files)
         .current_dir(directory);
     let result = match process::run(&mut command, timeout) {
         Ok(output) if output.status.success() => {
@@ -205,6 +215,57 @@ mod tests {
         );
         assert!(!result.ok);
         assert_eq!(result.note, "activation is not enabled on this system");
+    }
+
+    #[test]
+    fn tar_carries_the_per_app_overlay_when_sources_exist() {
+        let mut doc = DesiredDoc::current();
+        doc.sources.insert(
+            "firefox".into(),
+            crate::desired_state::PerAppSource {
+                rev: "a".repeat(40),
+                nar_hash: None,
+            },
+        );
+        doc.add_package(
+            "alice",
+            "hello".into(),
+            crate::desired_state::PackageScope::System,
+        );
+        let (preserved, hardware) = config_source::discover()
+            .map(|sources| (Some(sources.configuration), sources.hardware_configuration))
+            .unwrap_or((None, None));
+
+        let dir = std::env::temp_dir().join(format!("np-tar-overlay-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        build::write_generation(
+            &dir,
+            &doc,
+            "26.05",
+            preserved.as_deref(),
+            hardware.as_deref(),
+        )
+        .unwrap();
+        // The overlay file is produced beside the generated module.
+        assert!(dir.join(PER_APP_OVERLAY_NAME).is_file());
+
+        let archive = create_tar_gz(&dir, Duration::from_secs(10)).unwrap();
+        let path = std::env::temp_dir().join(format!("np-tar-overlay-list-{}", std::process::id()));
+        std::fs::write(&path, &archive).unwrap();
+        let listing = Command::new("tar")
+            .args(["-tzf"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(listing.status.success());
+        let files: Vec<String> = String::from_utf8_lossy(&listing.stdout)
+            .lines()
+            .map(str::to_string)
+            .collect();
+        assert!(files.contains(&PER_APP_OVERLAY_NAME.to_string()));
+        assert_eq!(files.len(), 3);
     }
 
     #[test]
