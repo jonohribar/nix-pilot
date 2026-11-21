@@ -29,21 +29,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::setting_value::SettingValue;
+
 /// Current persisted schema version. Bump on any additive/non-additive change
 /// and add a step to `migrate` so older files upgrade before use.
 pub const CURRENT_SCHEMA: u8 = 1;
 
 /// The NixOS account that owns a per-user package selection.
 pub type Account = String;
-
-/// A user-set setting value (settings surface v1: strings and booleans).
-/// Stored only for settings the user actively changed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum SettingValue {
-    Str(String),
-    Bool(bool),
-}
 
 /// Which per-user package mechanism the render targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,11 +48,30 @@ pub enum UserBackend {
     HomeManager,
 }
 
+/// Scope for one selected package attribute.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackageScope {
+    /// Available to one account through its configured per-user package backend.
+    User,
+    /// Installed for the machine through the system package set.
+    System,
+}
+
+/// A package selection projected from the desired state for an operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageIntent {
+    /// nixpkgs attribute path selected by the user.
+    pub attr: String,
+    /// Whether this selection belongs to the machine or one account.
+    pub scope: PackageScope,
+}
+
 /// A set of package attributes (nixpkgs attribute names, e.g. `firefox`).
 /// Held as a sorted, deduped Vec for clean JSON and stable diffs.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Packages {
+    /// Sorted, duplicate-free nixpkgs attribute paths.
     #[serde(default)]
     pub packages: Vec<String>,
 }
@@ -88,6 +100,7 @@ pub struct AccountProfile {
 }
 
 impl AccountProfile {
+    /// Create an app-owned account profile with its display name and admin role.
     pub fn new(full_name: String, admin: bool) -> AccountProfile {
         AccountProfile { full_name, admin }
     }
@@ -97,9 +110,12 @@ impl AccountProfile {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DesiredDoc {
+    /// Serialization format version used to reject incompatible future files.
     pub schema_version: u8,
+    /// Packages installed for the whole machine.
     #[serde(default)]
     pub system: Packages,
+    /// Per-account package selections; keys are Unix account names.
     #[serde(default)]
     pub users: BTreeMap<Account, Packages>,
     /// User-set settings (key = NixOS option path; settings surface, D14).
@@ -150,9 +166,64 @@ impl DesiredDoc {
             .unwrap_or(&[])
     }
 
-    /// Replace the system-wide package set.
-    pub fn set_system(&mut self, packages: Vec<String>) {
-        self.system = Packages::new(packages);
+    /// Package selections for the system and one account, in stable order.
+    /// The same attribute may appear once in each scope; scope is part of the
+    /// identity of a package intent.
+    pub fn package_intents_for(&self, account: &str) -> Vec<PackageIntent> {
+        self.system_packages()
+            .iter()
+            .map(|attr| PackageIntent {
+                attr: attr.clone(),
+                scope: PackageScope::System,
+            })
+            .chain(self.packages_for(account).iter().map(|attr| PackageIntent {
+                attr: attr.clone(),
+                scope: PackageScope::User,
+            }))
+            .collect()
+    }
+
+    /// Whether this attribute is selected in either scope used by one
+    /// running account: system-wide or that account's per-user set.
+    pub fn contains_package_for(&self, account: &str, attr: &str) -> bool {
+        self.system_packages().iter().any(|value| value == attr)
+            || self.packages_for(account).iter().any(|value| value == attr)
+    }
+
+    /// Add one package selection in a specific scope; returns false when it
+    /// was already selected there. The other scope remains independent.
+    pub fn add_package(&mut self, account: &str, attr: String, scope: PackageScope) -> bool {
+        let packages = match scope {
+            PackageScope::System => &mut self.system.packages,
+            PackageScope::User => &mut self.users.entry(account.to_string()).or_default().packages,
+        };
+        if packages.contains(&attr) {
+            return false;
+        }
+        packages.push(attr);
+        packages.sort();
+        true
+    }
+
+    /// Remove one package selection from a specific scope.
+    pub fn remove_package(&mut self, account: &str, attr: &str, scope: PackageScope) -> bool {
+        match scope {
+            PackageScope::System => {
+                let before = self.system.packages.len();
+                self.system.packages.retain(|value| value != attr);
+                before != self.system.packages.len()
+            }
+            PackageScope::User => {
+                let mut packages = self.packages_for(account).to_vec();
+                let before = packages.len();
+                packages.retain(|value| value != attr);
+                if before == packages.len() {
+                    return false;
+                }
+                self.set_user(account, packages);
+                true
+            }
+        }
     }
 
     /// Replace one account's per-user package set; an empty set removes the
@@ -207,7 +278,10 @@ impl DesiredDoc {
         self.accounts.remove(name);
     }
 
-    /// Validate every value that will be inserted into generated Nix syntax.
+    /// Validate values and names before they are used in generated Nix syntax.
+    ///
+    /// # Errors
+    /// Returns the first invalid package attribute, account name, or setting.
     pub fn validate(&self) -> Result<(), StateValidationError> {
         for attr in &self.system.packages {
             validate_package_attr(attr)?;
@@ -255,12 +329,17 @@ impl DesiredDoc {
         Ok(())
     }
 
-    /// Render the full generated NixOS module (system scope + every account's
-    /// per-user packages through the chosen backend). This is what the backend
-    /// would feed `nixos-rebuild`; byte-deterministic. Note: per-user entries
-    /// assume the account already exists (defined by the preserved/system
-    /// config) — the app adds *packages* for existing accounts, it never
-    /// creates accounts.
+    /// Render this desired state as a deterministic NixOS module.
+    ///
+    /// System packages, settings, and per-user packages are emitted for the
+    /// selected backend. Authorized keys are emitted only for the NixOS-native
+    /// backend. Per-user package and key entries refer to accounts that must
+    /// already exist in the system configuration. Separately, profiles in
+    /// [`DesiredDoc::accounts`] are app-owned account definitions and are
+    /// emitted as NixOS `users.users` declarations.
+    ///
+    /// # Errors
+    /// Returns an error if any value cannot safely or correctly be rendered.
     pub fn render_module(&self, backend: UserBackend) -> Result<String, StateValidationError> {
         self.validate()?;
         let mut body = String::new();
@@ -270,10 +349,8 @@ impl DesiredDoc {
                 render_package_list(&self.system.packages)
             ));
         }
-        // Per-account installs; authorized SSH keys are NixOS-native only
-        // (home-manager has no equivalent in this scope).
-        // Per-account installs and authorized SSH keys (NixOS-native only;
-        // home-manager has no authorized-key equivalent in this scope).
+        // Per-account package selections use the chosen backend; authorized
+        // keys are NixOS-native because Home Manager has no equivalent here.
         // Accounts come from the union of package users and key users, sorted.
         let mut accounts: Vec<&String> = self
             .users
@@ -399,8 +476,11 @@ fn validate_package_attr(attr: &str) -> Result<(), StateValidationError> {
 /// A desired-state value cannot safely or correctly be represented in Nix.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StateValidationError {
+    /// A package attribute is not a valid dot-separated Nix package path.
     PackageAttribute(String),
+    /// An account name is not valid for use as a NixOS account identifier.
     Account(String),
+    /// A setting value failed its setting-specific validation rule.
     Setting { key: String, reason: String },
 }
 
@@ -425,14 +505,14 @@ impl std::error::Error for StateValidationError {}
 /// Errors loading the persisted desired state.
 #[derive(Debug)]
 pub enum LoadError {
+    /// The file could not be read from storage.
     Io(std::io::Error),
+    /// The file was not valid JSON or did not match the stored schema.
     Parse(serde_json::Error),
+    /// Parsed state contains a value rejected by desired-state validation.
     InvalidState(StateValidationError),
     /// The file was written by a newer app than the one reading it.
-    NewerVersion {
-        found: u8,
-        supported: u8,
-    },
+    NewerVersion { found: u8, supported: u8 },
 }
 
 impl fmt::Display for LoadError {
@@ -461,6 +541,7 @@ impl std::error::Error for LoadError {
 }
 
 impl LoadError {
+    /// Whether loading failed because the file does not exist.
     pub fn is_missing(&self) -> bool {
         matches!(self, LoadError::Io(error) if error.kind() == io::ErrorKind::NotFound)
     }
@@ -473,7 +554,15 @@ struct FileHeader {
     schema_version: u8,
 }
 
-/// Load a desired-state file. Exists as `Option`, errors through `LoadError`.
+/// Read, validate, and migrate a persisted desired-state document.
+///
+/// A file from a newer schema is rejected without interpreting it as the
+/// current format. Supported older documents are migrated before return.
+///
+/// # Errors
+/// Returns [`LoadError`] for I/O, JSON/schema, validation, or newer-version
+/// failures. A missing file is reported as [`LoadError::Io`] and can be tested
+/// with [`LoadError::is_missing`].
 pub fn load(path: &Path) -> Result<DesiredDoc, LoadError> {
     let text = std::fs::read_to_string(path).map_err(LoadError::Io)?;
     let header: FileHeader = serde_json::from_str(&text).map_err(LoadError::Parse)?;
@@ -497,11 +586,12 @@ fn migrate(mut doc: DesiredDoc) -> DesiredDoc {
     doc
 }
 
-/// Write the desired state atomically (temp file + rename in the same
-/// directory), so a crash mid-write never leaves a truncated source of truth.
+/// Failure to validate or persist a desired-state document.
 #[derive(Debug)]
 pub enum SaveError {
+    /// The destination could not be created or written.
     Io(io::Error),
+    /// State failed validation and was not written.
     InvalidState(StateValidationError),
 }
 
@@ -531,6 +621,15 @@ impl From<io::Error> for SaveError {
     }
 }
 
+/// Validate and atomically replace the persisted desired-state file.
+///
+/// The temporary file is created beside the destination and renamed into
+/// place, so an interrupted write does not leave a partially written state
+/// document.
+///
+/// # Errors
+/// Returns [`SaveError::InvalidState`] before writing invalid state, or
+/// [`SaveError::Io`] if directory creation, writing, or replacement fails.
 pub fn save(doc: &DesiredDoc, path: &Path) -> Result<(), SaveError> {
     doc.validate().map_err(SaveError::InvalidState)?;
     if let Some(parent) = path.parent() {
@@ -614,7 +713,9 @@ mod tests {
 
     fn doc_with(system: &[&str], users: &[(&str, &[&str])]) -> DesiredDoc {
         let mut d = DesiredDoc::current();
-        d.set_system(system.iter().map(|s| s.to_string()).collect());
+        for attr in system {
+            d.add_package("test", (*attr).into(), PackageScope::System);
+        }
         for (acct, pkgs) in users {
             d.set_user(acct, pkgs.iter().map(|s| s.to_string()).collect());
         }
@@ -741,7 +842,11 @@ mod tests {
     #[test]
     fn renderer_rejects_invalid_package_and_account_identifiers() {
         let mut package_doc = DesiredDoc::current();
-        package_doc.set_system(vec!["hello; builtins.abort \"injected\"".into()]);
+        package_doc.add_package(
+            "alice",
+            "hello; builtins.abort \"injected\"".into(),
+            PackageScope::System,
+        );
         assert!(matches!(
             package_doc.render_module(UserBackend::NixUsers),
             Err(StateValidationError::PackageAttribute(_))
@@ -778,7 +883,10 @@ mod tests {
 
     #[test]
     fn round_trip_is_deterministic_and_stable() {
-        let d = doc_with(&["gimp", "htop"], &[("alice", &["vscode", "firefox"])]);
+        let mut d = doc_with(&["gimp", "htop"], &[("alice", &["vscode", "firefox"])]);
+        // The serialized model permits one attribute in both scopes, and each
+        // selection must survive independently.
+        d.add_package("alice", "firefox".into(), PackageScope::System);
         let mut dir = std::env::temp_dir();
         dir.push(format!(
             "nix-pilot-ds-roundtrip-{}.json",
@@ -800,6 +908,35 @@ mod tests {
         let f = text.find("firefox").unwrap();
         let v = text.find("vscode").unwrap();
         assert!(f < v);
+    }
+
+    #[test]
+    fn package_intents_preserve_independent_scopes() {
+        let mut document = DesiredDoc::current();
+        assert!(document.add_package("alice", "firefox".into(), PackageScope::System));
+        assert!(document.add_package("alice", "firefox".into(), PackageScope::User));
+        assert!(!document.add_package("alice", "firefox".into(), PackageScope::User));
+
+        assert!(document.contains_package_for("alice", "firefox"));
+        assert_eq!(
+            document.package_intents_for("alice"),
+            vec![
+                PackageIntent {
+                    attr: "firefox".into(),
+                    scope: PackageScope::System,
+                },
+                PackageIntent {
+                    attr: "firefox".into(),
+                    scope: PackageScope::User,
+                },
+            ]
+        );
+
+        assert!(document.remove_package("alice", "firefox", PackageScope::User));
+        assert_eq!(document.system_packages(), &["firefox"]);
+        assert!(document.packages_for("alice").is_empty());
+        assert!(document.contains_package_for("alice", "firefox"));
+        assert!(!document.remove_package("alice", "firefox", PackageScope::User));
     }
 
     #[test]

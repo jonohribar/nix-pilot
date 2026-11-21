@@ -13,7 +13,8 @@ import os
 import sys
 import time
 import subprocess
-import signal
+import shutil
+import tempfile
 from contextlib import contextmanager
 from typing import Optional, List, Iterator
 
@@ -37,7 +38,11 @@ class AtspiDriver:
         self.app_binary = app_binary
         # A unique display per run avoids stale Xvfb locks from previous or
         # orphaned sessions (a fixed ":99" fails after a timed-out run).
-        self.xvfb_display = xvfb_display or (":%d" % (100 + os.getpid() % 5000))
+        self.xvfb_display = (
+            xvfb_display
+            or os.environ.get("NIX_PILOT_A11Y_DISPLAY")
+            or (":%d" % (100 + os.getpid() % 5000))
+        )
         self.processes: List[subprocess.Popen] = []
         self.xvfb_proc: Optional[subprocess.Popen] = None
         self.session_proc: Optional[subprocess.Popen] = None  # dbus-run-session (wrapper)
@@ -45,6 +50,7 @@ class AtspiDriver:
         self.app_proc: Optional[subprocess.Popen] = None
         self.desktop: Optional[Atspi.Accessible] = None
         self.app: Optional[Atspi.Accessible] = None
+        self.test_home = tempfile.mkdtemp(prefix="nix-pilot-a11y-")
 
     def _run_cmd(self, cmd: List[str], env: Optional[dict] = None) -> subprocess.Popen:
         """Run a command and track the process."""
@@ -57,13 +63,6 @@ class AtspiDriver:
 
     def start_xvfb(self) -> None:
         """Start Xvfb virtual display."""
-        # Clean up any stale lock
-        lock_file = f"/tmp/.X{self.xvfb_display.split(':')[-1]}-lock"
-        try:
-            os.unlink(lock_file)
-        except FileNotFoundError:
-            pass
-
         self.xvfb_proc = self._run_cmd([
             "Xvfb", self.xvfb_display,
             "-screen", "0", "1280x800x24",
@@ -85,27 +84,34 @@ class AtspiDriver:
         init), then the app.
         """
         env = os.environ.copy()
-        # Strip inherited bus addresses so children never reach the host's
-        # session (or a stale one) — only the wrapping dbus-run-session's bus
-        # must be used.
-        for k in ("DBUS_SESSION_BUS_ADDRESS", "AT_SPI_BUS_ADDRESS"):
-            env.pop(k, None)
+        # Keep DBUS_SESSION_BUS_ADDRESS from the wrapping dbus-run-session:
+        # it is the fresh isolated bus shared with this Python client. Only
+        # clear a possibly stale AT-SPI-specific address so the launcher
+        # discovers its registry through that session bus.
+        env.pop("AT_SPI_BUS_ADDRESS", None)
         env.update({
             "DISPLAY": self.xvfb_display,
             "GDK_BACKEND": "x11",
             "GSK_RENDERER": "cairo",  # software rendering, no Vulkan/GPU needed
             "GTK_MODULES": "",  # GTK4 has built-in AT-SPI, no atk-bridge needed
-            "XDG_DATA_HOME": "/tmp/nix-pilot-test-data",
-            # Isolate the run-time dir: at-spi creates its bus socket under
-            # $XDG_RUNTIME_DIR/at-spi/bus_<id>, and the shared /run/user/1000
-            # namespace collects stale sockets from killed runs that let the
-            # launcher reconnect to a dead bus ("unit failed").
-            "XDG_RUNTIME_DIR": f"/tmp/nix-pilot-test-runtime-{os.getpid()}",
+            # The isolated accessibility bus has no systemd user unit manager.
+            # dbus-broker's systemd activation fails to start the registry in
+            # that setup; the bundled dbus-daemon correctly activates its
+            # org.a11y.atspi.Registry D-Bus service directly.
+            "ATSPI_DBUS_IMPLEMENTATION": "dbus-daemon",
+            "XDG_DATA_HOME": os.path.join(self.test_home, "data"),
+            "XDG_CONFIG_HOME": os.path.join(self.test_home, "config"),
+            # Keep AT-SPI's bus socket in this run's private runtime directory
+            # so stale sockets from an earlier test cannot be reused.
+            "XDG_RUNTIME_DIR": os.path.join(self.test_home, "runtime"),
         })
-        os.makedirs(env["XDG_RUNTIME_DIR"], exist_ok=True)
         if extra_env:
             env.update(extra_env)
+        os.makedirs(env["XDG_RUNTIME_DIR"], mode=0o700, exist_ok=True)
         os.makedirs(env["XDG_DATA_HOME"], exist_ok=True)
+        os.makedirs(env["XDG_CONFIG_HOME"], exist_ok=True)
+        if not extra_env or "XDG_RUNTIME_DIR" not in extra_env:
+            os.chmod(env["XDG_RUNTIME_DIR"], 0o700)
 
         # Launcher first, then the app, in this same (wrapping) session bus.
         self.launcher = self._run_cmd(
@@ -251,10 +257,11 @@ class AtspiDriver:
                 except subprocess.TimeoutExpired:
                     proc.kill()
                     proc.wait()
+            shutil.rmtree(self.test_home, ignore_errors=True)
 
 
 @contextmanager
-def atspi_session(app_binary: str, xvfb_display: str = ":99"):
+def atspi_session(app_binary: str, xvfb_display: Optional[str] = None):
     """Context manager for a full AT-SPI test session."""
     driver = AtspiDriver(app_binary, xvfb_display)
     try:

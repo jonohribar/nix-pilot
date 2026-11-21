@@ -10,6 +10,7 @@ use std::sync::mpsc;
 
 use gtk4::prelude::*;
 
+use crate::account::{self, AccountPresence, DisplayNameResult};
 use crate::config_value::{read_config_value, ConfigValue, ConfigValueError};
 use crate::desired_state::{AccountProfile, DesiredDoc, SettingValue};
 use crate::settings::{self, ValueKind};
@@ -38,6 +39,7 @@ struct RowData {
     current_label: gtk4::Label,
 }
 
+/// Settings surface containing the profile, category navigation, and controls.
 pub struct SettingsPage {
     /// The settings-internal stack: home + one subpage per category.
     pub page: gtk4::Stack,
@@ -57,6 +59,7 @@ pub struct SettingsPage {
 }
 
 impl SettingsPage {
+    /// Build the settings surface for the account whose user-scoped data it edits.
     pub fn new(account: &str) -> SettingsPage {
         // Settings-internal stack: a home (profile + category navigation) and
         // one subpage per category, like the common desktop settings shells.
@@ -93,9 +96,10 @@ impl SettingsPage {
         avatar.set_margin_top(8);
         avatar.set_margin_bottom(8);
         let name_col = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-        let name_label = gtk4::Label::new(Some(&full_name_of(account)));
+        let name_label = gtk4::Label::new(Some(account));
         name_label.add_css_class("heading");
         name_label.set_xalign(0.0);
+        load_display_name(&name_label, account.to_string());
         let acc_label = gtk4::Label::new(Some(&format!("@{account}")));
         acc_label.add_css_class("dim-label");
         acc_label.set_xalign(0.0);
@@ -331,15 +335,15 @@ impl SettingsPage {
         }
     }
 
-    /// Populate from the desired state and wire edits back through `save`.
-    /// A valid change stores/removes the value; an invalid one is flagged on
-    /// the control and left out of the desired state.
-    /// Jump straight to a category subpage (global-search results land here;
-    /// the shell shows this page's stack on the app-level stack first).
+    /// Show a category subpage, for example after selecting a global-search result.
     pub fn show_category(&self, child_id: &str) {
         self.page.set_visible_child_name(child_id);
     }
 
+    /// Load controls from desired state and persist valid user edits through `save`.
+    ///
+    /// Invalid setting values remain out of desired state and are marked on
+    /// their controls. Account and SSH-key edits are wired here as well.
     pub fn wire(&self, desired: &Rc<RefCell<DesiredDoc>>, save: Rc<dyn Fn()>) {
         for row in &self.rows {
             let key: &'static str = row.key;
@@ -473,33 +477,96 @@ impl SettingsPage {
         let add_admin = self.add_admin.clone();
         let add_btn = self.add_btn.clone();
         refresh_accounts(&accounts_box, &accounts_desired, accounts_save.clone());
+        let finish_add: Rc<dyn Fn(String, String, bool)> = {
+            let accounts_box = accounts_box.clone();
+            let accounts_desired = accounts_desired.clone();
+            let accounts_save = accounts_save.clone();
+            let accounts_status = accounts_status.clone();
+            let add_name = add_name.clone();
+            let add_full = add_full.clone();
+            let add_admin = add_admin.clone();
+            Rc::new(move |name, full, admin| {
+                accounts_desired
+                    .borrow_mut()
+                    .set_account(&name, AccountProfile::new(full, admin));
+                accounts_save();
+                add_name.set_text("");
+                add_full.set_text("");
+                add_admin.set_active(false);
+                accounts_status.set_visible(false);
+                refresh_accounts(&accounts_box, &accounts_desired, accounts_save.clone());
+            })
+        };
+        let add_btn_for_click = add_btn.clone();
         add_btn.connect_clicked(move |_| {
             let name = add_name.text().to_string().trim().to_string();
-            let full = add_full.text().to_string();
             if name.is_empty() {
                 accounts_status.set_text("Enter an account name first");
                 accounts_status.set_visible(true);
                 return;
             }
-            // The app can own only accounts it creates: refuse names the live
-            // system already defines (read-only collision check).
+            let full = add_full.text().to_string();
+            let admin = add_admin.is_active();
+            // Existing app-owned accounts may be edited without a live lookup.
             let already_owned = accounts_desired.borrow().accounts.contains_key(&name);
-            if !already_owned && account_exists(&name) {
-                accounts_status.set_text(&format!(
-                    "\u{201c}{name}\u{201d} already exists on this system — the app cannot own it."
-                ));
-                accounts_status.set_visible(true);
+            let finish_add = finish_add.clone();
+            if already_owned {
+                finish_add(name, full, admin);
                 return;
             }
-            accounts_desired
-                .borrow_mut()
-                .set_account(&name, AccountProfile::new(full, add_admin.is_active()));
-            accounts_save();
-            add_name.set_text("");
-            add_full.set_text("");
-            add_admin.set_active(false);
-            accounts_status.set_visible(false);
-            refresh_accounts(&accounts_box, &accounts_desired, accounts_save.clone());
+
+            // Account-directory queries run off the GTK thread. A failed
+            // lookup blocks creation rather than assuming the name is free.
+            add_btn_for_click.set_sensitive(false);
+            accounts_status.set_text("Checking whether this account name is available…");
+            accounts_status.set_visible(true);
+            let checked_name = name.clone();
+            let (sender, receiver) = mpsc::channel();
+            std::thread::spawn(move || {
+                let result = account::check_presence(&checked_name);
+                let _ = sender.send((checked_name, result));
+            });
+
+            let add_btn = add_btn_for_click.clone();
+            let add_name = add_name.clone();
+            let add_full = add_full.clone();
+            let add_admin = add_admin.clone();
+            let accounts_status = accounts_status.clone();
+            glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+                match receiver.try_recv() {
+                    Ok((checked_name, presence)) => {
+                        add_btn.set_sensitive(true);
+                        if add_name.text().trim() != checked_name {
+                            accounts_status.set_text("The account name changed; check it again.");
+                            return glib::ControlFlow::Break;
+                        }
+                        match presence {
+                            AccountPresence::Exists => accounts_status.set_text(&format!(
+                                "\u{201c}{checked_name}\u{201d} already exists on this system — the app cannot own it."
+                            )),
+                            AccountPresence::NotFound => {
+                                finish_add(
+                                    checked_name,
+                                    add_full.text().to_string(),
+                                    add_admin.is_active(),
+                                )
+                            }
+                            AccountPresence::QueryFailed => accounts_status.set_text(
+                                "Could not check this account name. Try again before adding it.",
+                            ),
+                        }
+                        glib::ControlFlow::Break
+                    }
+                    Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        add_btn.set_sensitive(true);
+                        accounts_status.set_text(
+                            "Could not check this account name. Try again before adding it.",
+                        );
+                        glib::ControlFlow::Break
+                    }
+                }
+            });
         });
     }
 
@@ -591,24 +658,28 @@ fn category_page(stack: &gtk4::Stack, title: &str) -> gtk4::Box {
     page
 }
 
-/// Best-effort display name of the OS account: getent passwd field 5, else
-/// the username. Read-only display; never used for decisions.
-fn full_name_of(account: &str) -> String {
-    if let Ok(out) = std::process::Command::new("getent")
-        .args(["passwd", account])
-        .output()
-    {
-        if out.status.success() {
-            let line = String::from_utf8_lossy(&out.stdout);
-            if let Some(gecos) = line.split(':').nth(4) {
-                let gecos = gecos.trim();
-                if !gecos.is_empty() {
-                    return gecos.to_string();
-                }
+/// Resolve the read-only profile label on a worker and update it on GTK's thread.
+/// If lookup fails or finds no GECOS name, the account name is displayed.
+fn load_display_name(label: &gtk4::Label, account_name: String) {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(account::display_name(&account_name));
+    });
+    let label = label.clone();
+    glib::timeout_add_local(
+        std::time::Duration::from_millis(50),
+        move || match receiver.try_recv() {
+            Ok(result) => {
+                let name = match result {
+                    DisplayNameResult::Found(name) | DisplayNameResult::Fallback(name) => name,
+                };
+                label.set_text(&name);
+                glib::ControlFlow::Break
             }
-        }
-    }
-    account.to_string()
+            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        },
+    );
 }
 
 /// One-letter avatar: first character of the account name, uppercased.
@@ -618,20 +689,6 @@ fn initial_of(account: &str) -> String {
         .next()
         .map(|c| c.to_ascii_uppercase().to_string())
         .unwrap_or_else(|| "?".to_string())
-}
-
-/// Whether an account name already exists on this system (read-only collision
-/// check). The app can own only accounts it creates: a name the live system
-/// already defines cannot be cleanly owned (settings-schema.md design).
-fn account_exists(name: &str) -> bool {
-    std::process::Command::new("id")
-        .arg("-u")
-        .arg(name)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
 }
 
 /// Re-render the app-owned accounts list (name · full name · administrator),

@@ -35,8 +35,8 @@ pkgs.mkShell {
     openbox
     blueprint-compiler
     imagemagick
-    xorg.xwininfo
-    xorg.xwd
+    xwininfo
+    xwd
     xdotool
     # AT-SPI test dependencies
     python3

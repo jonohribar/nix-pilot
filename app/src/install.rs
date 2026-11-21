@@ -30,6 +30,7 @@ pub enum Outcome {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CheckResult {
+    /// Classified verdict used by the UI and transaction preparation.
     pub outcome: Outcome,
     /// Raw nix output (technical detail, one click away).
     pub detail: String,
@@ -70,8 +71,11 @@ pub fn discover_nix() -> Option<PathBuf> {
     cands.into_iter().find(|p| p.exists())
 }
 
-/// Run `nix build --dry-run --no-link nixpkgs#<attr>` with a timeout and
-/// classify. The dry run evaluates only; it never fetches, builds or writes.
+/// Check whether `attr` is available under the system's configured nixpkgs.
+///
+/// Runs a dry-run availability evaluation with a deadline; it does not fetch,
+/// build, or write a system configuration. Evaluation output is retained in
+/// `detail` while `outcome` provides a stable classification for the UI.
 pub fn check_availability(nix: &std::path::Path, attr: &str, timeout: Duration) -> CheckResult {
     // Wrap in timeout(1) when available so an orphaned check (app closed
     // mid-run) still terminates instead of lingering on a stalled download.

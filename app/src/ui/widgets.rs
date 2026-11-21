@@ -1,12 +1,17 @@
-//! Shared widget builders for the Store UI.
+//! Shared widget builders for Store, search, and detail metadata.
+//!
+//! Builders keep repeated row structure and safe Pango-markup interpolation
+//! consistent across the GTK pages.
 use gtk4::prelude::*;
 
 use crate::model::IndexEntry;
 
+/// Escape untrusted text for safe interpolation into GTK label markup.
 pub fn esc(s: &str) -> String {
     glib::markup_escape_text(s).to_string()
 }
 
+/// Build a catalogue row showing its name, class, version, and description.
 pub fn entry_row(e: &IndexEntry) -> gtk4::ListBoxRow {
     let boxv = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
     boxv.set_margin_top(8);

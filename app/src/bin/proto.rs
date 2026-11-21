@@ -1,13 +1,11 @@
-// Navigable wireframe prototype: the page .blp files (compiled to .ui) become
-// Gtk.Stack pages inside one shell with a sidebar, so navigation is clickable:
-//   sidebar -> top-level pages; app card -> detail; store search -> results; back.
-//
-// Search is store-local: the SearchEntry lives INSIDE the store page (home +
-// results), not in the header — the header global search is a separate surface.
-//
-// Screenshot-driven rendering: --page <home|search|detail|settings|updates>
-// sets the initial page, --search <text> pre-fills the store search, and
-// --detail <name> sets the detail page title (for captures).
+//! Navigable GTK wireframe prototype built from Blueprint-compiled `.ui` pages.
+//!
+//! Pages are placed in one stack so sidebar, detail, and store-search
+//! navigation can be exercised without the product data/backend. Store search
+//! is local to the store page; the header's global search is a separate
+//! surface. For screenshot capture, `--page <home|search|detail|settings|updates>`
+//! selects the initial page, `--search <text>` prefills the query, and
+//! `--detail <name>` sets the displayed detail title.
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -115,6 +113,18 @@ fn main() {
     // failure/rollback/boot-recovery states), so load its builder for wiring.
     let updates_b = gtk4::Builder::from_file(format!("{}/page-updates.ui", build_dir));
     let page_updates: gtk4::Stack = updates_b.object("page_updates").expect("page_updates");
+    // Blueprint's `name` on the child widgets is a GtkWidget name, while GTK4
+    // stores stack navigation names on GtkStackPage. Copy the declared names
+    // so the prototype's state buttons and screenshot selector address pages.
+    let mut update_page = page_updates.first_child();
+    while let Some(child) = update_page {
+        let next = child.next_sibling();
+        let name = child.widget_name();
+        if !name.is_empty() {
+            page_updates.page(&child).set_name(name.as_str());
+        }
+        update_page = next;
+    }
 
     stack.add_named(&page_home, Some("home"));
     stack.add_named(&page_search, Some("search"));

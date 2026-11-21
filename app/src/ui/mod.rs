@@ -3,7 +3,9 @@
 //! the nix adapter live in the sibling non-UI modules; this layer translates
 //! user actions into store/updates/install actions and renders their outcomes.
 pub mod detail;
+mod global_search;
 pub mod settings_page;
+mod store_search;
 pub mod updates_page;
 pub mod widgets;
 pub mod your_system;
@@ -81,8 +83,9 @@ mod tree_probe {
         let _ = libadwaita::init();
         let account = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
         let settings = super::settings_page::SettingsPage::new(&account);
-        let updates = super::updates_page::UpdatesPage::new();
-        let your_system = super::your_system::YourSystemPage::new(&account);
+        let package_names = std::rc::Rc::new(crate::model::PackageNames::default());
+        let updates = super::updates_page::UpdatesPage::new(package_names.clone());
+        let your_system = super::your_system::YourSystemPage::new(&account, package_names);
 
         let s = all_text(&settings.page);
         let u = all_text(&updates.page);
@@ -139,14 +142,17 @@ mod tree_probe {
         let desired = Rc::new(std::cell::RefCell::new(
             crate::desired_state::DesiredDoc::current(),
         ));
-        desired.borrow_mut().set_system(vec!["hello".to_string()]);
+        desired.borrow_mut().add_package(
+            "alice",
+            "hello".to_string(),
+            crate::desired_state::PackageScope::System,
+        );
         desired.borrow_mut().settings.insert(
             "services.pipewire.enable".into(),
             crate::desired_state::SettingValue::Bool(true),
         );
-        let queue = Rc::new(std::cell::RefCell::new(crate::store::ChangeQueue::new()));
         let on_change: Rc<dyn Fn()> = Rc::new(|| {});
-        your_system.refresh(&desired, &queue, &on_change);
+        your_system.refresh(&desired, &on_change);
         let y2 = all_text(&your_system.page);
         let hay = y2.join("\n");
         assert!(

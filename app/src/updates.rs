@@ -1,30 +1,34 @@
 //! Updates backend (v1 — safe build-first, failure-and-recovery.md).
 //!
-//! This module owns the transaction transition table and safe "prepare" step.
-//! `verify_queued` dry-runs each queued package, then the Updates page builds a
-//! candidate generation. The transition table also models future apply and
-//! recovery states; those states do not themselves perform system operations.
-//! The current app is build-only, so activation remains disabled.
+//! This module owns the transaction transition table, its derived action view,
+//! and the safe package-verification step. The Updates UI uses these pure
+//! contracts to coordinate candidate builds and the separately gated apply
+//! adapter; this module itself performs no system activation or recovery I/O.
 use std::time::Duration;
 
+use crate::desired_state::PackageIntent;
 use crate::install;
-pub use crate::store::PendingChange;
 
 /// Per-change build-verify outcome.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BuildItem {
-    pub name: String,
+    /// Package attribute checked by the availability probe.
+    pub attr: String,
+    /// Whether the package was confirmed available for this system.
     pub ok: bool,
+    /// Plain-language result or reason the check could not confirm availability.
     pub note: String,
 }
 
-/// Result of verifying the pending set builds.
+/// Result of verifying each selected package intent.
 #[derive(Debug, Default)]
 pub struct BuildReport {
+    /// One result for each requested package intent, in input order.
     pub items: Vec<BuildItem>,
 }
 
 impl BuildReport {
+    /// Whether every checked item succeeded; an empty report is successful.
     pub fn all_ok(&self) -> bool {
         self.items.iter().all(|i| i.ok)
     }
@@ -36,14 +40,27 @@ impl BuildReport {
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TxStep {
+    /// No prepare operation is currently in progress.
     Ready,
+    /// The prepare operation has begun and its checks are running.
     Explaining,
+    /// Package checks passed and the candidate is ready for the next step.
     BuildCheck,
+    /// An activation operation is in progress (modeled, not performed here).
     Applying,
+    /// The requested change was applied (modeled state only).
     Done,
+    /// A rollback operation is in progress.
+    RollingBack,
+    /// Candidate preparation failed before activation.
     BuildFailed,
+    /// Activation failed and recovery may be required.
     ApplyFailed,
+    /// A rollback attempt failed; it may be retried.
+    RollbackFailed,
+    /// The previous system state was restored.
     RolledBack,
+    /// Startup detected a system requiring the recovery flow.
     BootRecovery,
 }
 
@@ -57,8 +74,10 @@ impl TxStep {
             BuildCheck => "Prepared — the changes are built and checked",
             Applying => "Applying…",
             Done => "The change was applied",
+            RollingBack => "Restoring the previous system…",
             BuildFailed => "Nothing was changed — building the change failed",
-            ApplyFailed => "Applying failed — returning to the previous system",
+            ApplyFailed => "Applying failed — the previous system can be restored",
+            RollbackFailed => "Could not restore the previous system",
             RolledBack => "The previous system was restored",
             BootRecovery => "Recovery — this may be an earlier system",
         }
@@ -70,15 +89,89 @@ impl TxStep {
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TxEvent {
+    /// Begin preparing the pending changes.
     Prepare,
+    /// Verification and candidate preparation completed successfully.
     Prepared,
-    BuildOk,
+    /// Preparation or candidate build failed.
     BuildFailed,
+    /// Begin applying the prepared candidate.
     Apply,
+    /// Applying completed successfully.
     ApplyOk,
+    /// Applying failed.
     ApplyFailed,
+    /// Begin restoring the previous system state.
     Rollback,
+    /// Rollback completed successfully.
+    RollbackOk,
+    /// Rollback failed.
+    RollbackFailed,
+    /// Prepared inputs changed before apply.
+    InputsChanged,
+    /// Recovery completed.
     Recovered,
+}
+
+/// Operation represented by the Updates page's primary action button.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrimaryAction {
+    /// No primary operation is available in the current transaction state.
+    None,
+    /// Apply the prepared candidate system generation.
+    Apply,
+    /// Restore the previous system generation.
+    Rollback,
+}
+
+/// GTK-independent controls derived from the transaction state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TxView {
+    /// Whether the UI should enable the Prepare action.
+    pub prepare_enabled: bool,
+    /// Operation selected for the primary action, if any.
+    pub primary_action: PrimaryAction,
+    /// Whether that operation is currently allowed by system policy.
+    pub primary_enabled: bool,
+    /// User-facing label for the primary action button.
+    pub primary_label: &'static str,
+    /// Optional explanation for the primary action's availability.
+    pub primary_tooltip: Option<&'static str>,
+}
+
+/// Derive available Updates actions from transaction state and system policy.
+pub fn view_for(step: TxStep, activation_allowed: bool) -> TxView {
+    use PrimaryAction as Action;
+    use TxStep as St;
+
+    let prepare_enabled = matches!(
+        step,
+        St::Ready | St::BuildCheck | St::BuildFailed | St::RollbackFailed | St::RolledBack
+    );
+    let primary_action = match step {
+        St::BuildCheck => Action::Apply,
+        St::Done | St::ApplyFailed | St::RollbackFailed => Action::Rollback,
+        _ => Action::None,
+    };
+    let primary_label = match primary_action {
+        Action::Apply | Action::None => "Apply changes",
+        Action::Rollback => "Go back to the previous system",
+    };
+    let primary_tooltip = if !activation_allowed {
+        Some("Activation requires NIX_PILOT_ALLOW_SWITCH to be set and the nix-pilot-apply helper installed (nixos-module).")
+    } else if primary_action == Action::Rollback {
+        Some("Return to the system generation before this change was applied.")
+    } else {
+        None
+    };
+
+    TxView {
+        prepare_enabled,
+        primary_action,
+        primary_enabled: activation_allowed && primary_action != Action::None,
+        primary_label,
+        primary_tooltip,
+    }
 }
 
 /// The pure transition table. Returns `None` when the event is not valid for
@@ -87,28 +180,34 @@ pub fn advance(step: TxStep, event: TxEvent) -> Option<TxStep> {
     use TxEvent as Ev;
     use TxStep as St;
     Some(match (step, event) {
-        (St::Ready, Ev::Prepare) => St::Explaining,
+        (St::Ready, Ev::Prepare)
+        | (St::BuildCheck, Ev::Prepare)
+        | (St::BuildFailed, Ev::Prepare)
+        | (St::RollbackFailed, Ev::Prepare)
+        | (St::RolledBack, Ev::Prepare) => St::Explaining,
         (St::Explaining, Ev::Prepared) => St::BuildCheck,
         (St::Explaining, Ev::BuildFailed) => St::BuildFailed,
-        (St::BuildCheck, Ev::BuildOk) => St::Applying,
+        (St::BuildCheck, Ev::Apply) => St::Applying,
         (St::BuildCheck, Ev::BuildFailed) => St::BuildFailed,
-        (St::BuildFailed, Ev::Prepare) => St::Ready,
+        (St::BuildCheck, Ev::InputsChanged) => St::Ready,
         (St::Applying, Ev::ApplyOk) => St::Done,
         (St::Applying, Ev::ApplyFailed) => St::ApplyFailed,
-        (St::ApplyFailed, Ev::Rollback) => St::RolledBack,
-        (St::Done, Ev::Rollback) => St::RolledBack,
-        (St::RolledBack, Ev::Prepare) => St::Ready,
+        (St::ApplyFailed, Ev::Rollback)
+        | (St::Done, Ev::Rollback)
+        | (St::RollbackFailed, Ev::Rollback) => St::RollingBack,
+        (St::RollingBack, Ev::RollbackOk) => St::RolledBack,
+        (St::RollingBack, Ev::RollbackFailed) => St::RollbackFailed,
         (St::BootRecovery, Ev::Recovered) => St::Done,
         _ => return None,
     })
 }
 
-/// Safely verify each queued change can be built (the "Prepare — changes are
+/// Safely verify each selected package can be built (the "Prepare — changes are
 /// built and checked" transaction step). Uses the dry-run availability check,
 /// so it never downloads, builds or activates anything.
-pub fn verify_queued(
+pub fn verify_package_intents(
     nix: &std::path::Path,
-    changes: &[PendingChange],
+    changes: &[PackageIntent],
     timeout: Duration,
 ) -> BuildReport {
     let mut report = BuildReport::default();
@@ -122,7 +221,7 @@ pub fn verify_queued(
             install::Outcome::CheckFailed { reason } => reason,
         };
         report.items.push(BuildItem {
-            name: c.name.clone(),
+            attr: c.attr.clone(),
             ok,
             note,
         });
@@ -134,11 +233,10 @@ pub fn verify_queued(
 mod tests {
     use super::*;
 
-    fn p(attr: &str) -> PendingChange {
-        PendingChange {
+    fn p(attr: &str) -> PackageIntent {
+        PackageIntent {
             attr: attr.into(),
-            name: attr.into(),
-            system_wide: false,
+            scope: crate::desired_state::PackageScope::User,
         }
     }
 
@@ -147,12 +245,12 @@ mod tests {
         let mut r = BuildReport::default();
         assert!(r.all_ok()); // empty is vacuously ok
         r.items.push(BuildItem {
-            name: "a".into(),
+            attr: "a".into(),
             ok: true,
             note: String::new(),
         });
         r.items.push(BuildItem {
-            name: "b".into(),
+            attr: "b".into(),
             ok: false,
             note: "blocked".into(),
         });
@@ -161,10 +259,10 @@ mod tests {
     }
 
     #[test]
-    fn pending_change_constructs() {
+    fn package_intent_constructs() {
         let c = p("firefox");
         assert_eq!(c.attr, "firefox");
-        assert!(!c.system_wide);
+        assert_eq!(c.scope, crate::desired_state::PackageScope::User);
     }
 
     #[test]
@@ -174,7 +272,7 @@ mod tests {
         s = advance(s, TxEvent::Prepare).unwrap();
         s = advance(s, TxEvent::Prepared).unwrap();
         assert_eq!(s, BuildCheck);
-        s = advance(s, TxEvent::BuildOk).unwrap();
+        s = advance(s, TxEvent::Apply).unwrap();
         assert_eq!(s, Applying);
         s = advance(s, TxEvent::ApplyOk).unwrap();
         assert_eq!(s, Done);
@@ -187,8 +285,8 @@ mod tests {
         assert_eq!(s, Some(BuildFailed));
         let s = advance(BuildCheck, TxEvent::BuildFailed);
         assert_eq!(s, Some(BuildFailed));
-        // retry goes back to the start, nothing was applied
-        assert_eq!(advance(BuildFailed, TxEvent::Prepare), Some(Ready));
+        // A retry starts preparation again; nothing was applied.
+        assert_eq!(advance(BuildFailed, TxEvent::Prepare), Some(Explaining));
     }
 
     #[test]
@@ -197,12 +295,79 @@ mod tests {
         let s = advance(Applying, TxEvent::ApplyFailed);
         assert_eq!(s, Some(ApplyFailed));
         let s = advance(ApplyFailed, TxEvent::Rollback);
-        assert_eq!(s, Some(RolledBack));
+        assert_eq!(s, Some(RollingBack));
+        assert_eq!(advance(RollingBack, TxEvent::RollbackOk), Some(RolledBack));
         // rollback is also available after a clean apply
-        assert_eq!(advance(Done, TxEvent::Rollback), Some(RolledBack));
-        assert_eq!(advance(RolledBack, TxEvent::Prepare), Some(Ready));
+        assert_eq!(advance(Done, TxEvent::Rollback), Some(RollingBack));
+        assert_eq!(
+            advance(RollingBack, TxEvent::RollbackFailed),
+            Some(RollbackFailed)
+        );
+        assert_eq!(
+            advance(RollbackFailed, TxEvent::Rollback),
+            Some(RollingBack)
+        );
+        assert_eq!(advance(RolledBack, TxEvent::Prepare), Some(Explaining));
         // boot recovery returns to a usable state
         assert_eq!(advance(BootRecovery, TxEvent::Recovered), Some(Done));
+    }
+
+    #[test]
+    fn prepare_retries_and_changed_inputs_follow_the_transition_table() {
+        use TxStep::*;
+        assert_eq!(advance(BuildFailed, TxEvent::Prepare), Some(Explaining));
+        assert_eq!(advance(BuildCheck, TxEvent::Prepare), Some(Explaining));
+        assert_eq!(advance(BuildCheck, TxEvent::InputsChanged), Some(Ready));
+        assert_eq!(advance(Applying, TxEvent::InputsChanged), None);
+    }
+
+    #[test]
+    fn repeated_apply_and_rollback_cycles_reuse_the_same_transitions() {
+        use TxStep::*;
+        let mut step = Ready;
+        for _ in 0..2 {
+            step = advance(step, TxEvent::Prepare).unwrap();
+            assert_eq!(step, Explaining);
+            step = advance(step, TxEvent::Prepared).unwrap();
+            assert_eq!(step, BuildCheck);
+            assert_eq!(view_for(step, true).primary_action, PrimaryAction::Apply);
+            step = advance(step, TxEvent::Apply).unwrap();
+            assert_eq!(step, Applying);
+            step = advance(step, TxEvent::ApplyOk).unwrap();
+            assert_eq!(step, Done);
+            assert_eq!(view_for(step, true).primary_action, PrimaryAction::Rollback);
+            step = advance(step, TxEvent::Rollback).unwrap();
+            assert_eq!(step, RollingBack);
+            step = advance(step, TxEvent::RollbackOk).unwrap();
+            assert_eq!(step, RolledBack);
+        }
+    }
+
+    #[test]
+    fn view_mapping_gates_actions_by_state_and_activation_policy() {
+        use PrimaryAction::*;
+        use TxStep::*;
+
+        let applying = view_for(Applying, true);
+        assert!(!applying.prepare_enabled);
+        assert_eq!(applying.primary_action, None);
+        assert!(!applying.primary_enabled);
+
+        let prepared_without_activation = view_for(BuildCheck, false);
+        assert!(prepared_without_activation.prepare_enabled);
+        assert_eq!(prepared_without_activation.primary_action, Apply);
+        assert!(!prepared_without_activation.primary_enabled);
+        assert!(prepared_without_activation.primary_tooltip.is_some());
+
+        let done = view_for(Done, true);
+        assert_eq!(done.primary_action, Rollback);
+        assert!(done.primary_enabled);
+        assert_eq!(done.primary_label, "Go back to the previous system");
+
+        let failed_rollback = view_for(RollbackFailed, true);
+        assert!(failed_rollback.prepare_enabled);
+        assert_eq!(failed_rollback.primary_action, Rollback);
+        assert!(failed_rollback.primary_enabled);
     }
 
     #[test]
@@ -213,7 +378,7 @@ mod tests {
         assert_eq!(advance(Done, TxEvent::Prepare), None);
         assert_eq!(advance(Applying, TxEvent::Prepared), None);
         assert_eq!(advance(BuildFailed, TxEvent::Apply), None);
-        assert_eq!(advance(RolledBack, TxEvent::BuildOk), None);
+        assert_eq!(advance(RolledBack, TxEvent::Apply), None);
     }
 
     #[test]
@@ -225,8 +390,10 @@ mod tests {
             BuildCheck,
             Applying,
             Done,
+            RollingBack,
             BuildFailed,
             ApplyFailed,
+            RollbackFailed,
             RolledBack,
             BootRecovery,
         ];

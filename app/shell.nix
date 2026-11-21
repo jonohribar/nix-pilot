@@ -26,11 +26,19 @@ pkgs.mkShell {
     openbox # minimal WM so GTK4 frame clock ticks under Xvfb (wireframe captures)
     blueprint-compiler # wireframe source (.blp) -> GTK .ui
     imagemagick # capture Xvfb screenshots of wireframes
-    xorg.xwininfo # diagnose which X windows are mapped
-    xorg.xwd # raster dump of an X window
+    xwininfo # diagnose which X windows are mapped
+    xwd # raster dump of an X window
   ];
 
   # gtk4-rs builds need to find the C libraries via pkg-config; nixpkgs'
   # dev outputs put the .pc files on PKG_CONFIG_PATH through propagation.
   RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
+
+  # GTK4's gsettings schemas: without a resolvable schema dir, GTK's settings
+  # backend fails to look up keys and floods stderr with a GLib-GIO-CRITICAL
+  # on every launch. Point glib at the gtk4 + desktop-schemas schema dirs.
+  GSETTINGS_SCHEMA_DIR = pkgs.lib.concatStringsSep ":" [
+    "${pkgs.gtk4}/share/gsettings-schemas/${pkgs.gtk4.name}/glib-2.0/schemas"
+    "${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}/glib-2.0/schemas"
+  ];
 }

@@ -4,22 +4,22 @@ Brief, high-level style guide for the product code in `app/`. Tenets: readabilit
 
 ## Module boundaries
 
-Code follows the architecture boundaries rather than inventing a second structure:
+Organize modules around responsibilities and dependency direction rather than around individual types or functions. A useful general separation is pure domain logic, application workflows, external-system adapters, UI composition, and startup code; the exact file and directory layout should follow the subsystem's actual boundaries. Let modules depend on narrow contracts, keep I/O at adapter edges, and keep UI frameworks out of domain logic. Avoid duplicate mutable representations of the same state.
 
-- `src/model.rs` — catalogue domain: typed `Class`/`Tier` enums, `IndexEntry`, pre-lowered search text. No GTK, no I/O.
-- `src/search.rs` — ranking (ported 1:1 from the verified `experiments/catalogue/search.js` scorer). Pure.
-- `src/store.rs` — application actions: the desired-change queue and the check-result rule. Pure.
-- `src/install.rs` — the nix adapter: discovers the client, runs the dry-run check, returns a typed `Outcome`. All external I/O lives here.
-- `src/updates.rs` — the updates backend: the transaction state machine (`TxStep`, failure-and-recovery semantics, driven by the Updates page for its safe steps) plus safe build-verify of queued changes (dry-run). The apply/rollback edges are spec-tested and gated until the desired-state apply backend exists.
-- `src/apply.rs` — the apply adapter (7wo.2 + activation surface 7wo.3/D24–D26): writes the generated configuration (D21 shape: imports the live config by pointer + the desired-state module) into an explicit generation dir, *builds* the candidate with `nixos-rebuild build` — never switches or activates unless `can_activate()` (module installed + `NIX_PILOT_ALLOW_SWITCH`), and even then only via `pkexec nix-pilot-apply` with an in-band tar of the exact rendered area. Storage upkeep (7wo.9) adds the fixed `gc`/`optimise`/`gc-estimate` cleanup actions and the read-only generations listing (7wo.8, world-readable profile symlinks). All external I/O; live `--ignored` tests prove a scratch build on a NixOS host.
-- `src/desired_state.rs` — the app-owned desired-state model (7wo.2): the persisted source of truth (versioned JSON, per-account file, atomic writes; packages + user-set settings + per-account authorized keys + app-owned accounts) plus the generated-NixOS-module renderer (pure, deterministic, live parse-checked). On launch the shell loads it back into the change queue; every queue change rewrites the running account's user scope and the system scope, preserving other sections.
-- `src/catalogue.rs` — catalogue consumption (7wo.4): source resolution (CLI arg > `NIX_PILOT_CATALOGUE` > conventional local paths), remote fetch via curl into the app cache, and `.sha256` sidecar verification (mismatch is a hard error).
-- `src/config_value.rs` — read-only live-config reader for the Settings surface (evaluate one NixOS option with `nix-instantiate`, typed `ConfigValue`; `NoSuchOption` classification for "no longer applies").
-- `src/settings.rs` — the Settings surface (9f3.8/D14): the owned setting workflows as pure data (label, plain-language blurb, value validation) and the render of user-set values as app-wins `lib.mkOverride 10` lines into the desired module. No GTK, no Nix.
-- `src/ui/` — the GTK surface: `shell.rs` (sidebar/navigation + store list/search, the composition point), `detail.rs` (detail page + install-intent state machine), `updates_page.rs` (Updates page: transaction prepare + candidate build + Automatic/Storage/System-versions upkeep cards), `settings_page.rs` (Settings surface: REQ-5 areas, D14 pointers), `your_system.rs` (read-only recipe view with remove actions), `widgets.rs` (shared row builders).
-- `src/main.rs` — thin startup: initialise, load the index, resolve nix, call `ui::run`. Keep it small; new behaviour goes in a module, not here.
+This guide defines coding principles, not the current source tree or the implementation plan. Consult the architecture and subsystem design documents for project-specific boundaries and current module ownership; record planned or completed structural changes in the project plan rather than maintaining a second module inventory here.
 
-The dependency rule: UI calls application actions; domain and action code do not depend on GTK; adapters own external I/O. That keeps behaviour testable without opening a window or invoking nix.
+## Code documentation
+
+Rustdoc comments are the standard for code-level intent and internal API documentation; generated docs are available with `just app docs` and are written to `app/target/doc/`. Keep product behavior, architectural rationale, and subsystem specifications in Markdown rather than duplicating them in code comments.
+
+- Start each module with `//!` describing its responsibility, boundary, and important dependencies or constraints. Link to the relevant design spec when it is the source of detailed behavior.
+- Use `///` on cross-module `pub` items, data types, and fields when their role, invariants, or semantics are not obvious from their names. These are internal APIs in this binary crate, not promises of a stable external library API.
+- Document functions in terms of intent and contract: what the operation does, meaningful input constraints, returned/error outcomes, side effects, and safety or lifecycle guarantees. Include only the parts that are not already clear from the signature.
+- Use `# Errors`, `# Panics`, and `# Safety` sections when those behaviors apply; add `# Examples` when an example clarifies correct use, not as boilerplate.
+- Prefer concise present-tense descriptions. Explain why a non-obvious rule exists; do not narrate each line or restate the implementation.
+- Ordinary private helpers do not need comments unless their logic or constraints are non-obvious. Keep implementation-local rationale next to the relevant code.
+
+The `docs` recipe builds documentation for private items as well as `pub` items and treats rustdoc warnings (including broken intra-doc links) as errors. It is a focused documentation check, separate from the general `check` gate.
 
 ## Types over strings
 

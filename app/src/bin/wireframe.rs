@@ -1,8 +1,8 @@
-// Wireframe renderer: loads a GTK .ui file (compiled from Blueprint) + a CSS
-// file, applies the stylesheet, presents the window, and runs the main loop.
-// Used with Xvfb + ImageMagick to produce wireframe screenshots:
-//   xvfb-run -a sh -c 'target/debug/wireframe build/foo.ui style.css & \
-//                      sleep 2; import -window root foo.png'
+//! Minimal GTK renderer for one Blueprint-compiled `.ui` file and stylesheet.
+//!
+//! Takes the UI file and CSS file as its two positional arguments, applies the
+//! stylesheet before presenting the window, and runs the GTK event loop. It
+//! is intended for screenshot capture under a virtual display.
 use gtk4::prelude::*;
 use log::{error, info};
 

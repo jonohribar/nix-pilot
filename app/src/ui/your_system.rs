@@ -3,24 +3,28 @@
 //! Read-only in the sense that it never invents content: every row comes from
 //! the persisted DesiredDoc (system apps, this account's apps, owned
 //! settings). Removing something = editing the desired state and persisting,
-//! exactly like the Store's remove; the queue is kept in sync so the Updates
-//! transaction matches what the user sees here.
+//! exactly like the Store's remove; Updates reads the same desired-state model.
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use crate::desired_state::DesiredDoc;
+use crate::desired_state::{DesiredDoc, PackageScope};
+use crate::model::PackageNames;
 use crate::settings;
 
+/// Readable summary of selected packages and settings with removal actions.
 pub struct YourSystemPage {
+    /// Root widget for the Your System surface.
     pub page: gtk4::Box,
     list: gtk4::ListBox,
     account: String,
+    package_names: Rc<PackageNames>,
 }
 
 impl YourSystemPage {
-    pub fn new(account: &str) -> YourSystemPage {
+    /// Build the page for the account whose per-user packages are shown.
+    pub fn new(account: &str, package_names: Rc<PackageNames>) -> YourSystemPage {
         let page = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
         page.set_margin_top(18);
         page.set_margin_start(28);
@@ -48,33 +52,34 @@ impl YourSystemPage {
             page,
             list,
             account: account.to_string(),
+            package_names,
         }
     }
 
-    /// Rebuild the list from the current desired document. The queue stays
-    /// in sync via `on_change` (the same hook the Store uses).
-    pub fn refresh(
-        &self,
-        desired: &Rc<RefCell<DesiredDoc>>,
-        queue: &Rc<RefCell<crate::store::ChangeQueue>>,
-        on_change: &Rc<dyn Fn()>,
-    ) {
+    /// Rebuild the list from the current desired document.
+    pub fn refresh(&self, desired: &Rc<RefCell<DesiredDoc>>, on_change: &Rc<dyn Fn()>) {
         while let Some(child) = self.list.first_child() {
             self.list.remove(&child);
         }
         let doc = desired.borrow().clone();
-        let mut rows: Vec<(String, String, String)> = Vec::new(); // (attr, label, scope)
+        let mut rows: Vec<(String, String, String, Option<bool>)> = Vec::new();
 
         // System-wide apps.
         for attr in doc.system_packages() {
-            rows.push((attr.clone(), attr.clone(), "system".to_string()));
+            rows.push((
+                attr.clone(),
+                self.package_names.display_name(attr).to_string(),
+                "system".to_string(),
+                Some(true),
+            ));
         }
         // This account's apps.
         for attr in doc.packages_for(&self.account) {
             rows.push((
                 attr.clone(),
-                attr.clone(),
+                self.package_names.display_name(attr).to_string(),
                 format!("{} (this account)", self.account),
+                Some(false),
             ));
         }
         // Owned settings (SPECS order, labelled plainly; unknown keys shown raw).
@@ -84,6 +89,7 @@ impl YourSystemPage {
                     spec.key.to_string(),
                     spec.label.to_string(),
                     "setting".to_string(),
+                    None,
                 ));
             }
         }
@@ -97,7 +103,7 @@ impl YourSystemPage {
             self.list.append(&l);
             return;
         }
-        for (attr, label, scope) in rows {
+        for (attr, label, scope, package_scope) in rows {
             let row = gtk4::ListBoxRow::new();
             row.set_selectable(false);
             row.set_activatable(false);
@@ -122,7 +128,6 @@ impl YourSystemPage {
             self.list.append(&row);
 
             let desired = desired.clone();
-            let queue = queue.clone();
             let on_change = on_change.clone();
             let account = self.account.clone();
             let attr = attr.clone();
@@ -133,30 +138,21 @@ impl YourSystemPage {
                 // a setting reverts to the system default (the option is
                 // simply no longer emitted). Re-borrow fresh so the check and
                 // the edit can never disagree.
-                let is_system = desired.borrow().system_packages().contains(&attr);
-                let is_account = desired.borrow().packages_for(&account).contains(&attr);
-                if is_system {
-                    let pkgs: Vec<String> = desired
-                        .borrow()
-                        .system_packages()
-                        .iter()
-                        .filter(|a| *a != &attr)
-                        .cloned()
-                        .collect();
-                    desired.borrow_mut().set_system(pkgs);
-                } else if is_account {
-                    let pkgs: Vec<String> = desired
-                        .borrow()
-                        .packages_for(&account)
-                        .iter()
-                        .filter(|a| *a != &attr)
-                        .cloned()
-                        .collect();
-                    desired.borrow_mut().set_user(&account, pkgs);
-                } else {
-                    desired.borrow_mut().settings.remove(&attr);
+                match package_scope {
+                    Some(true) => {
+                        desired
+                            .borrow_mut()
+                            .remove_package(&account, &attr, PackageScope::System);
+                    }
+                    Some(false) => {
+                        desired
+                            .borrow_mut()
+                            .remove_package(&account, &attr, PackageScope::User);
+                    }
+                    None => {
+                        desired.borrow_mut().settings.remove(&attr);
+                    }
                 }
-                queue.borrow_mut().remove(&attr);
                 on_change();
                 list.remove(&row_widget);
             });

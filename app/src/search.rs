@@ -1,7 +1,54 @@
 //! Catalogue search and ranking (pure; no GTK, no I/O). Ported 1:1 from the
 //! verified experiments/catalogue/search.js scorer so results match the HTML
 //! viewer: exact attr/pname = 100, prefix = 30, contains = 10, description = 3.
-use crate::model::SearchText;
+use crate::model::{IndexEntry, SearchText};
+
+/// Catalogue entries paired with their derived, lowercased search fields.
+///
+/// The private pairing keeps every ranking index tied to its source entry.
+/// Rebuild the corpus when the catalogue filter changes rather than mutating
+/// entries and cached text independently.
+#[derive(Debug, Clone, Default)]
+pub struct SearchCorpus {
+    items: Vec<SearchItem>,
+}
+
+#[derive(Debug, Clone)]
+struct SearchItem {
+    entry: IndexEntry,
+    text: SearchText,
+}
+
+impl SearchCorpus {
+    /// Build a search corpus from catalogue entries and the current unfree filter.
+    pub fn new(entries: &[IndexEntry], hide_unfree: bool) -> SearchCorpus {
+        let items = entries
+            .iter()
+            .filter(|entry| !hide_unfree || !entry.unfree)
+            .cloned()
+            .map(|entry| SearchItem {
+                text: SearchText::build(&entry),
+                entry,
+            })
+            .collect();
+        SearchCorpus { items }
+    }
+
+    /// Catalogue entries represented by this filtered corpus, in source order.
+    pub fn entries(&self) -> impl Iterator<Item = &IndexEntry> {
+        self.items.iter().map(|item| &item.entry)
+    }
+
+    /// Rank entries using cached fields while returning their source records.
+    pub fn rank(&self, query: &str, max: usize) -> Vec<&IndexEntry> {
+        rank_by(query, self.items.len(), max, |index, terms| {
+            score(&self.items[index].text, terms)
+        })
+        .into_iter()
+        .map(|index| &self.items[index].entry)
+        .collect()
+    }
+}
 
 /// Split on anything that is not [a-z0-9.+-], lowercase.
 pub fn tokenize(q: &str) -> Vec<String> {
@@ -12,7 +59,11 @@ pub fn tokenize(q: &str) -> Vec<String> {
         .collect()
 }
 
-/// Weighted score of one entry against the query terms (mirrors search.js).
+/// Score one entry against normalized query terms using the shared ranking weights.
+///
+/// Terms shorter than two bytes are ignored. Each term contributes at most one
+/// name match weight (exact 100, prefix 30, or substring 10), plus a 3-point
+/// description match bonus; contributions from separate terms accumulate.
 pub fn score(t: &SearchText, terms: &[String]) -> i64 {
     let mut s = 0i64;
     for term in terms {
@@ -33,17 +84,28 @@ pub fn score(t: &SearchText, terms: &[String]) -> i64 {
     s
 }
 
-/// Ranked indices of the matching entries (score desc), capped at `max`.
-/// Empty for a blank query; the caller decides the browse behaviour.
+/// Return matching entry indices ordered by descending score, capped at `max`.
+///
+/// Zero-score entries are omitted; equal scores retain their input order.
+/// A blank query returns no indices so the caller can choose browse behavior.
 pub fn rank(query: &str, texts: &[SearchText], max: usize) -> Vec<usize> {
+    rank_by(query, texts.len(), max, |index, terms| {
+        score(&texts[index], terms)
+    })
+}
+
+fn rank_by(
+    query: &str,
+    len: usize,
+    max: usize,
+    mut score_at: impl FnMut(usize, &[String]) -> i64,
+) -> Vec<usize> {
     let terms = tokenize(query);
     if terms.is_empty() {
         return Vec::new();
     }
-    let mut scored: Vec<(i64, usize)> = texts
-        .iter()
-        .enumerate()
-        .map(|(i, t)| (score(t, &terms), i))
+    let mut scored: Vec<(i64, usize)> = (0..len)
+        .map(|index| (score_at(index, &terms), index))
         .filter(|(s, _)| *s > 0)
         .collect();
     scored.sort_by_key(|(s, _)| std::cmp::Reverse(*s));
@@ -75,47 +137,10 @@ pub fn rank_settings(query: &str, specs: &[crate::settings::Spec], max: usize) -
     rank(query, &texts, max)
 }
 
-/// Optional non-free filter (decision D1): when `hide_unfree` is on, entries
-/// with an unfree licence drop out of the results entirely (browse + search).
-pub fn filter_unfree(
-    entries: &[crate::model::IndexEntry],
-    hide_unfree: bool,
-) -> Vec<crate::model::IndexEntry> {
-    if !hide_unfree {
-        return entries.to_vec();
-    }
-    entries.iter().filter(|e| !e.unfree).cloned().collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::IndexEntry;
-
-    #[test]
-    fn unfree_filter_drops_only_when_requested() {
-        let free = IndexEntry {
-            attr: "firefox".into(),
-            pname: None,
-            version: None,
-            description: None,
-            home_page: None,
-            main_program: None,
-            unfree: false,
-            linux_ok: true,
-            class: crate::model::Class::App,
-            tier: crate::model::Tier::Rich,
-            install: None,
-        };
-        let mut unfree = free.clone();
-        unfree.attr = "discord".into();
-        unfree.unfree = true;
-        let entries = vec![free.clone(), unfree.clone()];
-        assert_eq!(filter_unfree(&entries, false).len(), 2);
-        let hidden = filter_unfree(&entries, true);
-        assert_eq!(hidden.len(), 1);
-        assert_eq!(hidden[0].attr, "firefox");
-    }
 
     fn text(name: &str, pn: &str, desc: &str) -> SearchText {
         SearchText {
@@ -245,5 +270,55 @@ mod tests {
         let t = SearchText::build(&e);
         assert_eq!(t.name, "firefox");
         assert_eq!(t.desc, "web browser");
+    }
+
+    #[test]
+    fn corpus_keeps_cached_text_aligned_with_filtered_entries() {
+        let free = IndexEntry {
+            attr: "Firefox".into(),
+            pname: Some("Firefox Browser".into()),
+            version: None,
+            description: Some("Web browser".into()),
+            home_page: None,
+            main_program: None,
+            unfree: false,
+            linux_ok: true,
+            class: crate::model::Class::App,
+            tier: crate::model::Tier::Basic,
+            install: None,
+        };
+        let mut unfree = free.clone();
+        unfree.attr = "Discord".into();
+        unfree.pname = Some("Discord Chat".into());
+        unfree.unfree = true;
+
+        let entries = vec![free.clone(), unfree.clone()];
+        let visible = SearchCorpus::new(&entries, true);
+        assert_eq!(
+            visible
+                .entries()
+                .map(|entry| entry.attr.as_str())
+                .collect::<Vec<_>>(),
+            ["Firefox"]
+        );
+        assert!(visible.rank("chat", 10).is_empty());
+        assert_eq!(
+            visible
+                .rank("browser", 10)
+                .iter()
+                .map(|entry| entry.attr.as_str())
+                .collect::<Vec<_>>(),
+            ["Firefox"]
+        );
+
+        let all = SearchCorpus::new(&entries, false);
+        assert_eq!(
+            all.rank("chat", 10)
+                .iter()
+                .map(|entry| entry.attr.as_str())
+                .collect::<Vec<_>>(),
+            ["Discord"]
+        );
+        assert_eq!(all.entries().next().unwrap().attr, "Firefox");
     }
 }

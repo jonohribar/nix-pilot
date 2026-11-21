@@ -1,5 +1,6 @@
 //! Settings surface v1 (9f3.8, settings-schema.md + decision D14): the app's
-//! set of *owned* settings. Pure product data + rendering — no GTK, no Nix.
+//! set of *owned* settings. Pure product data, validation, and Nix-text
+//! rendering — no GTK, Nix evaluation, or external I/O.
 //!
 //! Boundary: a setting is owned only when it maps to a stable NixOS option,
 //! means the same thing on every desktop, and the app owns its versioning
@@ -9,12 +10,14 @@
 //! step above `mkForce`, so "what you change in the app always wins".
 use std::collections::BTreeMap;
 
-use crate::desired_state::SettingValue;
+use crate::setting_value::SettingValue;
 
 /// Value type accepted by a setting and used to choose its UI control.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValueKind {
+    /// Free-form text validated by the setting's specific validator.
     String,
+    /// A true/false setting represented by a switch.
     Boolean,
     /// A small product-authored value set rendered as a dropdown (S3/D14
     /// authored control, C2: raw option values never shown as free text).
@@ -22,7 +25,11 @@ pub enum ValueKind {
     Choice(&'static [(&'static str, &'static str)]),
 }
 
-/// One owned setting workflow: how it presents and how its value validates.
+/// Product-authored definition of one setting the app is responsible for.
+///
+/// The metadata drives its plain-language UI, search aliases, input control,
+/// validation, and NixOS option rendering. Only values present in desired
+/// state are rendered; absence leaves the live system configuration in charge.
 pub struct Spec {
     /// The settings map key (== the NixOS option path, dotted).
     pub key: &'static str,
@@ -69,8 +76,9 @@ const fn str_spec(
     }
 }
 
-/// The owned surface, in display order (first-release, verified on the
-/// pinned nixpkgs: networking.hostName, networking.networkmanager.enable,
+/// Settings owned by the app, in user-interface display order. The NixOS
+/// options were verified against the pinned nixpkgs snapshot:
+/// `networking.hostName`, `networking.networkmanager.enable`,
 /// hardware.bluetooth.enable, hardware.bluetooth.powerOnBoot, time.timeZone,
 /// i18n.defaultLocale, services.printing.enable, powerManagement.enable,
 /// services.pipewire.enable, services.openssh.enable).
@@ -316,7 +324,10 @@ const fn choice_spec(
     }
 }
 
-/// Validate a value for the given key (returns a plain-language reason).
+/// Validate a value against the setting definition for `key`.
+///
+/// The returned error is suitable for a plain-language control hint. Unknown
+/// keys and mismatches between the value type and control kind are rejected.
 pub fn validate(key: &str, value: &SettingValue) -> Result<(), String> {
     let Some(spec) = SPECS.iter().find(|s| s.key == key) else {
         return Err("unknown setting".into());
@@ -341,7 +352,9 @@ pub fn validate(key: &str, value: &SettingValue) -> Result<(), String> {
 /// Render the settings block for a desired-state settings map. Only keys the
 /// user set appear (the desired state stores exactly what changed), each as
 /// `option.path = lib.mkOverride 10 <value>;`. Prefixes the block so it is
-/// emitted verbatim into the generated module.
+/// emitted verbatim into the generated module. Call [`validate`] before
+/// rendering untrusted or persisted values; this function assumes the map is
+/// valid and omits keys that are not in [`SPECS`].
 pub fn render_block(settings: &BTreeMap<String, SettingValue>) -> String {
     let mut out = String::new();
     for spec in SPECS {

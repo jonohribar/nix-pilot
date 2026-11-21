@@ -18,13 +18,17 @@ run: build
 proto: build
     @if command -v cargo >/dev/null 2>&1; then cargo run --bin proto; else nix-shell ./shell.nix --run 'cargo run --bin proto'; fi
 
+# generate and validate internal Rust API documentation in target/doc
+docs:
+    @if command -v cargo >/dev/null 2>&1; then RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items; else nix-shell ./shell.nix --run 'RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items'; fi
+
 # render wireframe states to PNGs (all, or named: detail search …)
 wireframes *states: build
     @if command -v blueprint-compiler >/dev/null 2>&1; then ./wireframes/render.sh {{states}}; else nix-shell ./shell.nix --run './wireframes/render.sh {{states}}'; fi
 
 # headless smoke test (xvfb, ~5 s)
 smoke: build
-    @if command -v xvfb-run >/dev/null 2>&1; then ./scripts/smoke.sh; else nix-shell ./shell.nix --run './scripts/smoke.sh'; fi
+    @if command -v xvfb-run >/dev/null 2>&1 && command -v xwininfo >/dev/null 2>&1; then ./scripts/smoke.sh; else nix-shell ./shell.nix --run './scripts/smoke.sh'; fi
 
 # 7wo.3 activation harness: prove switch+rollback in an isolated QEMU VM
 # (uses the NixOS test driver; never touches the host config or system; qemu

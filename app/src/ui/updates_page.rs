@@ -1,5 +1,5 @@
-//! Updates page — review of the queued changes: Prepare dry-runs each item and
-//! builds the candidate generation. Activation is gated by `apply::can_activate()`
+//! Updates page — review of selected changes: Prepare dry-runs each item and
+//! builds the candidate generation. Activation is gated by `activation::can_activate()`
 //! (env NIX_PILOT_ALLOW_SWITCH + helper on PATH). When enabled, the Apply button
 //! becomes active in BuildCheck after a green candidate build.
 use std::cell::RefCell;
@@ -7,15 +7,18 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use crate::apply;
-use crate::desired_state::{DesiredDoc, SettingValue};
-use crate::store::ChangeQueue;
+use crate::desired_state::{DesiredDoc, PackageIntent, PackageScope, SettingValue};
+use crate::model::PackageNames;
+use crate::system::{activation, build, generation, storage};
 use crate::updates::{self, TxEvent, TxStep};
 
+/// Review, prepare, and (when enabled) apply desired system changes.
 pub struct UpdatesPage {
+    /// Root widget for the Updates surface.
     pub page: gtk4::Box,
     step_label: gtk4::Label,
     step: Rc<RefCell<TxStep>>,
+    prepared_doc: Rc<RefCell<Option<DesiredDoc>>>,
     /// Set-and-forget upkeep controls (category "updates").
     auto_bools: Vec<(String, gtk4::Switch)>,
     auto_strs: Vec<(String, gtk4::Entry)>,
@@ -35,36 +38,73 @@ pub struct UpdatesPage {
     config_view: gtk4::Label,
     build_btn: gtk4::Button,
     apply_btn: gtk4::Button,
+    package_names: Rc<PackageNames>,
+}
+
+#[derive(Clone)]
+struct TxUi {
+    step: Rc<RefCell<TxStep>>,
+    step_label: gtk4::Label,
+    results_label: gtk4::Label,
+    results_list: gtk4::ListBox,
+    build_btn: gtk4::Button,
+    primary_btn: gtk4::Button,
+}
+
+impl TxUi {
+    fn transition(&self, event: TxEvent) -> Option<TxStep> {
+        advance_transaction(&self.step, event)
+    }
+
+    fn render(&self) {
+        let step = *self.step.borrow();
+        let view = updates::view_for(step, activation::can_activate());
+        self.step_label.set_text(step.label());
+        self.build_btn.set_sensitive(view.prepare_enabled);
+        self.primary_btn.set_label(view.primary_label);
+        self.primary_btn.set_sensitive(view.primary_enabled);
+        self.primary_btn.set_tooltip_text(view.primary_tooltip);
+    }
+}
+
+fn advance_transaction(step: &RefCell<TxStep>, event: TxEvent) -> Option<TxStep> {
+    let current = *step.borrow();
+    let next = updates::advance(current, event)?;
+    *step.borrow_mut() = next;
+    Some(next)
 }
 
 struct PrepareResult {
     report: updates::BuildReport,
-    candidate: Option<apply::CandidateBuild>,
+    candidate: Option<build::CandidateBuild>,
 }
 
 /// Result of an activation attempt on the worker thread.
 struct ActivateResult {
-    action: apply::ActivateAction,
-    result: apply::ActivateResult,
+    action: activation::ActivateAction,
+    result: activation::ActivateResult,
 }
 
-/// Verify queued packages, then build a candidate only when every check passes.
+/// Verify every selected package, then build only when all checks pass.
+///
+/// The candidate remains absent if there are no changes, any check fails, or
+/// the supported live configuration cannot be discovered. The caller treats
+/// an absent candidate as not prepared for application.
 fn prepare_changes(
     nix: &std::path::Path,
-    changes: &[updates::PendingChange],
+    changes: &[PackageIntent],
     doc: &DesiredDoc,
 ) -> PrepareResult {
-    let report = updates::verify_queued(nix, changes, std::time::Duration::from_secs(60));
+    let report = updates::verify_package_intents(nix, changes, std::time::Duration::from_secs(60));
     let candidate = if report.all_ok() && !changes.is_empty() {
-        let (preserved, hardware) = apply::discover_nixos_sources();
-        if preserved.is_some() || hardware.is_some() {
+        if let Ok(sources) = crate::config_source::discover() {
             let state_version =
-                apply::system_state_version().unwrap_or_else(|| "26.05".to_string());
-            Some(apply::build_from_desired(
+                build::system_state_version().unwrap_or_else(|| "26.05".to_string());
+            Some(build::build_from_desired(
                 doc,
                 &state_version,
-                preserved.as_deref(),
-                hardware.as_deref(),
+                Some(&sources.configuration),
+                sources.hardware_configuration.as_deref(),
                 std::time::Duration::from_secs(1500),
             ))
         } else {
@@ -77,7 +117,7 @@ fn prepare_changes(
 }
 
 /// Wire the Storage card's three run-now buttons: each runs elevated through
-/// `apply::cleanup` on a worker thread (only Send values cross the thread
+/// `storage::cleanup` on a worker thread (only Send values cross the thread
 /// boundary; widgets are re-touched on the GTK thread via a short poll).
 fn wire_storage_buttons(
     result: &gtk4::Label,
@@ -96,13 +136,13 @@ fn wire_storage_buttons(
             &est,
             &cln,
             &opt,
-            apply::CleanupAction::GcEstimate,
+            storage::CleanupAction::GcEstimate,
             false,
         )
     });
     let (est, cln, opt) = (estimate.clone(), cleanup.clone(), optimise.clone());
     cleanup.connect_clicked(move |_| {
-        run_storage_action(&cln_r, &est, &cln, &opt, apply::CleanupAction::Gc, true)
+        run_storage_action(&cln_r, &est, &cln, &opt, storage::CleanupAction::Gc, true)
     });
     let (est, cln, opt) = (estimate.clone(), cleanup.clone(), optimise.clone());
     optimise.connect_clicked(move |_| {
@@ -111,7 +151,7 @@ fn wire_storage_buttons(
             &est,
             &cln,
             &opt,
-            apply::CleanupAction::Optimise,
+            storage::CleanupAction::Optimise,
             true,
         )
     });
@@ -124,16 +164,16 @@ fn run_storage_action(
     estimate: &gtk4::Button,
     cleanup: &gtk4::Button,
     optimise: &gtk4::Button,
-    action: apply::CleanupAction,
+    action: storage::CleanupAction,
     busy: bool,
 ) {
     result.set_text("Running…");
     for b in [estimate, cleanup, optimise] {
         b.set_sensitive(false);
     }
-    let (tx, rx) = std::sync::mpsc::channel::<apply::CleanupResult>();
+    let (tx, rx) = std::sync::mpsc::channel::<storage::CleanupResult>();
     std::thread::spawn(move || {
-        let r = apply::cleanup(action, std::time::Duration::from_secs(600));
+        let r = storage::cleanup(action, std::time::Duration::from_secs(600));
         let _ = tx.send(r);
     });
     let result = result.clone();
@@ -153,7 +193,7 @@ fn run_storage_action(
                 result.set_text(&text);
                 if !busy {
                     for b in [&estimate, &cleanup, &optimise] {
-                        b.set_sensitive(apply::can_activate());
+                        b.set_sensitive(activation::can_activate());
                     }
                 }
                 glib::ControlFlow::Break
@@ -198,31 +238,25 @@ fn classify_prepare(
 /// Update the page after the worker finishes; this function runs on GTK's thread.
 fn render_prepare_result(
     result: PrepareResult,
-    step: &RefCell<TxStep>,
-    step_label: &gtk4::Label,
-    results_label: &gtk4::Label,
-    results_list: &gtk4::ListBox,
-    build_button: &gtk4::Button,
-    apply_button: &gtk4::Button,
+    snapshot: DesiredDoc,
+    ui: &TxUi,
+    prepared_doc: &RefCell<Option<DesiredDoc>>,
+    package_names: &PackageNames,
 ) {
-    while let Some(child) = results_list.first_child() {
-        results_list.remove(&child);
+    while let Some(child) = ui.results_list.first_child() {
+        ui.results_list.remove(&child);
     }
     for item in &result.report.items {
         let text = if item.ok {
-            format!("{} — buildable", item.name)
+            format!("{} — buildable", package_names.display_name(&item.attr))
         } else {
-            format!("{} — {}", item.name, item.note)
+            format!("{} — {}", package_names.display_name(&item.attr), item.note)
         };
-        append_result_row(results_list, &text, false);
+        append_result_row(&ui.results_list, &text, false);
     }
 
-    let mut all_ok = result.report.all_ok();
     let verdict = result.candidate.as_ref().map(|candidate| {
-        append_log_tail(results_list, &candidate.log);
-        if !candidate.ok {
-            all_ok = false;
-        }
+        append_log_tail(&ui.results_list, &candidate.log);
         candidate.note.clone()
     });
 
@@ -233,14 +267,23 @@ fn render_prepare_result(
         result.report.items.is_empty(),
         result.candidate.as_ref().map(|c| c.ok),
     );
-    let (event, fallback) = match classification {
-        PrepareVerdict::Ready => (TxEvent::Prepared, TxStep::BuildCheck),
-        _ => (TxEvent::BuildFailed, TxStep::BuildFailed),
+    let event = match classification {
+        PrepareVerdict::Ready => TxEvent::Prepared,
+        _ => TxEvent::BuildFailed,
     };
-    let target = updates::advance(*step.borrow(), event).unwrap_or(fallback);
-    *step.borrow_mut() = target;
-    step_label.set_text(target.label());
-    results_label.set_text(&verdict.unwrap_or_else(|| {
+    if ui.transition(event).is_none() {
+        *prepared_doc.borrow_mut() = None;
+        ui.results_label
+            .set_text("The preparation result did not match the current transaction.");
+        ui.render();
+        return;
+    }
+    if classification == PrepareVerdict::Ready {
+        *prepared_doc.borrow_mut() = Some(snapshot);
+    } else {
+        *prepared_doc.borrow_mut() = None;
+    }
+    ui.results_label.set_text(&verdict.unwrap_or_else(|| {
         match classification {
             PrepareVerdict::NotQueued => "Nothing queued to prepare".into(),
             PrepareVerdict::NoSystemConfig => {
@@ -252,19 +295,7 @@ fn render_prepare_result(
             PrepareVerdict::Ready => "All changes prepare cleanly".into(),
         }
     }));
-    build_button.set_sensitive(true);
-
-    // Enable Apply only in BuildCheck with a green candidate AND activation allowed.
-    let can_activate = apply::can_activate();
-    let has_green_candidate = all_ok && result.candidate.as_ref().map(|c| c.ok).unwrap_or(false);
-    apply_button.set_sensitive(target == TxStep::BuildCheck && can_activate && has_green_candidate);
-    if can_activate {
-        apply_button.set_tooltip_text(None);
-    } else {
-        apply_button.set_tooltip_text(Some(
-            "Activation requires NIX_PILOT_ALLOW_SWITCH=1 and the nix-pilot-apply helper installed (nixos-module).",
-        ));
-    }
+    ui.render();
 }
 
 fn append_result_row(list: &gtk4::ListBox, text: &str, technical: bool) {
@@ -297,7 +328,8 @@ fn append_log_tail(list: &gtk4::ListBox, log: &str) {
 }
 
 impl UpdatesPage {
-    pub fn new() -> UpdatesPage {
+    /// Build the Updates surface and its initially disabled action controls.
+    pub fn new(package_names: Rc<PackageNames>) -> UpdatesPage {
         let page = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
         page.set_margin_top(18);
         page.set_margin_start(28);
@@ -491,6 +523,7 @@ impl UpdatesPage {
             page,
             step_label,
             step,
+            prepared_doc: Rc::new(RefCell::new(None)),
             auto_bools,
             auto_strs,
             storage_usage,
@@ -507,6 +540,18 @@ impl UpdatesPage {
             config_view,
             build_btn,
             apply_btn,
+            package_names,
+        }
+    }
+
+    fn transaction_ui(&self) -> TxUi {
+        TxUi {
+            step: self.step.clone(),
+            step_label: self.step_label.clone(),
+            results_label: self.results_label.clone(),
+            results_list: self.results_list.clone(),
+            build_btn: self.build_btn.clone(),
+            primary_btn: self.apply_btn.clone(),
         }
     }
 
@@ -516,10 +561,10 @@ impl UpdatesPage {
     fn refresh_storage_usage(&self) {
         let (tx, rx) = std::sync::mpsc::channel::<String>();
         std::thread::spawn(move || {
-            let _ = tx.send(match apply::store_usage_bytes() {
+            let _ = tx.send(match storage::store_usage_bytes() {
                 Some(bytes) => format!(
                     "The package store holds {} on this computer.",
-                    apply::human_bytes(bytes)
+                    storage::human_bytes(bytes)
                 ),
                 None => "Could not read the store size on this computer.".to_string(),
             });
@@ -544,7 +589,7 @@ impl UpdatesPage {
         while let Some(child) = self.gens_list.first_child() {
             self.gens_list.remove(&child);
         }
-        let gens = apply::list_generations();
+        let gens = generation::list_generations();
         if gens.is_empty() {
             let l = gtk4::Label::new(Some("No system versions could be read on this computer."));
             l.set_xalign(0.0);
@@ -582,8 +627,7 @@ impl UpdatesPage {
     }
 
     /// Reset then repopulate the queued-change list (call when shown).
-    pub fn refresh(&self, queue: &Rc<RefCell<ChangeQueue>>) {
-        self.reset();
+    pub fn refresh(&self, desired: &Rc<RefCell<DesiredDoc>>, account: &str) {
         self.refresh_storage_usage();
         self.storage_result.set_text("");
         self.refresh_generations();
@@ -591,20 +635,34 @@ impl UpdatesPage {
         while let Some(child) = self.queue_list.first_child() {
             self.queue_list.remove(&child);
         }
-        let q = queue.borrow();
-        // Queue-driven status (rqe): the Ready label must not claim changes
+        let document = desired.borrow().clone();
+        let intents = document.package_intents_for(account);
+        if *self.step.borrow() == TxStep::BuildCheck
+            && self.prepared_doc.borrow().as_ref() != Some(&document)
+        {
+            self.prepared_doc.borrow_mut().take();
+            let ui = self.transaction_ui();
+            let _ = ui.transition(TxEvent::InputsChanged);
+            self.results_label
+                .set_text("Your changes have changed since preparation. Prepare them again.");
+            while let Some(child) = self.results_list.first_child() {
+                self.results_list.remove(&child);
+            }
+        }
+        self.transaction_ui().render();
+        // Desired-state-driven status: the Ready label must not claim changes
         // are ready when none are.
         if *self.step.borrow() == TxStep::Ready {
-            let label = if q.is_empty() {
+            let label = if intents.is_empty() {
                 "No changes waiting."
             } else {
-                let n = q.len();
+                let n = intents.len();
                 let suffix = if n == 1 { "" } else { "s" };
                 &format!("{n} change{suffix} ready — nothing has been applied yet")
             };
             self.step_label.set_text(label);
         }
-        if q.is_empty() {
+        if intents.is_empty() {
             let l = gtk4::Label::new(Some(
                 "Nothing ready to change yet — add packages from the store.",
             ));
@@ -613,11 +671,14 @@ impl UpdatesPage {
             self.queue_list.append(&l);
             return;
         }
-        for (name, system_wide) in q.summary() {
+        for intent in intents {
             let l = gtk4::Label::new(Some(&format!(
                 "{} · {}",
-                name,
-                if system_wide { "system" } else { "user" }
+                self.package_names.display_name(&intent.attr),
+                match intent.scope {
+                    PackageScope::System => "system",
+                    PackageScope::User => "user",
+                }
             )));
             l.set_xalign(0.0);
             let row = gtk4::ListBoxRow::new();
@@ -628,27 +689,11 @@ impl UpdatesPage {
         }
     }
 
-    /// Reset the results/step lines (run before a fresh Prepare or when shown).
-    fn reset(&self) {
-        *self.step.borrow_mut() = TxStep::Ready;
-        self.step_label.set_text(TxStep::Ready.label());
-        self.results_label.set_text("");
-        while let Some(child) = self.results_list.first_child() {
-            self.results_list.remove(&child);
-        }
-        // Apply button resets to disabled; it will be enabled in render_prepare_result
-        // only when in BuildCheck with a green candidate and can_activate().
-        self.apply_btn.set_sensitive(false);
-        self.apply_btn.set_tooltip_text(Some(
-            "Activation requires NIX_PILOT_ALLOW_SWITCH=1 and the nix-pilot-apply helper installed (nixos-module).",
-        ));
-    }
-
     /// Wire Prepare and Apply on worker threads.
     pub fn wire(
         &self,
-        queue: &Rc<RefCell<ChangeQueue>>,
         desired: &Rc<RefCell<DesiredDoc>>,
+        account: &str,
         nix: &Option<std::path::PathBuf>,
         save: Rc<dyn Fn()>,
     ) {
@@ -706,7 +751,7 @@ impl UpdatesPage {
         let estimate_btn = self.estimate_btn.clone();
         let cleanup_btn = self.cleanup_btn.clone();
         let optimise_btn = self.optimise_btn.clone();
-        let activate = apply::can_activate();
+        let activate = activation::can_activate();
         for b in [&estimate_btn, &cleanup_btn, &optimise_btn] {
             b.set_sensitive(activate);
             b.set_tooltip_text(Some(match activate {
@@ -736,11 +781,11 @@ impl UpdatesPage {
         gens_rollback.connect_clicked(move |b| {
             b.set_sensitive(false);
             gens_result.set_text("Starting the previous version…");
-            let (tx, rx) = std::sync::mpsc::channel::<apply::ActivateResult>();
+            let (tx, rx) = std::sync::mpsc::channel::<activation::ActivateResult>();
             let doc = doc_rc.borrow().clone();
             std::thread::spawn(move || {
-                let r = apply::activate(
-                    apply::ActivateAction::Rollback,
+                let r = activation::activate(
+                    activation::ActivateAction::Rollback,
                     &doc,
                     std::time::Duration::from_secs(900),
                 );
@@ -752,409 +797,279 @@ impl UpdatesPage {
                 match rx.try_recv() {
                     Ok(r) => {
                         res.set_text(&r.note);
-                        btn.set_sensitive(apply::can_activate());
+                        btn.set_sensitive(activation::can_activate());
                         glib::ControlFlow::Break
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
                     Err(_) => {
-                        btn.set_sensitive(apply::can_activate());
+                        btn.set_sensitive(activation::can_activate());
                         glib::ControlFlow::Break
                     }
                 }
             });
         });
 
-        // Clone shared state for both Prepare and Apply handlers
-        let queue_for_prepare = queue.clone();
+        let ui = self.transaction_ui();
+        let prepared_doc = self.prepared_doc.clone();
         let desired_for_prepare = desired.clone();
+        let account_for_prepare = account.to_string();
         let nix = nix.clone();
-        let step = self.step.clone();
-        let step_label = self.step_label.clone();
-        let results_label = self.results_label.clone();
-        let results_list = self.results_list.clone();
         let config_view = self.config_view.clone();
-        let build_btn = self.build_btn.clone();
-        let apply_btn = self.apply_btn.clone();
+        let package_names = self.package_names.clone();
 
         // --- Prepare (Build) ---
-        build_btn.connect_clicked(move |b| {
-            b.set_sensitive(false);
-            apply_btn.set_sensitive(false);
-            // the transaction advances: Ready --Prepare--> Explaining
-            *step.borrow_mut() = TxStep::Explaining;
-            step_label.set_text(TxStep::Explaining.label());
+        let prepare_ui = ui.clone();
+        self.build_btn.connect_clicked(move |_| {
+            if prepare_ui.transition(TxEvent::Prepare).is_none() {
+                return;
+            }
+            *prepared_doc.borrow_mut() = None;
+            while let Some(child) = prepare_ui.results_list.first_child() {
+                prepare_ui.results_list.remove(&child);
+            }
+            prepare_ui.results_label.set_text("");
+            prepare_ui.render();
+
             let Some(nixp) = nix.clone() else {
-                results_label.set_text("The package checker is not available on this system");
-                b.set_sensitive(true);
+                fail_prepare(
+                    &prepare_ui,
+                    &prepared_doc,
+                    "The package checker is not available on this system.",
+                );
                 return;
             };
-            let step_label = step_label.clone();
-            let step = step.clone();
-            let results_label = results_label.clone();
-            let results_list = results_list.clone();
-            let b = b.clone();
-            let apply_btn = apply_btn.clone();
-            // render the config the desired-state model would generate (the
-            // persisted doc: system + per-user packages + any app settings)
+
             let doc = desired_for_prepare.borrow().clone();
-            match doc.render_module(apply::detect_user_backend()) {
+            match doc.render_module(build::detect_user_backend()) {
                 Ok(config) => config_view.set_text(&config),
-                Err(error) => config_view
-                    .set_text(&format!("Cannot render the desired state safely: {error}")),
+                Err(error) => {
+                    config_view
+                        .set_text(&format!("Cannot render the desired state safely: {error}"));
+                    fail_prepare(
+                        &prepare_ui,
+                        &prepared_doc,
+                        "The desired state could not be rendered safely.",
+                    );
+                    return;
+                }
             }
-            let changes = queue_for_prepare.borrow().items().to_vec();
+            let snapshot = doc.clone();
+            let changes = doc.package_intents_for(&account_for_prepare);
             let (tx, rx) = std::sync::mpsc::channel::<PrepareResult>();
             std::thread::spawn(move || {
                 let result = prepare_changes(&nixp, &changes, &doc);
                 let _ = tx.send(result);
             });
+            let result_ui = prepare_ui.clone();
+            let result_snapshot = snapshot.clone();
+            let result_prepared_doc = prepared_doc.clone();
+            let result_package_names = package_names.clone();
             glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
                 match rx.try_recv() {
                     Ok(result) => {
                         render_prepare_result(
                             result,
-                            &step,
-                            &step_label,
-                            &results_label,
-                            &results_list,
-                            &b,
-                            &apply_btn,
+                            result_snapshot.clone(),
+                            &result_ui,
+                            &result_prepared_doc,
+                            &result_package_names,
                         );
                         glib::ControlFlow::Break
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(_) => {
-                        b.set_sensitive(true);
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        fail_prepare(
+                            &result_ui,
+                            &result_prepared_doc,
+                            "Preparation ended before a result was received.",
+                        );
                         glib::ControlFlow::Break
                     }
                 }
             });
         });
 
-        // --- Apply (Switch) ---
-        let step = self.step.clone();
-        let step_label = self.step_label.clone();
-        let results_label = self.results_label.clone();
-        let results_list = self.results_list.clone();
-        let apply_btn = self.apply_btn.clone();
-        let build_btn = self.build_btn.clone();
-        let queue_for_apply = queue.clone();
-        let desired_for_apply = desired.clone();
-        apply_btn.clone().connect_clicked(move |_| {
-            apply_btn.set_sensitive(false);
-            build_btn.set_sensitive(false);
-
-            // BuildCheck --BuildOk--> Applying (the Apply button is only enabled
-            // in BuildCheck with a green candidate, so this is the valid transition)
-            *step.borrow_mut() = TxStep::Applying;
-            step_label.set_text(TxStep::Applying.label());
-            results_label.set_text("Applying the change…");
-
-            let doc = desired_for_apply.borrow().clone();
-            let (tx, rx) = std::sync::mpsc::channel::<ActivateResult>();
-            std::thread::spawn(move || {
-                let result = apply::activate(
-                    apply::ActivateAction::Switch,
-                    &doc,
-                    std::time::Duration::from_secs(1800),
-                );
-                let _ = tx.send(ActivateResult {
-                    action: apply::ActivateAction::Switch,
-                    result,
-                });
-            });
-            // Clone for the timeout closure
-            let step = step.clone();
-            let step_label = step_label.clone();
-            let results_label = results_label.clone();
-            let results_list = results_list.clone();
-            let apply_btn = apply_btn.clone();
-            let build_btn = build_btn.clone();
-            let queue_for_apply = queue_for_apply.clone();
-            let desired_for_apply = desired_for_apply.clone();
-            glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-                match rx.try_recv() {
-                    Ok(ar) => {
-                        handle_activate_result(
-                            ar,
-                            ActivateContext {
-                                step: &step,
-                                step_label: &step_label,
-                                results_label: &results_label,
-                                results_list: &results_list,
-                                apply_btn: &apply_btn,
-                                build_btn: &build_btn,
-                                queue: &queue_for_apply,
-                                desired: &desired_for_apply,
-                            },
-                        );
-                        glib::ControlFlow::Break
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(_) => {
-                        apply_btn.set_sensitive(true);
-                        build_btn.set_sensitive(true);
-                        glib::ControlFlow::Break
-                    }
+        // One stable handler dispatches Apply or confirmed rollback according
+        // to the current transaction state; it is never reconnected.
+        let action_ui = ui.clone();
+        let action_desired = desired.clone();
+        let action_prepared_doc = self.prepared_doc.clone();
+        self.apply_btn.connect_clicked(move |_| {
+            let view = updates::view_for(*action_ui.step.borrow(), activation::can_activate());
+            if !view.primary_enabled {
+                return;
+            }
+            match view.primary_action {
+                updates::PrimaryAction::Apply => start_apply(
+                    action_ui.clone(),
+                    action_desired.clone(),
+                    action_prepared_doc.clone(),
+                ),
+                updates::PrimaryAction::Rollback => {
+                    show_rollback_confirmation(action_ui.clone(), action_desired.clone())
                 }
-            });
-        });
-    }
-}
-
-/// Context passed to handle_activate_result (grouped to avoid too many arguments).
-struct ActivateContext<'a> {
-    step: &'a RefCell<TxStep>,
-    step_label: &'a gtk4::Label,
-    results_label: &'a gtk4::Label,
-    results_list: &'a gtk4::ListBox,
-    apply_btn: &'a gtk4::Button,
-    build_btn: &'a gtk4::Button,
-    queue: &'a Rc<RefCell<ChangeQueue>>,
-    desired: &'a Rc<RefCell<DesiredDoc>>,
-}
-
-/// Handle the result of an activation (switch or rollback) on the GTK thread.
-fn handle_activate_result(ar: ActivateResult, ctx: ActivateContext<'_>) {
-    let action = ar.action;
-    let result = ar.result;
-
-    // Clear any previous log tail
-    while let Some(child) = ctx.results_list.first_child() {
-        ctx.results_list.remove(&child);
-    }
-    if !result.log.is_empty() {
-        append_log_tail(ctx.results_list, &result.log);
-    }
-
-    match (action, result.ok) {
-        (apply::ActivateAction::Switch, true) => {
-            // Applying --ApplyOk--> Done
-            *ctx.step.borrow_mut() = TxStep::Done;
-            ctx.step_label.set_text(TxStep::Done.label());
-            ctx.results_label.set_text(&result.note);
-            ctx.apply_btn.set_sensitive(true);
-            ctx.apply_btn.set_label("Go back to the previous system");
-            ctx.apply_btn.set_tooltip_text(Some(
-                "Return to the system generation before this change was applied.",
-            ));
-            // Rewire the apply button to perform rollback
-            rewire_apply_for_rollback(
-                ctx.apply_btn,
-                ctx.build_btn,
-                ActivateContext {
-                    step: ctx.step,
-                    step_label: ctx.step_label,
-                    results_label: ctx.results_label,
-                    results_list: ctx.results_list,
-                    apply_btn: ctx.apply_btn,
-                    build_btn: ctx.build_btn,
-                    queue: ctx.queue,
-                    desired: ctx.desired,
-                },
-            );
-        }
-        (apply::ActivateAction::Switch, false) => {
-            // Applying --ApplyFailed--> ApplyFailed
-            *ctx.step.borrow_mut() = TxStep::ApplyFailed;
-            ctx.step_label.set_text(TxStep::ApplyFailed.label());
-            ctx.results_label.set_text(&result.note);
-            ctx.apply_btn.set_sensitive(true);
-            ctx.apply_btn.set_label("Go back to the previous system");
-            ctx.apply_btn.set_tooltip_text(Some(
-                "The change did not apply. Return to the previous system generation.",
-            ));
-            rewire_apply_for_rollback(
-                ctx.apply_btn,
-                ctx.build_btn,
-                ActivateContext {
-                    step: ctx.step,
-                    step_label: ctx.step_label,
-                    results_label: ctx.results_label,
-                    results_list: ctx.results_list,
-                    apply_btn: ctx.apply_btn,
-                    build_btn: ctx.build_btn,
-                    queue: ctx.queue,
-                    desired: ctx.desired,
-                },
-            );
-        }
-        (apply::ActivateAction::Rollback, true) => {
-            // ApplyFailed/Done --Rollback--> RolledBack
-            *ctx.step.borrow_mut() = TxStep::RolledBack;
-            ctx.step_label.set_text(TxStep::RolledBack.label());
-            ctx.results_label.set_text(&result.note);
-            ctx.apply_btn.set_sensitive(false);
-            ctx.apply_btn.set_label("Apply changes");
-            ctx.apply_btn.set_tooltip_text(Some(
-                "Activation requires NIX_PILOT_ALLOW_SWITCH=1 and the nix-pilot-apply helper installed (nixos-module).",
-            ));
-            ctx.build_btn.set_sensitive(true);
-            // Restore original Apply wiring (will be re-enabled on next Prepare if green)
-            restore_apply_wiring(
-                ctx.apply_btn,
-                ctx.build_btn,
-                ActivateContext {
-                    step: ctx.step,
-                    step_label: ctx.step_label,
-                    results_label: ctx.results_label,
-                    results_list: ctx.results_list,
-                    apply_btn: ctx.apply_btn,
-                    build_btn: ctx.build_btn,
-                    queue: ctx.queue,
-                    desired: ctx.desired,
-                },
-            );
-        }
-        (apply::ActivateAction::Rollback, false) => {
-            // Rollback failed — stay in current step, show error
-            ctx.results_label
-                .set_text(&format!("Rollback failed: {}", result.note));
-            ctx.apply_btn.set_sensitive(true);
-            ctx.build_btn.set_sensitive(true);
-        }
-    }
-}
-
-/// Rewire the Apply button to perform rollback with confirmation.
-fn rewire_apply_for_rollback(
-    apply_btn: &gtk4::Button,
-    build_btn: &gtk4::Button,
-    ctx: ActivateContext<'_>,
-) {
-    // Use a shared mode flag to track rollback mode.
-    let in_rollback_mode = Rc::new(RefCell::new(true));
-
-    let apply_btn = apply_btn.clone();
-    let step = Rc::new(ctx.step.clone());
-    let step_label = ctx.step_label.clone();
-    let results_label = ctx.results_label.clone();
-    let results_list = ctx.results_list.clone();
-    let queue = ctx.queue.clone();
-    let desired = ctx.desired.clone();
-    let build_btn = build_btn.clone();
-    let in_rollback_mode = in_rollback_mode.clone();
-
-    apply_btn.clone().connect_clicked(move |_| {
-        if !*in_rollback_mode.borrow() {
-            return; // Not in rollback mode, ignore
-        }
-
-        // Show confirmation dialog (REQ-3: one-dialog plain-language confirmation)
-        let dialog = gtk4::MessageDialog::builder()
-            .transient_for(
-                apply_btn
-                    .root()
-                    .and_then(|r| r.downcast::<gtk4::Window>().ok())
-                    .as_ref()
-                    .expect("dialog must have a parent window"),
-            )
-            .modal(true)
-            .message_type(gtk4::MessageType::Question)
-            .buttons(gtk4::ButtonsType::None)
-            .text("Go back to the previous system?")
-            .secondary_text(
-                "This will undo the change and restart the previous system generation. \
-                 You can re-apply the change later from the Updates page.",
-            )
-            .build();
-        dialog.add_button("Cancel", gtk4::ResponseType::Cancel);
-        dialog.add_button("Go back", gtk4::ResponseType::Accept);
-        dialog.set_default_response(gtk4::ResponseType::Cancel);
-        let apply_btn = apply_btn.clone();
-        let build_btn = build_btn.clone();
-        let step = step.clone();
-        let step_label = step_label.clone();
-        let results_label = results_label.clone();
-        let results_list = results_list.clone();
-        let queue = queue.clone();
-        let desired = desired.clone();
-        let in_rollback_mode = in_rollback_mode.clone();
-        dialog.connect_response(move |d, response| {
-            d.close();
-            if response == gtk4::ResponseType::Accept {
-                // User confirmed — run rollback
-                in_rollback_mode.replace(false);
-                apply_btn.set_sensitive(false);
-                build_btn.set_sensitive(false);
-                results_label.set_text("Restoring the previous system…");
-
-                let doc = desired.borrow().clone();
-                let (tx, rx) = std::sync::mpsc::channel::<ActivateResult>();
-                std::thread::spawn(move || {
-                    let result = apply::activate(
-                        apply::ActivateAction::Rollback,
-                        &doc,
-                        std::time::Duration::from_secs(600),
-                    );
-                    let _ = tx.send(ActivateResult {
-                        action: apply::ActivateAction::Rollback,
-                        result,
-                    });
-                });
-                // Clone for the timeout closure
-                let step = step.clone();
-                let step_label = step_label.clone();
-                let results_label = results_label.clone();
-                let results_list = results_list.clone();
-                let apply_btn = apply_btn.clone();
-                let build_btn = build_btn.clone();
-                let queue = queue.clone();
-                let desired = desired.clone();
-                glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-                    match rx.try_recv() {
-                        Ok(ar) => {
-                            handle_activate_result(
-                                ar,
-                                ActivateContext {
-                                    step: &step,
-                                    step_label: &step_label,
-                                    results_label: &results_label,
-                                    results_list: &results_list,
-                                    apply_btn: &apply_btn,
-                                    build_btn: &build_btn,
-                                    queue: &queue,
-                                    desired: &desired,
-                                },
-                            );
-                            glib::ControlFlow::Break
-                        }
-                        Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                        Err(_) => {
-                            apply_btn.set_sensitive(true);
-                            build_btn.set_sensitive(true);
-                            glib::ControlFlow::Break
-                        }
-                    }
-                });
+                updates::PrimaryAction::None => {}
             }
         });
-        dialog.present();
+    }
+}
+
+fn fail_prepare(ui: &TxUi, prepared_doc: &RefCell<Option<DesiredDoc>>, message: &str) {
+    *prepared_doc.borrow_mut() = None;
+    if ui.transition(TxEvent::BuildFailed).is_some() {
+        ui.results_label.set_text(message);
+    } else {
+        ui.results_label
+            .set_text("The preparation result did not match the current transaction.");
+    }
+    ui.render();
+}
+
+fn start_apply(
+    ui: TxUi,
+    desired: Rc<RefCell<DesiredDoc>>,
+    prepared_doc: Rc<RefCell<Option<DesiredDoc>>>,
+) {
+    if !activation::can_activate() {
+        ui.render();
+        return;
+    }
+    let doc = desired.borrow().clone();
+    if prepared_doc.borrow().as_ref() != Some(&doc) {
+        if ui.transition(TxEvent::InputsChanged).is_some() {
+            *prepared_doc.borrow_mut() = None;
+            ui.results_label
+                .set_text("Your changes have changed since preparation. Prepare them again.");
+            while let Some(child) = ui.results_list.first_child() {
+                ui.results_list.remove(&child);
+            }
+        }
+        ui.render();
+        return;
+    }
+    if ui.transition(TxEvent::Apply).is_none() {
+        return;
+    }
+    *prepared_doc.borrow_mut() = None;
+    ui.results_label.set_text("Applying the change…");
+    ui.render();
+    start_activation(ui, activation::ActivateAction::Switch, doc, 1800);
+}
+
+fn show_rollback_confirmation(ui: TxUi, desired: Rc<RefCell<DesiredDoc>>) {
+    let Some(parent) = ui
+        .primary_btn
+        .root()
+        .and_then(|root| root.downcast::<gtk4::Window>().ok())
+    else {
+        return;
+    };
+    let dialog = gtk4::MessageDialog::builder()
+        .transient_for(&parent)
+        .modal(true)
+        .message_type(gtk4::MessageType::Question)
+        .buttons(gtk4::ButtonsType::None)
+        .text("Go back to the previous system?")
+        .secondary_text(
+            "This will undo the change and restart the previous system generation. \
+             You can re-apply the change later from the Updates page.",
+        )
+        .build();
+    dialog.add_button("Cancel", gtk4::ResponseType::Cancel);
+    dialog.add_button("Go back", gtk4::ResponseType::Accept);
+    dialog.set_default_response(gtk4::ResponseType::Cancel);
+    dialog.connect_response(move |dialog, response| {
+        dialog.close();
+        if response != gtk4::ResponseType::Accept {
+            return;
+        }
+        let view = updates::view_for(*ui.step.borrow(), activation::can_activate());
+        if view.primary_action != updates::PrimaryAction::Rollback || !view.primary_enabled {
+            return;
+        }
+        if ui.transition(TxEvent::Rollback).is_none() {
+            return;
+        }
+        ui.results_label.set_text("Restoring the previous system…");
+        ui.render();
+        start_activation(
+            ui.clone(),
+            activation::ActivateAction::Rollback,
+            desired.borrow().clone(),
+            600,
+        );
+    });
+    dialog.present();
+}
+
+/// Run activation or rollback off the GTK thread and handle completion on it.
+fn start_activation(
+    ui: TxUi,
+    action: activation::ActivateAction,
+    doc: DesiredDoc,
+    timeout_secs: u64,
+) {
+    let (tx, rx) = std::sync::mpsc::channel::<ActivateResult>();
+    std::thread::spawn(move || {
+        let result =
+            activation::activate(action, &doc, std::time::Duration::from_secs(timeout_secs));
+        let _ = tx.send(ActivateResult { action, result });
+    });
+
+    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+        match rx.try_recv() {
+            Ok(result) => {
+                handle_activate_result(result, &ui);
+                glib::ControlFlow::Break
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                handle_activate_result(
+                    ActivateResult {
+                        action,
+                        result: activation::ActivateResult {
+                            ok: false,
+                            note: "The operation ended before a result was received.".into(),
+                            log: "activation worker disconnected before reporting its result"
+                                .into(),
+                        },
+                    },
+                    &ui,
+                );
+                glib::ControlFlow::Break
+            }
+        }
     });
 }
 
-/// Restore the Apply button to its original wiring (for a future Prepare cycle).
-fn restore_apply_wiring(
-    apply_btn: &gtk4::Button,
-    build_btn: &gtk4::Button,
-    _ctx: ActivateContext<'_>,
-) {
-    // The Apply button will be re-enabled and rewired in the next Prepare cycle
-    // via render_prepare_result. We just need to ensure it's not in rollback mode.
-    // The rollback handler checks `in_rollback_mode` flag which is local to
-    // the rewire_apply_for_rollback closure. After rollback, we set it to
-    // false, so the rollback handler becomes a no-op. The original Switch
-    // handler will fire on next click, but only if the button is sensitive.
-    // The button is only made sensitive in render_prepare_result when in
-    // BuildCheck with green candidate. So the Switch handler will correctly
-    // fire Switch. This works!
-    let _ = _ctx; // silence unused warning
-    apply_btn.set_sensitive(false);
-    apply_btn.set_label("Apply changes");
-    apply_btn.set_tooltip_text(Some(
-        "Activation requires NIX_PILOT_ALLOW_SWITCH=1 and the nix-pilot-apply helper installed (nixos-module).",
-    ));
-    build_btn.set_sensitive(true);
+/// Apply operation results through the transaction reducer on the GTK thread.
+fn handle_activate_result(ar: ActivateResult, ui: &TxUi) {
+    let event = match (ar.action, ar.result.ok) {
+        (activation::ActivateAction::Switch, true) => TxEvent::ApplyOk,
+        (activation::ActivateAction::Switch, false) => TxEvent::ApplyFailed,
+        (activation::ActivateAction::Rollback, true) => TxEvent::RollbackOk,
+        (activation::ActivateAction::Rollback, false) => TxEvent::RollbackFailed,
+    };
+    if ui.transition(event).is_none() {
+        ui.results_label
+            .set_text("The operation result did not match the current transaction.");
+        ui.render();
+        return;
+    }
+
+    while let Some(child) = ui.results_list.first_child() {
+        ui.results_list.remove(&child);
+    }
+    if !ar.result.log.is_empty() {
+        append_log_tail(&ui.results_list, &ar.result.log);
+    }
+    let note = if ar.action == activation::ActivateAction::Rollback && !ar.result.ok {
+        format!("Rollback failed: {}", ar.result.note)
+    } else {
+        ar.result.note
+    };
+    ui.results_label.set_text(&note);
+    ui.render();
 }
 
 #[cfg(test)]

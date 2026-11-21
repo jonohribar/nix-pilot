@@ -5,46 +5,66 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
+use crate::desired_state::{DesiredDoc, PackageScope};
 use crate::install;
 use crate::model::IndexEntry;
 use crate::store;
-use crate::store::{ChangeQueue, PendingChange};
 use crate::ui::widgets::{esc, meta_row};
 
 /// Availability and queue state shown by the detail card.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum InstallState {
+    /// No availability check has completed for the current entry.
     Idle,
+    /// The package availability probe is running.
     Checking,
+    /// The package can be added to the desired state.
     Available,
+    /// The package is unavailable or could not be confirmed.
     Unavailable,
+    /// The package is already selected in the currently shown scope.
     Added,
 }
 
 /// Detail/install page. GTK objects have interior mutability, so an Rc is
 /// enough to share it across activation closures while populate() takes &self.
 pub struct DetailUi {
+    /// Selected package's display name.
     pub title: gtk4::Label,
+    /// Secondary package identity and classification text.
     pub sub: gtk4::Label,
+    /// Optional package description.
     pub desc: gtk4::Label,
+    /// Chooses between per-account and system-wide install intent.
     pub scope: gtk4::Switch,
     /// The system-wide scope toggle row (hidden when install is unavailable).
     pub scope_row: gtk4::Box,
     /// The card holding the install button + scope toggle.
     pub install_card: gtk4::Box,
+    /// Container for package metadata rows.
     pub meta: gtk4::Box,
+    /// Opens the selected package's upstream project page.
     pub home: gtk4::Button,
+    /// Root widget for the detail page.
     pub page: gtk4::Box,
+    /// Adds or removes the selected package from desired state.
     pub btn_install: gtk4::Button,
+    /// Plain-language availability or selection status.
     pub status: gtk4::Label,
+    /// Collapsible area for technical check output.
     pub expander: gtk4::Expander,
+    /// Technical output from an unsuccessful availability check.
     pub tech: gtk4::Label,
+    /// Upstream URL associated with the current entry, if any.
     pub home_url: Rc<RefCell<Option<String>>>,
+    /// Availability and queue state for the currently selected entry.
     pub state: Rc<RefCell<InstallState>>,
+    /// Attribute currently displayed; used to discard stale async check results.
     pub current_attr: Rc<RefCell<Option<String>>>,
 }
 
 impl DetailUi {
+    /// Build an empty detail page using `install_hint` as guidance beside the action.
     pub fn new(install_hint: &str) -> DetailUi {
         let page = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
         page.set_margin_start(42);
@@ -230,7 +250,7 @@ impl DetailUi {
             self.home.set_tooltip_text(None);
         }
 
-        // install card reset (the queue re-syncs this via sync_added after).
+        // install card reset (the desired document re-syncs this via sync_added after).
         // Known-unavailable entries (linux_ok=false from the catalogue) are a
         // first-class state (architecture.md): the install action is not
         // offered, never an enabled CTA beside a "cannot be installed" note.
@@ -253,12 +273,31 @@ impl DetailUi {
         self.expander.set_expanded(false);
     }
 
-    /// Reflect that the current entry is already queued, if it is.
-    pub fn sync_added(&self, queued: bool) {
-        if queued {
+    /// Reflect selection in the currently chosen scope. If this package is
+    /// selected only in the other scope, keep it ready to add here as well.
+    pub fn sync_added(&self, desired: &DesiredDoc, account: &str) {
+        let Some(attr) = self.current_attr.borrow().clone() else {
+            return;
+        };
+        let scope = if self.scope.is_active() {
+            PackageScope::System
+        } else {
+            PackageScope::User
+        };
+        let selected_here = desired
+            .package_intents_for(account)
+            .iter()
+            .any(|intent| intent.attr == attr && intent.scope == scope);
+        let selected_elsewhere = desired.contains_package_for(account, &attr);
+
+        if selected_here {
             *self.state.borrow_mut() = InstallState::Added;
             self.btn_install.set_label("Remove from changes");
             self.status.set_text(ADDED_TEXT);
+        } else if selected_elsewhere || *self.state.borrow() == InstallState::Added {
+            *self.state.borrow_mut() = InstallState::Available;
+            self.btn_install.set_label("Add to ready-to-change list");
+            self.status.set_text("Ready to add for the selected scope.");
         }
     }
 }
@@ -272,6 +311,8 @@ fn start_availability_check(
     nix_path: std::path::PathBuf,
     attr: String,
 ) {
+    // Evaluate off the GTK thread; the main-loop poller updates widgets and
+    // rejects the result if navigation has since selected another entry.
     *detail.state.borrow_mut() = InstallState::Checking;
     button.set_sensitive(false);
     button.set_label("Checking…");
@@ -354,12 +395,13 @@ fn start_availability_check(
     });
 }
 
-/// Connect the install button (availability check + queue) and home-page button.
-/// `on_change` runs whenever the queue changes so the shell can
+/// Connect the install button (availability check + desired state) and home-page button.
+/// `on_change` runs whenever package intent changes so the shell can
 /// refresh its header count. Nothing here mutates the system.
 pub fn wire(
     d: &Rc<DetailUi>,
-    queue: &Rc<RefCell<ChangeQueue>>,
+    desired: &Rc<RefCell<DesiredDoc>>,
+    account: &str,
     nix: &Option<std::path::PathBuf>,
     home_win: &gtk4::ApplicationWindow,
     on_change: Rc<dyn Fn()>,
@@ -369,7 +411,14 @@ pub fn wire(
     let home_url = d.home_url.clone();
     let home_win = home_win.clone();
     let btn_install = d.btn_install.clone();
-    let queue_click = queue.clone();
+    let desired_click = desired.clone();
+    let account = account.to_string();
+    let scope_detail = d.clone();
+    let scope_desired = desired.clone();
+    let scope_account = account.clone();
+    d.scope.connect_active_notify(move |_| {
+        scope_detail.sync_added(&scope_desired.borrow(), &scope_account);
+    });
     let nix_click = nix.clone();
     btn_install.connect_clicked(move |btn| {
         let attr = match d.current_attr.borrow().clone() {
@@ -384,24 +433,27 @@ pub fn wire(
         match state {
             InstallState::Checking => {}
             InstallState::Added => {
-                queue_click.borrow_mut().remove(&attr);
-                *d.state.borrow_mut() = InstallState::Idle;
-                btn.set_label("Install for me");
-                d.status.set_text("");
-                d.expander.set_visible(false);
+                let scope = if d.scope.is_active() {
+                    PackageScope::System
+                } else {
+                    PackageScope::User
+                };
+                desired_click
+                    .borrow_mut()
+                    .remove_package(&account, &attr, scope);
+                d.sync_added(&desired_click.borrow(), &account);
                 on_change();
             }
             InstallState::Available => {
-                let system_wide = d.scope.is_active();
-                let name = d.title.text().to_string();
-                queue_click.borrow_mut().add(PendingChange {
-                    attr: attr.clone(),
-                    name,
-                    system_wide,
-                });
-                *d.state.borrow_mut() = InstallState::Added;
-                btn.set_label("Remove from changes");
-                d.status.set_text(ADDED_TEXT);
+                let scope = if d.scope.is_active() {
+                    PackageScope::System
+                } else {
+                    PackageScope::User
+                };
+                desired_click
+                    .borrow_mut()
+                    .add_package(&account, attr.clone(), scope);
+                d.sync_added(&desired_click.borrow(), &account);
                 on_change();
             }
             InstallState::Idle | InstallState::Unavailable => {

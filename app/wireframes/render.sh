@@ -15,6 +15,8 @@ mkdir -p build
 BIN="$(cd .. && pwd)/target/debug/proto"
 CSS="$(pwd)/style.css"
 OUT="$(pwd)"
+TEST_CONFIG="$(mktemp -d)"
+trap 'rm -rf "$TEST_CONFIG"' EXIT
 
 # compile every page blueprint
 for blp in page-*.blp; do
@@ -46,7 +48,7 @@ for st in "${targets[@]}"; do
     extra=""
     [[ "${STATES[$st]}" != "$name" ]] && extra="${STATES[$st]#* }"
     echo "== $st"
-    GSK_RENDERER=cairo GDK_BACKEND=x11 xvfb-run -a -s "-screen 0 1400x960x24" bash -c "
+    XDG_CONFIG_HOME='$TEST_CONFIG' GSK_RENDERER=cairo GDK_BACKEND=x11 xvfb-run -a -s "-screen 0 1400x960x24" bash -c "
         openbox >/dev/null 2>&1 &
         sleep 1
         WIREFRAME_BUILD='$OUT/build' WIREFRAME_CSS='$CSS' '$BIN' --page $name $extra &

@@ -4,7 +4,7 @@
 
 use std::process::{Command, Stdio};
 
-use crate::apply::discover_nixos_sources;
+use crate::config_source;
 
 /// The result of evaluating a NixOS option from the live configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,9 +109,14 @@ fn unescape_nix_string(s: &str) -> String {
 
 /// Read a single NixOS option value from the live system configuration.
 ///
-/// This is a pure read operation: it runs `nix-instantiate --eval --strict`
+/// This is a read-only operation: it runs `nix-instantiate --eval --strict`
 /// on an expression that imports the live configuration and extracts the
 /// requested option. It never writes, edits, or builds anything.
+///
+/// # Errors
+/// Returns a typed error when the option path is malformed, the live
+/// configuration or evaluator is unavailable, the option is absent, or
+/// evaluation fails.
 pub fn read_config_value(option_path: &str) -> Result<ConfigValue, ConfigValueError> {
     if option_path.is_empty() {
         return Err(ConfigValueError::InvalidOptionPath(
@@ -130,8 +135,8 @@ pub fn read_config_value(option_path: &str) -> Result<ConfigValue, ConfigValueEr
     }
 
     // Discover the live NixOS configuration
-    let (config_path, _) = discover_nixos_sources();
-    let config_path = config_path.ok_or(ConfigValueError::NoLiveConfig)?;
+    let sources = config_source::discover().map_err(|_| ConfigValueError::NoLiveConfig)?;
+    let config_path = sources.configuration;
 
     // Find nix-instantiate
     let nix_instantiate = which::which("nix-instantiate")
@@ -167,7 +172,7 @@ pub fn read_config_value(option_path: &str) -> Result<ConfigValue, ConfigValueEr
 /// Check if NixOS config reading is available (non-blocking heuristic).
 /// Returns true if we're on a NixOS system with nix-instantiate available.
 pub fn is_available() -> bool {
-    discover_nixos_sources().0.is_some() && which::which("nix-instantiate").is_ok()
+    config_source::discover().is_ok() && which::which("nix-instantiate").is_ok()
 }
 
 /// Decide whether an eval failure means the option no longer exists (removed

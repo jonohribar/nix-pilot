@@ -15,7 +15,9 @@ use crate::model;
 /// Where the index should come from.
 #[derive(Debug, Clone)]
 pub enum Source {
+    /// Read index bytes from a local file.
     Local(PathBuf),
+    /// Fetch fresh index bytes from this HTTP(S) URL.
     Remote(String),
 }
 
@@ -62,6 +64,13 @@ fn cache_path() -> PathBuf {
 
 /// Load the index bytes for the given source, verifying the `.sha256`
 /// sidecar when one exists.
+///
+/// Remote bytes are fetched on each call; a local cache copy is best-effort
+/// only and is not used as a fallback if the fetch fails.
+///
+/// # Errors
+/// Returns a plain-language error for read/download failures or invalid
+/// checksums.
 pub fn load_raw(source: &Source) -> Result<Vec<u8>, String> {
     match source {
         Source::Local(path) => {
@@ -144,7 +153,11 @@ fn sha256_hex(raw: &[u8]) -> String {
     text.split_whitespace().next().unwrap_or("").to_string()
 }
 
-/// Convenience: parse the loaded bytes into entries, typed for the app.
+/// Load and deserialize catalogue entries from an optional source.
+///
+/// # Errors
+/// Returns an error when no source was resolved, loading or checksum
+/// verification fails, or the index is not valid catalogue JSON.
 pub fn load_entries(source: Option<&Source>) -> Result<Vec<model::IndexEntry>, String> {
     let Some(source) = source else {
         return Err("catalogue index not found — pass a path, set NIX_PILOT_CATALOGUE, or run from the repo root".into());
