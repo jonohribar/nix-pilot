@@ -9,19 +9,28 @@ TEST_HOME="$(mktemp -d)"
 export XDG_DATA_HOME="$TEST_HOME/data"
 export XDG_CONFIG_HOME="$TEST_HOME/config"
 export GDK_BACKEND=x11
-# A headless run cannot reach the host accessibility bus, so GTK logs a
-# non-fatal "connection refused" from its accessibility thread; the window
-# still appears and the check only asserts on the window.
+# A fresh session bus gives this process its own primary GtkApplication
+# instance. Without it the new instance either hands off to an already-running
+# nix-pilot and exits 0 before ever running `activate` (no window here), or has
+# no bus to register on and never activates. A headless run cannot reach the
+# host accessibility bus, so GTK logs a non-fatal "connection refused"; the
+# window still appears and the check only asserts on the window.
 mkdir -p "$XDG_DATA_HOME" "$XDG_CONFIG_HOME"
 trap 'rm -rf "$TEST_HOME"' EXIT
 
-xvfb-run -a bash -c '
+# Bounded end to end: a stall is a failure (timeout rc 124), never a hang.
+timeout 60 dbus-run-session -- xvfb-run -a bash -c '
 	set -euo pipefail
-	./target/debug/nix-pilot-app &
+	# Do not let the backgrounded app inherit this shell's stdout: during its
+	# slow shutdown it holds the pipe open, so the xvfb-run/dbus-run-session
+	# teardown never closes and the test hangs.
+	./target/debug/nix-pilot-app >/dev/null 2>&1 &
 	app_pid=$!
+	# The windowed app does not exit promptly on SIGTERM under this env, so
+	# never `wait` on it here: kill it and return immediately, or the EXIT trap
+	# (and this whole test) would block forever.
 	cleanup() {
 		kill "$app_pid" 2>/dev/null || true
-		wait "$app_pid" 2>/dev/null || true
 	}
 	trap cleanup EXIT
 
