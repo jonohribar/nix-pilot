@@ -475,14 +475,18 @@ pub fn run(
         &global.entry,
     );
 
-    // Dev/test deep-link: NIX_PILOT_GO=settings opens the first settings
-    // category (used by screenshot and AT-SPI drives; core keeps the default).
-    if std::env::var("NIX_PILOT_GO").as_deref() == Ok("settings") {
-        let first = crate::settings::SETTINGS_CATEGORIES
-            .first()
-            .map(|t| t.2)
-            .unwrap_or("system");
-        select_category(first);
+    // Dev/test deep-link: NIX_PILOT_GO=settings|updates opens a non-default
+    // page (used by screenshot and AT-SPI drives; core keeps the default).
+    match std::env::var("NIX_PILOT_GO").as_deref() {
+        Ok("settings") => {
+            let first = crate::settings::SETTINGS_CATEGORIES
+                .first()
+                .map(|t| t.2)
+                .unwrap_or("system");
+            select_category(first);
+        }
+        Ok("updates") => stack.set_visible_child_name("updates"),
+        _ => {}
     }
     let body = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     body.append(&sidebar);

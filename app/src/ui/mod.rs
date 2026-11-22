@@ -4,6 +4,7 @@
 //! user actions into store/updates/install actions and renders their outcomes.
 pub mod detail;
 mod global_search;
+mod setting_card;
 pub mod settings_page;
 mod store_search;
 pub mod updates_page;

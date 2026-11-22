@@ -7,9 +7,10 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use crate::desired_state::{DesiredDoc, PackageIntent, PackageScope, SettingValue};
+use crate::desired_state::{DesiredDoc, PackageIntent, PackageScope};
 use crate::model::PackageNames;
 use crate::system::{activation, build, generation, storage};
+use crate::ui::setting_card;
 use crate::updates::{self, TxEvent, TxStep};
 
 /// How many recent generations the System-versions card shows by default
@@ -67,9 +68,9 @@ pub struct UpdatesPage {
     step_label: gtk4::Label,
     step: Rc<RefCell<TxStep>>,
     prepared_doc: Rc<RefCell<Option<DesiredDoc>>>,
-    /// Set-and-forget upkeep controls (category "updates").
-    auto_bools: Vec<(String, gtk4::Switch)>,
-    auto_strs: Vec<(String, gtk4::Entry)>,
+    /// Set-and-forget upkeep cards (category "updates"), rendered with the
+    /// same unified controls as the Settings page.
+    auto_cards: Vec<setting_card::SettingCard>,
     /// Storage upkeep: read-only usage readout + run-now buttons.
     storage_usage: gtk4::Label,
     storage_result: gtk4::Label,
@@ -410,33 +411,14 @@ impl UpdatesPage {
         automatic_blurb.add_css_class("dim-label");
         let automatic_box = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
         automatic_box.set_margin_top(4);
-        let mut auto_bools = Vec::new();
-        let mut auto_strs = Vec::new();
+        let mut auto_cards = Vec::new();
         for spec in crate::settings::SPECS
             .iter()
             .filter(|s| s.category == "updates")
         {
-            let label = gtk4::Label::new(Some(spec.label));
-            label.set_xalign(0.0);
-            let blurb = gtk4::Label::new(Some(spec.blurb));
-            blurb.set_xalign(0.0);
-            blurb.set_wrap(true);
-            blurb.add_css_class("dim-label");
-            if spec.kind == crate::settings::ValueKind::Boolean {
-                let sw = gtk4::Switch::new();
-                sw.set_halign(gtk4::Align::Start);
-                automatic_box.append(&label);
-                automatic_box.append(&sw);
-                automatic_box.append(&blurb);
-                auto_bools.push((spec.key.to_string(), sw));
-            } else {
-                let entry = gtk4::Entry::new();
-                entry.set_placeholder_text(Some("(system default)"));
-                automatic_box.append(&label);
-                automatic_box.append(&entry);
-                automatic_box.append(&blurb);
-                auto_strs.push((spec.key.to_string(), entry));
-            }
+            let card = setting_card::SettingCard::new(spec);
+            automatic_box.append(card.card());
+            auto_cards.push(card);
         }
         automatic_card.append(&automatic_heading);
         automatic_card.append(&automatic_blurb);
@@ -572,8 +554,7 @@ impl UpdatesPage {
             step_label,
             step,
             prepared_doc: Rc::new(RefCell::new(None)),
-            auto_bools,
-            auto_strs,
+            auto_cards,
             storage_usage,
             storage_result,
             estimate_btn,
@@ -663,6 +644,7 @@ impl UpdatesPage {
 
     /// Reset then repopulate the queued-change list (call when shown).
     pub fn refresh(&self, desired: &Rc<RefCell<DesiredDoc>>, account: &str) {
+        setting_card::refresh_live_values(&self.auto_cards, desired);
         self.refresh_storage_usage();
         self.storage_result.set_text("");
         self.refresh_generations();
@@ -732,52 +714,10 @@ impl UpdatesPage {
         nix: &Option<std::path::PathBuf>,
         save: Rc<dyn Fn()>,
     ) {
-        // Automatic upkeep controls: load, then persist on change.
-        {
-            let doc = desired.borrow();
-            for (key, sw) in &self.auto_bools {
-                sw.set_active(matches!(
-                    doc.settings.get(key),
-                    Some(SettingValue::Bool(true))
-                ));
-            }
-            for (key, entry) in &self.auto_strs {
-                if let Some(SettingValue::Str(s)) = doc.settings.get(key) {
-                    entry.set_text(s);
-                }
-            }
-        }
-        for (key, sw) in self.auto_bools.clone() {
-            let desired = desired.clone();
-            let save = save.clone();
-            sw.connect_state_set(move |_, active| {
-                if active {
-                    desired
-                        .borrow_mut()
-                        .settings
-                        .insert(key.clone(), SettingValue::Bool(true));
-                } else {
-                    desired.borrow_mut().settings.remove(&key);
-                }
-                save();
-                glib::Propagation::Proceed
-            });
-        }
-        for (key, entry) in self.auto_strs.clone() {
-            let desired = desired.clone();
-            let save = save.clone();
-            entry.connect_changed(move |entry| {
-                let text = entry.text().to_string();
-                if text.trim().is_empty() {
-                    desired.borrow_mut().settings.remove(&key);
-                } else {
-                    desired
-                        .borrow_mut()
-                        .settings
-                        .insert(key.clone(), SettingValue::Str(text));
-                }
-                save();
-            });
+        // Automatic upkeep cards: unified controls, wired like the Settings
+        // page (mirror-reality preselection, always-visible Reset, validation).
+        for card in &self.auto_cards {
+            card.wire(desired, save.clone());
         }
 
         // Storage upkeep: the run-now actions route through the sanctioned
