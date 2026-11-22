@@ -97,13 +97,16 @@ impl NavSelection {
 
 /// One sidebar nav row, built uniformly so every entry shares the same
 /// formatting and a single style change applies to them all. `indented`
-/// marks the settings category sub-rows; `marking` drives the selected state.
+/// marks the settings category sub-rows; `marking` drives the selected
+/// state. `trailing` adds an end-aligned dim label (the pending-change
+/// count on the Updates row) and returns it so the caller can refresh it.
 fn nav_item(
     label: &str,
     indented: bool,
+    trailing: Option<&str>,
     marking: &NavSelection,
     on_click: impl Fn(&gtk4::Button) + 'static,
-) -> gtk4::Button {
+) -> (gtk4::Button, Option<gtk4::Label>) {
     let b = gtk4::Button::new();
     b.add_css_class("flat");
     b.add_css_class("nav-item");
@@ -115,14 +118,25 @@ fn nav_item(
     let l = gtk4::Label::new(Some(label));
     l.set_halign(gtk4::Align::Start);
     l.set_xalign(0.0);
+    l.set_hexpand(true);
     row.append(&l);
+    let trailing_label = trailing.map(|text| {
+        let t = gtk4::Label::new(Some(text));
+        t.add_css_class("dim-label");
+        t.set_margin_start(6);
+        t.set_halign(gtk4::Align::End);
+        t.set_xalign(1.0);
+        t.set_tooltip_text(Some("Changes waiting to be applied"));
+        row.append(&t);
+        t
+    });
     b.set_child(Some(&row));
     let marking = marking.clone();
     b.connect_clicked(move |b| {
         marking.mark(b);
         on_click(b);
     });
-    b
+    (b, trailing_label)
 }
 
 struct HeaderWidgets {
@@ -224,16 +238,19 @@ fn update_pending_button(
     package_names: &PackageNames,
     button: &gtk4::Button,
 ) {
-    let intents = document.package_intents_for(account);
-    if intents.is_empty() {
+    // Packages and settings share one pending count (mirror-reality: the
+    // stored settings map holds exactly the user's changes).
+    let total = document.pending_change_count(account);
+    if total == 0 {
         button.set_visible(false);
         button.set_label("");
         return;
     }
 
-    let suffix = if intents.len() == 1 { "" } else { "s" };
-    button.set_label(&format!("{} change{suffix} ready to apply", intents.len()));
-    let items = intents
+    let suffix = if total == 1 { "" } else { "s" };
+    button.set_label(&format!("{total} change{suffix} ready to apply"));
+    let mut items: Vec<String> = document
+        .package_intents_for(account)
         .iter()
         .map(|intent| {
             format!(
@@ -245,7 +262,14 @@ fn update_pending_button(
                 }
             )
         })
-        .collect::<Vec<_>>();
+        .collect();
+    let unlisted_settings = document.settings.len();
+    if unlisted_settings > 0 {
+        let s = if unlisted_settings == 1 { "" } else { "s" };
+        items.push(format!(
+            "- {unlisted_settings} setting change{s} in Settings"
+        ));
+    }
     button.set_tooltip_text(Some(&items.join("\n")));
     button.set_visible(true);
 }
@@ -267,9 +291,18 @@ fn wire_pending_button(
     });
 }
 
-/// The sidebar box plus a shared category-open callback (used by both the
-/// sidebar and global search so the highlighted row stays in sync).
-type Sidebar = (gtk4::Box, Rc<dyn Fn(&str)>);
+/// Late-bound handle to the sidebar's pending-count setter, filled once the
+/// sidebar exists so the count can be refreshed from before-build closures.
+type PendingCountSetter = std::rc::Rc<std::cell::RefCell<Option<Rc<dyn Fn(usize)>>>>;
+
+/// What `build_sidebar` returns: the sidebar box, a shared category-open
+/// callback (used by both the sidebar and global search so the highlighted
+/// row stays in sync), and a setter for the Updates row's pending-count badge.
+struct Sidebar {
+    sidebar: gtk4::Box,
+    select_category: Rc<dyn Fn(&str)>,
+    set_pending_count: Rc<dyn Fn(usize)>,
+}
 
 #[allow(clippy::too_many_arguments)]
 fn build_sidebar(
@@ -301,7 +334,7 @@ fn build_sidebar(
     // deep-link highlights one item in lockstep.
     let selection = NavSelection::new();
     let stack_for_packages = stack.clone();
-    let packages = nav_item("Packages", false, &selection, move |_| {
+    let (packages, _) = nav_item("Packages", false, None, &selection, move |_| {
         stack_for_packages.set_visible_child_name("list");
     });
     selection.mark(&packages);
@@ -324,7 +357,7 @@ fn build_sidebar(
         let stack = stack.clone();
         let settings = settings.clone();
         let child_id = child.to_string();
-        let button = nav_item(label, true, &selection, move |_| {
+        let (button, _) = nav_item(label, true, None, &selection, move |_| {
             settings.show_category(&child_id);
             stack.set_visible_child_name("settings");
         });
@@ -337,10 +370,26 @@ fn build_sidebar(
     let updates_account = account.to_string();
     let refresh_updates = Rc::new(move || updates.refresh(&updates_desired, &updates_account));
     let stack_for_updates = stack.clone();
-    sidebar.append(&nav_item("Updates", false, &selection, move |_| {
-        refresh_updates();
-        stack_for_updates.set_visible_child_name("updates");
-    }));
+    let (updates_button, updates_count) =
+        nav_item("Updates", false, Some(""), &selection, move |_| {
+            refresh_updates();
+            stack_for_updates.set_visible_child_name("updates");
+        });
+    sidebar.append(&updates_button);
+    // The always-visible pending badge on the Updates row: shows “· N” while
+    // changes wait, hidden at zero so “no changes” reads as done.
+    let set_pending_count: Rc<dyn Fn(usize)> = {
+        let count_label = updates_count.expect("the Updates row carries a pending-count badge");
+        Rc::new(move |n| {
+            if n > 0 {
+                count_label.set_text(&format!("· {n}"));
+                count_label.set_visible(true);
+            } else {
+                count_label.set_text("");
+                count_label.set_visible(false);
+            }
+        })
+    };
 
     // Your system: refresh the recipe list each time it is shown so removals
     // made elsewhere (Store, Settings) show up here.
@@ -349,10 +398,11 @@ fn build_sidebar(
     let on_change = on_package_intent_change.clone();
     let refresh_your_system = Rc::new(move || your_system.refresh(&desired, &on_change));
     let stack_for_system = stack.clone();
-    sidebar.append(&nav_item("Your system", false, &selection, move |_| {
+    let (your_system_button, _) = nav_item("Your system", false, None, &selection, move |_| {
         refresh_your_system();
         stack_for_system.set_visible_child_name("your-system");
-    }));
+    });
+    sidebar.append(&your_system_button);
 
     // Shared entry point for opening a settings category from anywhere (nav
     // or search), keeping the highlighted row in sync.
@@ -368,7 +418,11 @@ fn build_sidebar(
             stack.set_visible_child_name("settings");
         })
     };
-    (sidebar, select_category)
+    Sidebar {
+        sidebar,
+        select_category,
+        set_pending_count,
+    }
 }
 
 /// Build and present the window for a loaded catalogue.
@@ -512,21 +566,27 @@ pub fn run(
     let persist_desired_state =
         wire_desired_state_persistence(&desired, persistence_enabled, &catalogue.state_notice);
     persist_desired_state();
-    updates.wire(&desired, &account, &nix, persist_desired_state.clone());
-    settings.wire(&desired, persist_desired_state.clone());
 
-    // Header count of package changes, refreshed on every edit.
+    // One shared pending count drives the header button and the sidebar badge;
+    // the sidebar's count setter is filled in once the sidebar exists.
     let pending = header.pending.clone();
     let desired_for_label = desired.clone();
     let account_for_label = account.clone();
     let package_names_for_label = package_names.clone();
+    let pending_setter: PendingCountSetter = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let pending_setter_handle = pending_setter.clone();
     let refresh_pending = Rc::new(move || {
+        let document = desired_for_label.borrow();
+        let count = document.pending_change_count(&account_for_label);
         update_pending_button(
-            &desired_for_label.borrow(),
+            &document,
             &account_for_label,
             &package_names_for_label,
             &pending,
         );
+        if let Some(set_count) = pending_setter_handle.borrow().as_ref() {
+            set_count(count);
+        }
     });
     let on_package_intent_change: Rc<dyn Fn()> = {
         let refresh_pending = refresh_pending.clone();
@@ -537,6 +597,18 @@ pub fn run(
         })
     };
     let on_package_intent_change_for_sidebar = on_package_intent_change.clone();
+    updates.wire(&desired, &account, &nix, persist_desired_state.clone());
+    // Settings edits refresh the pending counts too, so the header and sidebar
+    // badge stay in step with settings changes, not just package changes.
+    let settings_save = {
+        let persist_desired_state = persist_desired_state.clone();
+        let refresh_pending = refresh_pending.clone();
+        Rc::new(move || {
+            persist_desired_state();
+            refresh_pending();
+        })
+    };
+    settings.wire(&desired, settings_save);
     detail::wire(
         &detail,
         &desired,
@@ -559,7 +631,7 @@ pub fn run(
     stack.add_named(&scrolled_page(&your_system.page), Some("your-system"));
     stack.set_visible_child_name("list");
 
-    let (sidebar, select_category) = build_sidebar(
+    let sidebar = build_sidebar(
         &stack,
         &settings,
         &updates,
@@ -569,6 +641,8 @@ pub fn run(
         &on_package_intent_change_for_sidebar,
         &global.entry,
     );
+    *pending_setter.borrow_mut() = Some(sidebar.set_pending_count.clone());
+    refresh_pending();
 
     let ctx = ShellContext {
         window: window.clone(),
@@ -583,7 +657,7 @@ pub fn run(
         settings,
         your_system,
         corpus,
-        select_category,
+        select_category: sidebar.select_category.clone(),
         on_package_intent_change,
     };
 
@@ -591,7 +665,7 @@ pub fn run(
     wire_dev_hooks(&ctx);
 
     let body = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-    body.append(&sidebar);
+    body.append(&sidebar.sidebar);
     body.append(&stack);
     window.set_child(Some(&body));
 

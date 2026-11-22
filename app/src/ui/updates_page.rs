@@ -518,7 +518,7 @@ impl UpdatesPage {
         config_expander.set_child(Some(&config_scroll));
         page.append(&config_expander);
 
-        let build_btn = gtk4::Button::with_label("Prepare and build");
+        let build_btn = gtk4::Button::with_label("Check and build changes");
         let apply_btn = gtk4::Button::with_label("Apply changes");
         apply_btn.add_css_class("suggested-action");
         apply_btn.set_sensitive(false);
@@ -665,23 +665,34 @@ impl UpdatesPage {
                 self.results_list.remove(&child);
             }
         }
-        self.transaction_ui().render();
+        let queued = document.pending_change_count(account);
+        let ui = self.transaction_ui();
+        ui.render();
+        if *self.step.borrow() == TxStep::Ready && queued == 0 {
+            // Apply disabled at zero: with nothing queued neither action does
+            // anything, so both stay greyed until a change is stored.
+            ui.build_btn.set_sensitive(false);
+            ui.primary_btn.set_sensitive(false);
+        }
         // Desired-state-driven status: the Ready label must not claim changes
-        // are ready when none are.
+        // are ready when none are (packages + settings share the count).
         if *self.step.borrow() == TxStep::Ready {
-            let label = if intents.is_empty() {
-                "No changes waiting."
+            let label = if queued == 0 {
+                "No changes waiting.".to_string()
             } else {
-                let n = intents.len();
-                let suffix = if n == 1 { "" } else { "s" };
-                &format!("{n} change{suffix} ready — nothing has been applied yet")
+                let suffix = if queued == 1 { "" } else { "s" };
+                format!("{queued} change{suffix} ready — nothing has been applied yet")
             };
-            self.step_label.set_text(label);
+            self.step_label.set_text(&label);
         }
         if intents.is_empty() {
-            let l = gtk4::Label::new(Some(
-                "Nothing ready to change yet — add packages from the store.",
-            ));
+            let message = if queued == 0 {
+                "Nothing ready to change yet — add packages from the store, or \
+                 change a setting in Settings."
+            } else {
+                "No package changes — your stored settings apply with the next update."
+            };
+            let l = gtk4::Label::new(Some(message));
             l.set_xalign(0.0);
             l.add_css_class("dim-label");
             self.queue_list.append(&l);

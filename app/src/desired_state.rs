@@ -207,6 +207,14 @@ impl DesiredDoc {
             .collect()
     }
 
+    /// How many changes are queued for this account: each distinct package
+    /// intent plus each stored setting. One shared definition drives the
+    /// header button, the sidebar Updates row and the Updates-page Apply gate,
+    /// so the surfaces cannot disagree.
+    pub fn pending_change_count(&self, account: &str) -> usize {
+        self.system_packages().len() + self.packages_for(account).len() + self.settings.len()
+    }
+
     /// Whether this attribute is selected in either scope used by one
     /// running account: system-wide or that account's per-user set.
     pub fn contains_package_for(&self, account: &str, attr: &str) -> bool {
@@ -1063,6 +1071,27 @@ mod tests {
         assert!(document.packages_for("alice").is_empty());
         assert!(document.contains_package_for("alice", "firefox"));
         assert!(!document.remove_package("alice", "firefox", PackageScope::User));
+    }
+
+    #[test]
+    fn pending_change_count_spans_packages_and_settings() {
+        let mut document = DesiredDoc::current();
+        assert_eq!(document.pending_change_count("alice"), 0);
+        document.add_package("alice", "firefox".into(), PackageScope::System);
+        assert_eq!(document.pending_change_count("alice"), 1);
+        document.add_package("alice", "kitty".into(), PackageScope::User);
+        assert_eq!(document.pending_change_count("alice"), 2);
+        document
+            .settings
+            .insert("services.pipewire.enable".into(), SettingValue::Bool(true));
+        document.settings.insert(
+            "time.timeZone".into(),
+            SettingValue::Str("Europe/Berlin".into()),
+        );
+        assert_eq!(document.pending_change_count("alice"), 4);
+        // Another account's packages do not count for alice.
+        document.add_package("bob", "vim".into(), PackageScope::User);
+        assert_eq!(document.pending_change_count("alice"), 4);
     }
 
     #[test]

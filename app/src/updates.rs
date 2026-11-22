@@ -70,8 +70,8 @@ impl TxStep {
         use TxStep::*;
         match self {
             Ready => "Changes are ready — nothing has been applied yet",
-            Explaining => "Explaining the change…",
-            BuildCheck => "Prepared — the changes are built and checked",
+            Explaining => "Checking the changes…",
+            BuildCheck => "Checked and built — ready to apply",
             Applying => "Applying…",
             Done => "The change was applied",
             RollingBack => "Restoring the previous system…",
