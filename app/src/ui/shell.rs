@@ -37,22 +37,90 @@ fn scrolled_page(child: &impl IsA<gtk4::Widget>) -> gtk4::ScrolledWindow {
         .build()
 }
 
-/// A sidebar nav button that switches the stack and (for Updates) refreshes it.
-fn nav_button(
+/// Scoped styles for the sidebar nav, loaded once for the display. Scoped to
+/// `.np-sidebar` so the bespoke classes below do not fight libadwaita's hull
+/// and only touch the sidebar. The app otherwise loads no CSS.
+const NP_CSS: &str = "
+.np-sidebar .nav-item {
+  margin: 1px 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+.np-sidebar .nav-item.indented {
+  margin-left: 14px;
+}
+.np-sidebar .nav-item.active {
+  background-color: alpha(@accent_bg_color, 0.25);
+  color: @accent_color;
+  font-weight: 600;
+}
+.np-sidebar .nav-section {
+  margin: 12px 8px 2px 10px;
+}
+";
+
+fn install_np_css() {
+    let provider = gtk4::CssProvider::new();
+    provider.load_from_data(NP_CSS);
+    if let Some(display) = gtk4::gdk::Display::default() {
+        gtk4::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
+}
+
+/// The single source of truth for which sidebar row is selected. Every nav
+/// entry goes through NavSelection::mark, so a sidebar click and a
+/// global-search deep-link keep one row highlighted in lockstep.
+#[derive(Clone)]
+struct NavSelection {
+    active: std::rc::Rc<std::cell::RefCell<Option<gtk4::Button>>>,
+}
+
+impl NavSelection {
+    fn new() -> Self {
+        Self {
+            active: std::rc::Rc::new(std::cell::RefCell::new(None)),
+        }
+    }
+
+    fn mark(&self, button: &gtk4::Button) {
+        if let Some(prev) = self.active.borrow_mut().take() {
+            prev.remove_css_class("active");
+        }
+        *self.active.borrow_mut() = Some(button.clone());
+        button.add_css_class("active");
+    }
+}
+
+/// One sidebar nav row, built uniformly so every entry shares the same
+/// formatting and a single style change applies to them all. `indented`
+/// marks the settings category sub-rows; `marking` drives the selected state.
+fn nav_item(
     label: &str,
-    page: &'static str,
-    stack: &gtk4::Stack,
-    on_show: Option<Rc<dyn Fn()>>,
+    indented: bool,
+    marking: &NavSelection,
+    on_click: impl Fn(&gtk4::Button) + 'static,
 ) -> gtk4::Button {
-    let b = gtk4::Button::with_label(label);
+    let b = gtk4::Button::new();
     b.add_css_class("flat");
     b.add_css_class("nav-item");
-    let stack = stack.clone();
-    b.connect_clicked(move |_| {
-        if let Some(f) = on_show.as_ref() {
-            f();
-        }
-        stack.set_visible_child_name(page);
+    if indented {
+        b.add_css_class("indented");
+    }
+    b.set_halign(gtk4::Align::Fill);
+    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    let l = gtk4::Label::new(Some(label));
+    l.set_halign(gtk4::Align::Start);
+    l.set_xalign(0.0);
+    row.append(&l);
+    b.set_child(Some(&row));
+    let marking = marking.clone();
+    b.connect_clicked(move |b| {
+        marking.mark(b);
+        on_click(b);
     });
     b
 }
@@ -199,6 +267,10 @@ fn wire_pending_button(
     });
 }
 
+/// The sidebar box plus a shared category-open callback (used by both the
+/// sidebar and global search so the highlighted row stays in sync).
+type Sidebar = (gtk4::Box, Rc<dyn Fn(&str)>);
+
 #[allow(clippy::too_many_arguments)]
 fn build_sidebar(
     stack: &gtk4::Stack,
@@ -209,9 +281,10 @@ fn build_sidebar(
     account: &str,
     on_package_intent_change: &Rc<dyn Fn()>,
     global_search: &gtk4::SearchEntry,
-) -> gtk4::Box {
+) -> Sidebar {
     let sidebar = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     sidebar.set_width_request(240);
+    sidebar.add_css_class("np-sidebar");
     // The app-wide search sits atop the sidebar, above the surface nav; it
     // spans apps + settings, so it cannot live inside one surface.
     let search_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -223,52 +296,51 @@ fn build_sidebar(
     global_search.set_tooltip_text(Some("Searches packages and settings everywhere"));
     search_box.append(global_search);
     sidebar.append(&search_box);
-    sidebar.append(&nav_button("Packages", "list", stack, None));
+
+    // One selection drives every row: a sidebar click or a global-search
+    // deep-link highlights one item in lockstep.
+    let selection = NavSelection::new();
+    let stack_for_packages = stack.clone();
+    let packages = nav_item("Packages", false, &selection, move |_| {
+        stack_for_packages.set_visible_child_name("list");
+    });
+    selection.mark(&packages);
+    sidebar.append(&packages);
 
     // Settings is a two-column router: the category list always lives in the
     // sidebar (under a section header) and selects the category page shown on
     // the right, so there is no drill-in or hidden second level.
     let settings_head = gtk4::Label::new(Some("Settings"));
     settings_head.add_css_class("dim-label");
+    settings_head.add_css_class("nav-section");
     settings_head.set_xalign(0.0);
-    settings_head.set_margin_start(12);
-    settings_head.set_margin_top(10);
-    settings_head.set_margin_bottom(2);
     sidebar.append(&settings_head);
-    let active: std::rc::Rc<std::cell::RefCell<Option<gtk4::Button>>> =
-        std::rc::Rc::new(std::cell::RefCell::new(None));
+
+    // Category rows, keyed by child id so a global-search deep-link can mark
+    // the same row active that a sidebar click would.
+    let mut category_buttons: std::collections::BTreeMap<&'static str, gtk4::Button> =
+        std::collections::BTreeMap::new();
     for (label, _summary, child) in crate::settings::SETTINGS_CATEGORIES {
-        let btn = gtk4::Button::with_label(label);
-        btn.add_css_class("flat");
-        btn.add_css_class("nav-item");
-        btn.set_halign(gtk4::Align::Fill);
-        btn.set_margin_start(14);
         let stack = stack.clone();
         let settings = settings.clone();
-        let child = child.to_string();
-        let active = active.clone();
-        btn.connect_clicked(move |b| {
-            if let Some(prev) = active.borrow_mut().take() {
-                prev.remove_css_class("active");
-            }
-            *active.borrow_mut() = Some(b.clone());
-            b.add_css_class("active");
-            settings.show_category(&child);
+        let child_id = child.to_string();
+        let button = nav_item(label, true, &selection, move |_| {
+            settings.show_category(&child_id);
             stack.set_visible_child_name("settings");
         });
-        sidebar.append(&btn);
+        category_buttons.insert(child, button.clone());
+        sidebar.append(&button);
     }
 
     let updates = updates.clone();
     let updates_desired = desired.clone();
     let updates_account = account.to_string();
     let refresh_updates = Rc::new(move || updates.refresh(&updates_desired, &updates_account));
-    sidebar.append(&nav_button(
-        "Updates",
-        "updates",
-        stack,
-        Some(refresh_updates),
-    ));
+    let stack_for_updates = stack.clone();
+    sidebar.append(&nav_item("Updates", false, &selection, move |_| {
+        refresh_updates();
+        stack_for_updates.set_visible_child_name("updates");
+    }));
 
     // Your system: refresh the recipe list each time it is shown so removals
     // made elsewhere (Store, Settings) show up here.
@@ -276,13 +348,27 @@ fn build_sidebar(
     let desired = desired.clone();
     let on_change = on_package_intent_change.clone();
     let refresh_your_system = Rc::new(move || your_system.refresh(&desired, &on_change));
-    sidebar.append(&nav_button(
-        "Your system",
-        "your-system",
-        stack,
-        Some(refresh_your_system),
-    ));
-    sidebar
+    let stack_for_system = stack.clone();
+    sidebar.append(&nav_item("Your system", false, &selection, move |_| {
+        refresh_your_system();
+        stack_for_system.set_visible_child_name("your-system");
+    }));
+
+    // Shared entry point for opening a settings category from anywhere (nav
+    // or search), keeping the highlighted row in sync.
+    let select_category = {
+        let selection = selection.clone();
+        let settings = settings.clone();
+        let stack = stack.clone();
+        Rc::new(move |child_id: &str| {
+            if let Some(button) = category_buttons.get(child_id) {
+                selection.mark(button);
+            }
+            settings.show_category(child_id);
+            stack.set_visible_child_name("settings");
+        })
+    };
+    (sidebar, select_category)
 }
 
 /// Build and present the window for a loaded catalogue.
@@ -292,6 +378,7 @@ pub fn run(
     load_error: Option<String>,
     nix: Option<std::path::PathBuf>,
 ) {
+    install_np_css();
     let window = gtk4::ApplicationWindow::builder()
         .application(app)
         .title("nix-pilot")
@@ -368,17 +455,6 @@ pub fn run(
     stack.add_named(&scrolled_page(&your_system.page), Some("your-system"));
     stack.set_visible_child_name("list");
 
-    // Dev/test deep-link: NIX_PILOT_GO=settings opens the first settings
-    // category (used by screenshot and AT-SPI drives; core keeps the default).
-    if std::env::var("NIX_PILOT_GO").as_deref() == Ok("settings") {
-        let first = crate::settings::SETTINGS_CATEGORIES
-            .first()
-            .map(|t| t.2)
-            .unwrap_or("system");
-        settings.show_category(first);
-        stack.set_visible_child_name("settings");
-    }
-
     // Load current config values when Settings page becomes visible (lazy, non-blocking)
     let settings_for_load = settings.clone();
     let desired_for_values = desired.clone();
@@ -388,7 +464,7 @@ pub fn run(
         }
     });
 
-    let sidebar = build_sidebar(
+    let (sidebar, select_category) = build_sidebar(
         &stack,
         &settings,
         &updates,
@@ -398,6 +474,16 @@ pub fn run(
         &on_package_intent_change_for_sidebar,
         &global.entry,
     );
+
+    // Dev/test deep-link: NIX_PILOT_GO=settings opens the first settings
+    // category (used by screenshot and AT-SPI drives; core keeps the default).
+    if std::env::var("NIX_PILOT_GO").as_deref() == Ok("settings") {
+        let first = crate::settings::SETTINGS_CATEGORIES
+            .first()
+            .map(|t| t.2)
+            .unwrap_or("system");
+        select_category(first);
+    }
     let body = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     body.append(&sidebar);
     body.append(&stack);
@@ -451,8 +537,8 @@ pub fn run(
     let detail_for_global = detail.clone();
     let desired_for_global = desired.clone();
     let account_for_global = account.clone();
-    let settings_for_global = settings.clone();
     let stack_for_global = stack.clone();
+    let select_category_for_global = select_category.clone();
     let on_global_selection: Rc<dyn Fn(global_search::GlobalSelection)> =
         Rc::new(move |target| match target {
             global_search::GlobalSelection::Package(entry) => {
@@ -461,8 +547,7 @@ pub fn run(
                 stack_for_global.set_visible_child_name("detail");
             }
             global_search::GlobalSelection::Setting(spec) => {
-                settings_for_global.show_category(spec.category);
-                stack_for_global.set_visible_child_name("settings");
+                select_category_for_global(spec.category);
             }
         });
     global.wire(
