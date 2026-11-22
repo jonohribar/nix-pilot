@@ -16,6 +16,10 @@ pub enum ConfigValue {
     /// Any other Nix value (attrsets, lists, functions, null, etc.) —
     /// represented as the raw printed output for display purposes.
     Unparsed(String),
+    /// An open `nixpkgs.config.<subkey>` nobody set, so the system default
+    /// applies. Distinct from a missing/removed typed option, which is a
+    /// `NoSuchOption` error.
+    Unset,
 }
 
 /// Error when reading a config value.
@@ -32,6 +36,31 @@ pub enum ConfigValueError {
     NoSuchOption(String),
     /// The option path is invalid (empty or malformed).
     InvalidOptionPath(String),
+}
+
+/// Sentinel returned by the read expression for an unset open-config subkey.
+const UNSET: &str = "__nix_pilot_config_unset__";
+
+/// The read-only Nix expression for `option_path` against the live config,
+/// plus whether the path is the open `nixpkgs.config.*` attrset.
+///
+/// Typed options are read as `.config.<path>`. The open `nixpkgs.config.*`
+/// attrset has no declared sub-options, so an unset subkey is a missing
+/// attribute: read it through `or <sentinel>` to distinguish "unset (system
+/// default)" from the "option removed" error a typed option gives.
+fn build_read_expr(option_path: &str, config_path: &std::path::Path) -> (String, bool) {
+    let under_nixpkgs_config = option_path.starts_with("nixpkgs.config.");
+    let option_expr = if under_nixpkgs_config {
+        format!("{option_path} or \"{UNSET}\"")
+    } else {
+        option_path.to_string()
+    };
+    let expr = format!(
+        r#"(import <nixpkgs/nixos> {{ configuration = import {}; }}).config.{}"#,
+        config_path.display(),
+        option_expr
+    );
+    (expr, under_nixpkgs_config)
 }
 
 /// Parse the output of `nix-instantiate --eval --strict` into a ConfigValue.
@@ -144,13 +173,8 @@ pub fn read_config_value(option_path: &str) -> Result<ConfigValue, ConfigValueEr
         .filter(|p| p.exists())
         .ok_or(ConfigValueError::NoNixInstantiate)?;
 
-    // Build the Nix expression:
-    // (import <nixpkgs/nixos> { configuration = import <live-config>; }).config.<option>
-    let expr = format!(
-        r#"(import <nixpkgs/nixos> {{ configuration = import {}; }}).config.{}"#,
-        config_path.display(),
-        option_path
-    );
+    // Build the read-only Nix expression for the requested option.
+    let (expr, under_nixpkgs_config) = build_read_expr(option_path, &config_path);
 
     // Run nix-instantiate --eval --strict
     let output = Command::new(&nix_instantiate)
@@ -166,6 +190,9 @@ pub fn read_config_value(option_path: &str) -> Result<ConfigValue, ConfigValueEr
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    if under_nixpkgs_config && stdout.trim() == format!("\"{UNSET}\"") {
+        return Ok(ConfigValue::Unset);
+    }
     Ok(parse_nix_value(&stdout))
 }
 
@@ -210,6 +237,25 @@ mod tests {
         assert_eq!(
             classify_eval_failure("error: infinite recursion encountered"),
             ConfigValueError::EvalFailed("error: infinite recursion encountered".into())
+        );
+    }
+
+    #[test]
+    fn read_expr_adds_or_fallback_only_for_open_config_attrs() {
+        let cfg = std::path::Path::new("/etc/nixos/configuration.nix");
+        // Typed options keep a plain read and still surface a missing
+        // attribute as "option removed", never as a default.
+        let (typed, is_open) = build_read_expr("networking.hostName", cfg);
+        assert!(!is_open);
+        assert!(typed.contains(".config.networking.hostName"), "{typed}");
+        assert!(!typed.contains(" or "), "{typed}");
+        // The open nixpkgs.config.* attrset reads through `or <sentinel>` so
+        // an unset subkey reports as "unset" rather than "removed".
+        let (open, is_open) = build_read_expr("nixpkgs.config.allowUnfree", cfg);
+        assert!(is_open);
+        assert!(
+            open.contains(r#".config.nixpkgs.config.allowUnfree or "__nix_pilot_config_unset__"#),
+            "{open}"
         );
     }
 
@@ -352,6 +398,9 @@ mod tests {
             ConfigValue::Unparsed(u) => {
                 panic!("time.timeZone should parse as string, got unparsed: {}", u)
             }
+            ConfigValue::Unset => {
+                panic!("time.timeZone is a typed option and cannot be 'unset'")
+            }
         }
     }
 
@@ -373,6 +422,7 @@ mod tests {
                 Ok(ConfigValue::Str(s)) => println!("{}: Str({})", key, s),
                 Ok(ConfigValue::Bool(b)) => println!("{}: Bool({})", key, b),
                 Ok(ConfigValue::Unparsed(u)) => println!("{}: Unparsed({})", key, u),
+                Ok(ConfigValue::Unset) => println!("{}: Unset (system default)", key),
                 Err(e) => println!("{}: Error({:?})", key, e),
             }
         }

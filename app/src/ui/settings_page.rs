@@ -676,6 +676,9 @@ impl SettingsPage {
                 let result = read_config_value(key);
                 let message = match (is_switch, result) {
                     (true, Ok(ConfigValue::Bool(b))) => RowLive::Bool(b),
+                    // An unset nixpkgs.config.* subkey means the boolean
+                    // default (off) applies.
+                    (true, Ok(ConfigValue::Unset)) => RowLive::Bool(false),
                     (_, other) => RowLive::Text(live_text(other)),
                 };
                 let _ = tx.send((key.to_string(), message));
@@ -745,6 +748,7 @@ fn live_text(result: Result<ConfigValue, ConfigValueError>) -> String {
         Ok(ConfigValue::Str(s)) => format!("currently: {s}"),
         Ok(ConfigValue::Bool(b)) => format!("currently: {}", if b { "on" } else { "off" }),
         Ok(ConfigValue::Unparsed(u)) => format!("currently: {u}"),
+        Ok(ConfigValue::Unset) => "currently: (system default)".to_string(),
         Err(ConfigValueError::NoSuchOption(_)) => {
             "this setting no longer applies — the option was removed or renamed in a newer NixOS"
                 .to_string()
