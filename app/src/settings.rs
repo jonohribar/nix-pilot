@@ -299,6 +299,22 @@ pub static SPECS: &[Spec] = &[
     )
     .with_tags(&["flake", "configuration", "description"]),
 ];
+/// The settings categories shown as the two-column router: (label, summary,
+/// child-id). The sidebar renders this list; SettingsPage keys its card
+/// pages by the same child-id so the two can never disagree.
+pub static SETTINGS_CATEGORIES: &[(&str, &str, &str)] = &[
+    ("System", "Device name, printing, power, sound", "system"),
+    ("Software", "Installs and licence choices", "software"),
+    ("Network & internet", "Wi-Fi, wired, Bluetooth", "network"),
+    ("Accounts", "Accounts and remote access keys", "accounts"),
+    ("Time & language", "Time zone, language and region", "time"),
+    (
+        "Personalisation",
+        "Where your desktop settings live",
+        "appearance",
+    ),
+    ("Privacy & security", "Remote access (SSH)", "privacy"),
+];
 
 const fn bool_spec(
     category: &'static str,

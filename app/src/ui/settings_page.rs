@@ -10,7 +10,7 @@ use std::sync::mpsc;
 
 use gtk4::prelude::*;
 
-use crate::account::{self, AccountPresence, DisplayNameResult};
+use crate::account::{self, AccountPresence};
 use crate::config_value::{read_config_value, ConfigValue, ConfigValueError};
 use crate::desired_state::{AccountProfile, DesiredDoc, SettingValue};
 use crate::settings::{self, ValueKind};
@@ -76,8 +76,9 @@ pub struct SettingsPage {
 impl SettingsPage {
     /// Build the settings surface for the account whose user-scoped data it edits.
     pub fn new(account: &str) -> SettingsPage {
-        // Settings-internal stack: a home (profile + category navigation) and
-        // one subpage per category, like the common desktop settings shells.
+        // Settings is a stack of one page per category, selected from the
+        // sidebar's two-column router (the category list lives there, not in
+        // a drill-in home page).
         let stack = gtk4::Stack::new();
         stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
         stack.set_margin_top(18);
@@ -85,101 +86,14 @@ impl SettingsPage {
         stack.set_margin_end(28);
         stack.set_vexpand(true);
 
-        let home = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
-        let heading = gtk4::Label::new(Some("Settings"));
-        heading.add_css_class("title-2");
-        heading.set_xalign(0.0);
-        home.append(&heading);
-        let hint = gtk4::Label::new(Some(
-            "Settings apply to this computer and always explain what changes \
-             before they are applied.",
-        ));
-        hint.set_xalign(0.0);
-        hint.set_wrap(true);
-        hint.add_css_class("dim-label");
-        home.append(&hint);
-
-        // Profile header: avatar + name + account, click -> Accounts.
-        let profile = gtk4::Button::new();
-        profile.set_halign(gtk4::Align::Fill);
-        profile.add_css_class("card");
-        let avatar = gtk4::Label::new(Some(&initial_of(account)));
-        avatar.add_css_class("title-3");
-        avatar.set_width_chars(2);
-        avatar.set_margin_start(12);
-        avatar.set_margin_end(6);
-        avatar.set_margin_top(8);
-        avatar.set_margin_bottom(8);
-        let name_col = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-        let name_label = gtk4::Label::new(Some(account));
-        name_label.add_css_class("heading");
-        name_label.set_xalign(0.0);
-        load_display_name(&name_label, account.to_string());
-        let acc_label = gtk4::Label::new(Some(&format!("@{account}")));
-        acc_label.add_css_class("dim-label");
-        acc_label.set_xalign(0.0);
-        name_col.append(&name_label);
-        name_col.append(&acc_label);
-        let profile_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
-        profile_row.append(&avatar);
-        profile_row.append(&name_col);
-        profile.set_child(Some(&profile_row));
-        {
-            let s = stack.clone();
-            profile.connect_clicked(move |_| s.set_visible_child_name("accounts"));
-        }
-        home.append(&profile);
-
-        // Category navigation (familiar names shared across desktop shells).
-        // Updates is a top-level sidebar surface, never duplicated here.
-        // Each row is icon + label + summary, like the shells this mirrors.
-        let categories: [(&str, &str, &str); 7] = [
-            ("System", "Device name, printing, power, sound", "system"),
-            ("Software", "Installs and licence choices", "software"),
-            ("Network & internet", "Wi-Fi, wired, Bluetooth", "network"),
-            ("Accounts", "Accounts and remote access keys", "accounts"),
-            ("Time & language", "Time zone, language and region", "time"),
-            (
-                "Personalisation",
-                "Where your desktop's own settings live",
-                "appearance",
-            ),
-            ("Privacy & security", "Remote access (SSH)", "privacy"),
-        ];
-        for (label, summary, child) in &categories {
-            let btn = gtk4::Button::new();
-            btn.set_halign(gtk4::Align::Fill);
-            btn.add_css_class("nav-item");
-            let row = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
-            row.set_margin_top(8);
-            row.set_margin_bottom(8);
-            row.set_margin_start(14);
-            row.set_margin_end(14);
-            let l = gtk4::Label::new(Some(label));
-            l.add_css_class("heading");
-            l.set_xalign(0.0);
-            let s = gtk4::Label::new(Some(summary));
-            s.add_css_class("dim-label");
-            s.set_xalign(0.0);
-            s.set_wrap(true);
-            row.append(&l);
-            row.append(&s);
-            btn.set_child(Some(&row));
-            let st = stack.clone();
-            let child = child.to_string();
-            btn.connect_clicked(move |_| st.set_visible_child_name(&child));
-            home.append(&btn);
-        }
-        stack.add_named(&home, Some("home"));
-
         let mut cat_pages: std::collections::BTreeMap<&'static str, gtk4::Box> =
             std::collections::BTreeMap::new();
         // Categories are (label, summary, child-id) triples: the page title
-        // is the label and the stack/map key is the id, so the nav buttons
+        // is the label and the stack/map key is the id, so the sidebar buttons
         // (which set the visible child by id) and the card appends (which
         // key by spec category id) agree.
-        for (title, _summary, child) in categories {
-            let page = category_page(&stack, title);
+        for (title, _summary, child) in settings::SETTINGS_CATEGORIES {
+            let page = category_page(title);
             stack.add_named(&page, Some(child));
             cat_pages.insert(child, page);
         }
@@ -759,54 +673,14 @@ fn live_text(result: Result<ConfigValue, ConfigValueError>) -> String {
 
 /// A settings category subpage: back button + title; returned as the Box the
 /// category's cards are appended to.
-fn category_page(stack: &gtk4::Stack, title: &str) -> gtk4::Box {
+fn category_page(title: &str) -> gtk4::Box {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
     page.set_vexpand(true);
-    // Compact back control: navigation, not a full-width content row.
-    let back = gtk4::Button::with_label("‹ Settings");
-    back.add_css_class("flat");
-    back.set_halign(gtk4::Align::Start);
-    let s = stack.clone();
-    back.connect_clicked(move |_| s.set_visible_child_name("home"));
-    page.append(&back);
     let heading = gtk4::Label::new(Some(title));
     heading.add_css_class("title-2");
     heading.set_xalign(0.0);
     page.append(&heading);
     page
-}
-
-/// Resolve the read-only profile label on a worker and update it on GTK's thread.
-/// If lookup fails or finds no GECOS name, the account name is displayed.
-fn load_display_name(label: &gtk4::Label, account_name: String) {
-    let (sender, receiver) = mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = sender.send(account::display_name(&account_name));
-    });
-    let label = label.clone();
-    glib::timeout_add_local(
-        std::time::Duration::from_millis(50),
-        move || match receiver.try_recv() {
-            Ok(result) => {
-                let name = match result {
-                    DisplayNameResult::Found(name) | DisplayNameResult::Fallback(name) => name,
-                };
-                label.set_text(&name);
-                glib::ControlFlow::Break
-            }
-            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
-        },
-    );
-}
-
-/// One-letter avatar: first character of the account name, uppercased.
-fn initial_of(account: &str) -> String {
-    account
-        .chars()
-        .next()
-        .map(|c| c.to_ascii_uppercase().to_string())
-        .unwrap_or_else(|| "?".to_string())
 }
 
 /// Re-render the app-owned accounts list (name · full name · administrator),

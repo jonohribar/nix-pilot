@@ -16,7 +16,10 @@ pub enum AccountPresence {
     QueryFailed,
 }
 
-/// Best-effort display name obtained from the account's GECOS field.
+/// Best-effort display name obtained from the account's GECOS field. Used by
+/// the profile header; latent while the Accounts surface routes through the
+/// two-column sidebar.
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DisplayNameResult {
     /// A non-empty GECOS field was found.
@@ -26,6 +29,7 @@ pub enum DisplayNameResult {
 }
 
 /// Look up an account's GECOS field, falling back to its name on any failure.
+#[allow(dead_code)]
 pub fn display_name(account: &str) -> DisplayNameResult {
     let output = Command::new("getent").args(["passwd", account]).output();
     match output {

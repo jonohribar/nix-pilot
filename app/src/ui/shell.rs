@@ -199,8 +199,10 @@ fn wire_pending_button(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_sidebar(
     stack: &gtk4::Stack,
+    settings: &Rc<settings_page::SettingsPage>,
     updates: &Rc<updates_page::UpdatesPage>,
     your_system: &Rc<your_system::YourSystemPage>,
     desired: &Rc<RefCell<DesiredDoc>>,
@@ -209,7 +211,7 @@ fn build_sidebar(
     global_search: &gtk4::SearchEntry,
 ) -> gtk4::Box {
     let sidebar = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    sidebar.set_width_request(220);
+    sidebar.set_width_request(240);
     // The app-wide search sits atop the sidebar, above the surface nav; it
     // spans apps + settings, so it cannot live inside one surface.
     let search_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -222,7 +224,40 @@ fn build_sidebar(
     search_box.append(global_search);
     sidebar.append(&search_box);
     sidebar.append(&nav_button("Packages", "list", stack, None));
-    sidebar.append(&nav_button("Settings", "settings", stack, None));
+
+    // Settings is a two-column router: the category list always lives in the
+    // sidebar (under a section header) and selects the category page shown on
+    // the right, so there is no drill-in or hidden second level.
+    let settings_head = gtk4::Label::new(Some("Settings"));
+    settings_head.add_css_class("dim-label");
+    settings_head.set_xalign(0.0);
+    settings_head.set_margin_start(12);
+    settings_head.set_margin_top(10);
+    settings_head.set_margin_bottom(2);
+    sidebar.append(&settings_head);
+    let active: std::rc::Rc<std::cell::RefCell<Option<gtk4::Button>>> =
+        std::rc::Rc::new(std::cell::RefCell::new(None));
+    for (label, _summary, child) in crate::settings::SETTINGS_CATEGORIES {
+        let btn = gtk4::Button::with_label(label);
+        btn.add_css_class("flat");
+        btn.add_css_class("nav-item");
+        btn.set_halign(gtk4::Align::Fill);
+        btn.set_margin_start(14);
+        let stack = stack.clone();
+        let settings = settings.clone();
+        let child = child.to_string();
+        let active = active.clone();
+        btn.connect_clicked(move |b| {
+            if let Some(prev) = active.borrow_mut().take() {
+                prev.remove_css_class("active");
+            }
+            *active.borrow_mut() = Some(b.clone());
+            b.add_css_class("active");
+            settings.show_category(&child);
+            stack.set_visible_child_name("settings");
+        });
+        sidebar.append(&btn);
+    }
 
     let updates = updates.clone();
     let updates_desired = desired.clone();
@@ -333,6 +368,17 @@ pub fn run(
     stack.add_named(&scrolled_page(&your_system.page), Some("your-system"));
     stack.set_visible_child_name("list");
 
+    // Dev/test deep-link: NIX_PILOT_GO=settings opens the first settings
+    // category (used by screenshot and AT-SPI drives; core keeps the default).
+    if std::env::var("NIX_PILOT_GO").as_deref() == Ok("settings") {
+        let first = crate::settings::SETTINGS_CATEGORIES
+            .first()
+            .map(|t| t.2)
+            .unwrap_or("system");
+        settings.show_category(first);
+        stack.set_visible_child_name("settings");
+    }
+
     // Load current config values when Settings page becomes visible (lazy, non-blocking)
     let settings_for_load = settings.clone();
     let desired_for_values = desired.clone();
@@ -344,6 +390,7 @@ pub fn run(
 
     let sidebar = build_sidebar(
         &stack,
+        &settings,
         &updates,
         &your_system,
         &desired,
