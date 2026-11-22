@@ -404,6 +404,46 @@ pub fn render_block(settings: &BTreeMap<String, SettingValue>) -> String {
     out
 }
 
+/// The switch position to show for a boolean setting (mirror-reality): the
+/// user's stored choice when one exists, otherwise the live system value.
+/// The toggle therefore always shows what the setting effectively is.
+pub fn bool_effective(live: bool, choice: Option<bool>) -> bool {
+    choice.unwrap_or(live)
+}
+
+/// The stored choice after the user flips a boolean switch.
+///
+/// Flipping to whatever the system currently does means "no change, keep the
+/// system default" and clears the stored choice; flipping away records the
+/// user's choice. This maps a binary toggle onto the three real states
+/// (your choice on / your choice off / unset = system decides) by making the
+/// system value the "return to default" endpoint.
+pub fn apply_bool_toggle(live: bool, toggled_to: bool) -> Option<bool> {
+    if toggled_to == live {
+        None
+    } else {
+        Some(toggled_to)
+    }
+}
+
+/// Plain-language status for a boolean setting: what the system does now and
+/// whether the user has a pending change.
+pub fn bool_status_text(live: bool, choice: Option<bool>) -> String {
+    let word = |b: bool| if b { "on" } else { "off" };
+    match choice {
+        None => format!("currently: {} — what your system does (system)", word(live)),
+        Some(c) if c == live => format!(
+            "currently: {} — your choice matches your system",
+            word(live)
+        ),
+        Some(c) => format!(
+            "currently: {} — you chose {} (applies when you next update)",
+            word(live),
+            word(c)
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -532,6 +572,36 @@ mod tests {
         assert_eq!(spec.category, "software");
         assert!(spec.tags.contains(&"proprietary"));
         assert!(spec.tags.contains(&"licence restrictions"));
+    }
+
+    #[test]
+    fn bool_toggle_mirrors_the_live_value_as_the_default_endpoint() {
+        // Effective position: stored choice when present, else the system value.
+        assert!(bool_effective(true, None));
+        assert!(!bool_effective(true, Some(false)));
+        assert!(bool_effective(false, Some(true)));
+        // Flipping to whatever the system does clears the choice (system
+        // default); flipping away stores the user's choice.
+        assert_eq!(apply_bool_toggle(true, true), None);
+        assert_eq!(apply_bool_toggle(true, false), Some(false));
+        assert_eq!(apply_bool_toggle(false, true), Some(true));
+        assert_eq!(apply_bool_toggle(false, false), None);
+    }
+
+    #[test]
+    fn bool_status_distinguishes_system_from_pending_choice() {
+        assert_eq!(
+            bool_status_text(true, None),
+            "currently: on — what your system does (system)"
+        );
+        let pending = bool_status_text(true, Some(false));
+        assert!(pending.contains("you chose off"), "{pending}");
+        assert!(
+            pending.contains("applies when you next update"),
+            "{pending}"
+        );
+        // A stored choice equal to the live value reads as "matches".
+        assert!(bool_status_text(false, Some(false)).contains("matches your system"));
     }
 
     #[test]

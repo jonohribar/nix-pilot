@@ -335,9 +335,10 @@ pub fn run(
 
     // Load current config values when Settings page becomes visible (lazy, non-blocking)
     let settings_for_load = settings.clone();
+    let desired_for_values = desired.clone();
     stack.connect_visible_child_name_notify(move |s| {
         if s.visible_child_name().as_deref() == Some("settings") {
-            settings_for_load.load_current_values();
+            settings_for_load.load_current_values(&desired_for_values);
         }
     });
 
