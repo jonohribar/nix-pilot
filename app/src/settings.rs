@@ -442,6 +442,17 @@ pub fn render_block(settings: &BTreeMap<String, SettingValue>) -> String {
     out
 }
 
+/// The user's stored boolean choice for a key, or None when unset. Unset is
+/// the distinct third state: the user never decided, so the system value
+/// decides (see [`bool_effective`]). This is the single home for the
+/// "user choice vs unset = system default" distinction.
+pub fn stored_bool(settings: &BTreeMap<String, SettingValue>, key: &str) -> Option<bool> {
+    match settings.get(key) {
+        Some(SettingValue::Bool(b)) => Some(*b),
+        _ => None,
+    }
+}
+
 /// The switch position to show for a boolean setting (mirror-reality): the
 /// user's stored choice when one exists, otherwise the live system value.
 /// The toggle therefore always shows what the setting effectively is.
@@ -620,6 +631,19 @@ mod tests {
         assert_eq!(spec.category, "software");
         assert!(spec.tags.contains(&"proprietary"));
         assert!(spec.tags.contains(&"licence restrictions"));
+    }
+
+    #[test]
+    fn stored_bool_distinguishes_choice_from_unset() {
+        let mut m = BTreeMap::new();
+        assert_eq!(stored_bool(&m, "x"), None, "unset means no choice");
+        m.insert("x".into(), SettingValue::Bool(true));
+        assert_eq!(stored_bool(&m, "x"), Some(true));
+        m.insert("x".into(), SettingValue::Bool(false));
+        assert_eq!(stored_bool(&m, "x"), Some(false));
+        // A string value is not a boolean choice.
+        m.insert("y".into(), SettingValue::Str("z".into()));
+        assert_eq!(stored_bool(&m, "y"), None);
     }
 
     #[test]

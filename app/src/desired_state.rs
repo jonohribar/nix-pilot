@@ -381,12 +381,7 @@ impl DesiredDoc {
     pub fn render_module(&self, backend: UserBackend) -> Result<String, StateValidationError> {
         self.validate()?;
         let mut body = String::new();
-        if !self.system.packages.is_empty() {
-            body.push_str(&format!(
-                "  environment.systemPackages = [ {} ];\n",
-                render_package_list(&self.system.packages)
-            ));
-        }
+        body.push_str(&render_system_packages(&self.system.packages));
         // Per-account package selections use the chosen backend; authorized
         // keys are NixOS-native because Home Manager has no equivalent here.
         // Accounts come from the union of package users and key users, sorted.
@@ -398,58 +393,15 @@ impl DesiredDoc {
         accounts.sort();
         accounts.dedup();
         for account in accounts {
-            let pkgs = self.users.get(account).cloned().unwrap_or_default();
+            let packages = self.users.get(account).cloned().unwrap_or_default();
             let keys = self.authorized_keys_for(account);
-            if pkgs.packages.is_empty() && keys.is_empty() {
-                continue;
-            }
-            match backend {
-                UserBackend::NixUsers => {
-                    let mut lines = vec![format!("  users.users.\"{account}\" = {{")];
-                    if !pkgs.packages.is_empty() {
-                        lines.push(format!(
-                            "    packages = [ {} ];",
-                            render_package_list(&pkgs.packages)
-                        ));
-                    }
-                    if !keys.is_empty() {
-                        lines.push(format!(
-                            "    openssh.authorizedKeys.keys = [ {} ];",
-                            render_key_list(keys)
-                        ));
-                    }
-                    lines.push("  };".into());
-                    body.push_str(&lines.join("\n"));
-                    body.push('\n');
-                }
-                UserBackend::HomeManager => {
-                    if !pkgs.packages.is_empty() {
-                        body.push_str(&format!(
-                            "  home-manager.users.\"{account}\".home.packages = [ {} ];\n",
-                            render_package_list(&pkgs.packages)
-                        ));
-                    }
-                }
-            }
+            body.push_str(&render_account_packages(account, &packages, keys, backend));
         }
         // App-owned accounts (NixOS-native; no home-manager equivalent in this
         // scope). The app owns these definitions, so removing one cleanly
         // un-creates it.
         for (account, profile) in &self.accounts {
-            let mut lines = vec![format!("  users.users.\"{account}\" = {{")];
-            lines.push("    isNormalUser = true;".into());
-            if !profile.full_name.is_empty() {
-                lines.push(format!(
-                    "    description = \"{}\";",
-                    escape_nix_str(&profile.full_name)
-                ));
-            }
-            if profile.admin {
-                lines.push("    extraGroups = [ \"wheel\" ];".into());
-            }
-            lines.push("  };".into());
-            body.push_str(&lines.join("\n"));
-            body.push('\n');
+            body.push_str(&render_owned_account(account, profile));
         }
         body.push_str(&crate::settings::render_block(&self.settings));
         if !self.sources.is_empty() {
@@ -465,6 +417,77 @@ impl DesiredDoc {
     }
 }
 
+/// The Nix lines installing the system-wide package list (empty when none).
+fn render_system_packages(packages: &[String]) -> String {
+    if packages.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "  environment.systemPackages = [ {} ];\n",
+            render_package_list(packages)
+        )
+    }
+}
+
+/// The Nix lines for one account's packages and authorized keys under the
+/// chosen backend (empty when the account has neither). Authorized keys are
+/// NixOS-native because Home Manager has no equivalent here.
+fn render_account_packages(
+    account: &str,
+    packages: &Packages,
+    keys: &[String],
+    backend: UserBackend,
+) -> String {
+    if packages.packages.is_empty() && keys.is_empty() {
+        return String::new();
+    }
+    match backend {
+        UserBackend::NixUsers => {
+            let mut lines = vec![format!("  users.users.\"{account}\" = {{")];
+            if !packages.packages.is_empty() {
+                lines.push(format!(
+                    "    packages = [ {} ];",
+                    render_package_list(&packages.packages)
+                ));
+            }
+            if !keys.is_empty() {
+                lines.push(format!(
+                    "    openssh.authorizedKeys.keys = [ {} ];",
+                    render_key_list(keys)
+                ));
+            }
+            lines.push("  };".into());
+            lines.join("\n") + "\n"
+        }
+        UserBackend::HomeManager => {
+            if packages.packages.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "  home-manager.users.\"{account}\".home.packages = [ {} ];\n",
+                    render_package_list(&packages.packages)
+                )
+            }
+        }
+    }
+}
+
+/// The Nix lines defining one app-owned user account.
+fn render_owned_account(account: &str, profile: &AccountProfile) -> String {
+    let mut lines = vec![format!("  users.users.\"{account}\" = {{")];
+    lines.push("    isNormalUser = true;".into());
+    if !profile.full_name.is_empty() {
+        lines.push(format!(
+            "    description = \"{}\";",
+            escape_nix_str(&profile.full_name)
+        ));
+    }
+    if profile.admin {
+        lines.push("    extraGroups = [ \"wheel\" ];".into());
+    }
+    lines.push("  };".into());
+    lines.join("\n") + "\n"
+}
 /// Render the per-app source overlay consumed by the generated module.
 ///
 /// Each pinned revision is imported once (`builtins.fetchTree`); the named

@@ -116,14 +116,37 @@ impl SettingsPage {
         let add_full = gtk4::Entry::new();
         add_full.set_placeholder_text(Some("full name"));
         add_full.set_hexpand(true);
+        // Creating an account can also give it administrator rights — a real
+        // boolean property of that new account. Label it with the same
+        // capitalised On/Off every other toggle in the app carries, so it
+        // reads the same instead of a naked switch.
         let add_admin = gtk4::Switch::new();
         add_admin.set_halign(gtk4::Align::Start);
         add_admin.set_tooltip_text(Some("administrator rights"));
+        let admin_label = gtk4::Label::new(Some("Administrator"));
+        admin_label.set_halign(gtk4::Align::Start);
+        let admin_status = gtk4::Label::new(Some("Off"));
+        admin_status.set_width_chars(3);
+        admin_status.set_halign(gtk4::Align::Start);
+        admin_status.add_css_class("dim-label");
+        {
+            let status = admin_status.clone();
+            let sw = add_admin.clone();
+            sw.connect_state_set(move |_, active| {
+                status.set_text(settings::bool_word(active));
+                glib::Propagation::Proceed
+            });
+        }
+        let admin_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+        admin_box.set_valign(gtk4::Align::Center);
+        admin_box.append(&admin_label);
+        admin_box.append(&add_admin);
+        admin_box.append(&admin_status);
         let add_btn = gtk4::Button::with_label("Add account");
         let add_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
         add_row.append(&add_name);
         add_row.append(&add_full);
-        add_row.append(&add_admin);
+        add_row.append(&admin_box);
         add_row.append(&add_btn);
         let accounts_status = gtk4::Label::new(None);
         accounts_status.set_xalign(0.0);

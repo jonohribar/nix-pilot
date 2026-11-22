@@ -455,6 +455,26 @@ fn wire_global_callbacks(
     (on_global_query, on_return_to_store, on_global_selection)
 }
 
+/// Shared handles for the shell surfaces. Built once in `run`; each `wire_*`
+/// function owns one surface's wiring and reads what it needs from this
+/// context, so the composition stays a thin ordered list.
+struct ShellContext {
+    window: gtk4::ApplicationWindow,
+    header: HeaderWidgets,
+    stack: gtk4::Stack,
+    desired: Rc<RefCell<DesiredDoc>>,
+    account: String,
+    detail: Rc<detail::DetailUi>,
+    catalogue: store_search::StoreSearch,
+    global: global_search::GlobalSearch,
+    updates: Rc<updates_page::UpdatesPage>,
+    settings: Rc<settings_page::SettingsPage>,
+    your_system: Rc<your_system::YourSystemPage>,
+    corpus: Rc<RefCell<SearchCorpus>>,
+    select_category: Rc<dyn Fn(&str)>,
+    on_package_intent_change: Rc<dyn Fn()>,
+}
+
 pub fn run(
     app: &gtk4::Application,
     entries: Vec<IndexEntry>,
@@ -495,11 +515,12 @@ pub fn run(
     updates.wire(&desired, &account, &nix, persist_desired_state.clone());
     settings.wire(&desired, persist_desired_state.clone());
 
+    // Header count of package changes, refreshed on every edit.
     let pending = header.pending.clone();
     let desired_for_label = desired.clone();
     let account_for_label = account.clone();
     let package_names_for_label = package_names.clone();
-    let update_pending = Rc::new(move || {
+    let refresh_pending = Rc::new(move || {
         update_pending_button(
             &desired_for_label.borrow(),
             &account_for_label,
@@ -508,10 +529,10 @@ pub fn run(
         );
     });
     let on_package_intent_change: Rc<dyn Fn()> = {
-        let update_pending = update_pending.clone();
+        let refresh_pending = refresh_pending.clone();
         let persist_desired_state = persist_desired_state.clone();
         Rc::new(move || {
-            update_pending();
+            refresh_pending();
             persist_desired_state();
         })
     };
@@ -522,9 +543,9 @@ pub fn run(
         &account,
         &nix,
         &window,
-        on_package_intent_change,
+        on_package_intent_change.clone(),
     );
-    update_pending();
+    refresh_pending();
 
     let stack = gtk4::Stack::new();
     stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
@@ -538,15 +559,6 @@ pub fn run(
     stack.add_named(&scrolled_page(&your_system.page), Some("your-system"));
     stack.set_visible_child_name("list");
 
-    // Load current config values when Settings page becomes visible (lazy, non-blocking)
-    let settings_for_load = settings.clone();
-    let desired_for_values = desired.clone();
-    stack.connect_visible_child_name_notify(move |s| {
-        if s.visible_child_name().as_deref() == Some("settings") {
-            settings_for_load.load_current_values(&desired_for_values);
-        }
-    });
-
     let (sidebar, select_category) = build_sidebar(
         &stack,
         &settings,
@@ -558,77 +570,142 @@ pub fn run(
         &global.entry,
     );
 
-    // Dev/test demo: seed a few settings so read-only review pages render
-    // non-empty rows for screenshots/AT-SPI drives (never in the core path).
+    let ctx = ShellContext {
+        window: window.clone(),
+        header,
+        stack: stack.clone(),
+        desired,
+        account,
+        detail,
+        catalogue,
+        global,
+        updates,
+        settings,
+        your_system,
+        corpus,
+        select_category,
+        on_package_intent_change,
+    };
+
+    wire_settings_live_refresh(&ctx);
+    wire_dev_hooks(&ctx);
+
+    let body = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    body.append(&sidebar);
+    body.append(&stack);
+    window.set_child(Some(&body));
+
+    wire_pending(&ctx);
+    wire_back(&ctx);
+    wire_store(&ctx, load_error.as_deref(), &full_entries);
+    wire_global_search(&ctx);
+    window.present();
+}
+
+/// Refresh current config values whenever the Settings page becomes visible.
+fn wire_settings_live_refresh(ctx: &ShellContext) {
+    let settings_for_load = ctx.settings.clone();
+    let desired_for_values = ctx.desired.clone();
+    ctx.stack.connect_visible_child_name_notify(move |s| {
+        if s.visible_child_name().as_deref() == Some("settings") {
+            settings_for_load.load_current_values(&desired_for_values);
+        }
+    });
+}
+
+/// Dev/test demo seed and deep-link (screenshot and AT-SPI drives; never in
+/// the core path).
+fn wire_dev_hooks(ctx: &ShellContext) {
     if std::env::var("NIX_PILOT_DEMO").as_deref() == Ok("1") {
-        desired.borrow_mut().settings.insert(
+        ctx.desired.borrow_mut().settings.insert(
             "services.pipewire.enable".into(),
             crate::desired_state::SettingValue::Bool(true),
         );
-        desired.borrow_mut().settings.insert(
+        ctx.desired.borrow_mut().settings.insert(
             "time.timeZone".into(),
             crate::desired_state::SettingValue::Str("Europe/Berlin".into()),
         );
-        desired.borrow_mut().settings.insert(
+        ctx.desired.borrow_mut().settings.insert(
             "nix.gc.options".into(),
             crate::desired_state::SettingValue::Str("--delete-older-than 7d".into()),
         );
     }
 
-    // Dev/test deep-link: NIX_PILOT_GO=settings|updates|your-system opens a
-    // non-default page (used by screenshot and AT-SPI drives; the core keeps
-    // the store list).
     match std::env::var("NIX_PILOT_GO").as_deref() {
         Ok("settings") => {
             let first = crate::settings::SETTINGS_CATEGORIES
                 .first()
                 .map(|t| t.2)
                 .unwrap_or("system");
-            select_category(first);
+            (ctx.select_category)(first);
         }
-        Ok("updates") => stack.set_visible_child_name("updates"),
+        Ok("updates") => ctx.stack.set_visible_child_name("updates"),
         Ok("your-system") => {
-            your_system.refresh(&desired, &on_package_intent_change_for_sidebar);
-            stack.set_visible_child_name("your-system");
+            ctx.your_system
+                .refresh(&ctx.desired, &ctx.on_package_intent_change);
+            ctx.stack.set_visible_child_name("your-system");
         }
         _ => {}
     }
-    let body = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-    body.append(&sidebar);
-    body.append(&stack);
-    window.set_child(Some(&body));
+}
 
-    wire_pending_button(&header.pending, &stack, &updates, &desired, &account);
-    let back_button = header.back.clone();
-    stack.connect_visible_child_name_notify(move |s| {
+/// The header pending button: review the waiting changes on the Updates page.
+fn wire_pending(ctx: &ShellContext) {
+    wire_pending_button(
+        &ctx.header.pending,
+        &ctx.stack,
+        &ctx.updates,
+        &ctx.desired,
+        &ctx.account,
+    );
+}
+
+/// The header back button, visible only on the detail page.
+fn wire_back(ctx: &ShellContext) {
+    let back_button = ctx.header.back.clone();
+    let stack_for_back = ctx.stack.clone();
+    ctx.stack.connect_visible_child_name_notify(move |s| {
         back_button.set_visible(s.visible_child_name().as_deref() == Some("detail"));
     });
-    let stack_for_back = stack.clone();
-    header
+    ctx.header
         .back
         .connect_clicked(move |_| stack_for_back.set_visible_child_name("list"));
+}
 
-    catalogue.set_initial_summary(&corpus.borrow(), load_error.as_deref());
-    catalogue.render(&corpus.borrow(), &catalogue.search.text());
+/// The store list: initial summary + render + search/filter/open callbacks.
+fn wire_store(ctx: &ShellContext, load_error: Option<&str>, full_entries: &[IndexEntry]) {
+    ctx.catalogue
+        .set_initial_summary(&ctx.corpus.borrow(), load_error);
+    ctx.catalogue
+        .render(&ctx.corpus.borrow(), &ctx.catalogue.search.text());
     let (on_store_query, on_filter, on_store_package) = wire_store_callbacks(
-        &stack,
-        &detail,
-        &desired,
-        &account,
-        &catalogue,
-        &corpus,
-        &full_entries,
+        &ctx.stack,
+        &ctx.detail,
+        &ctx.desired,
+        &ctx.account,
+        &ctx.catalogue,
+        &ctx.corpus,
+        full_entries,
     );
-    catalogue.wire(&corpus, on_store_query, on_filter, on_store_package);
+    ctx.catalogue
+        .wire(&ctx.corpus, on_store_query, on_filter, on_store_package);
+}
 
-    wire_search_shortcut(&global.entry, &window);
-    let (on_global_query, on_return_to_store, on_global_selection) =
-        wire_global_callbacks(&stack, &detail, &desired, &account, &select_category);
-    global.wire(
-        &corpus,
+/// The app-wide search: shortcut, results page, and selection routing (with
+/// settings deep-links keeping the sidebar highlight in sync).
+fn wire_global_search(ctx: &ShellContext) {
+    wire_search_shortcut(&ctx.global.entry, &ctx.window);
+    let (on_global_query, on_return_to_store, on_global_selection) = wire_global_callbacks(
+        &ctx.stack,
+        &ctx.detail,
+        &ctx.desired,
+        &ctx.account,
+        &ctx.select_category,
+    );
+    ctx.global.wire(
+        &ctx.corpus,
         on_global_query,
         on_return_to_store,
         on_global_selection,
     );
-    window.present();
 }

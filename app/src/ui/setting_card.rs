@@ -105,12 +105,15 @@ impl SettingCard {
                 let sw = gtk4::Switch::new();
                 sw.set_valign(gtk4::Align::Center);
                 control_row.append(&sw);
-                let st = gtk4::Label::new(Some("Off"));
-                st.set_valign(gtk4::Align::Center);
-                st.add_css_class("dim-label");
-                st.set_tooltip_text(Some("the value that will apply"));
-                control_row.append(&st);
-                status = Some(st);
+                let status_label = gtk4::Label::new(Some("Off"));
+                status_label.set_valign(gtk4::Align::Center);
+                status_label.add_css_class("dim-label");
+                status_label.set_tooltip_text(Some("the value that will apply"));
+                // On and Off differ in width; a fixed block keeps the Reset
+                // button on the right from shifting when the toggle flips.
+                status_label.set_width_chars(3);
+                control_row.append(&status_label);
+                status = Some(status_label);
                 Control::Switch(sw)
             }
             ValueKind::Choice(options) => {
@@ -164,18 +167,15 @@ impl SettingCard {
         match live {
             LiveValue::Bool(b) => {
                 self.live_bool.set(Some(b));
-                let choice = match desired.borrow().settings.get(self.key) {
-                    Some(SettingValue::Bool(v)) => Some(*v),
-                    _ => None,
-                };
+                let choice = settings::stored_bool(&desired.borrow().settings, self.key);
                 if let Control::Switch(sw) = &self.control {
                     self.syncing.set(true);
                     sw.set_active(settings::bool_effective(b, choice));
                     self.syncing.set(false);
                 }
                 self.reset.set_sensitive(choice.is_some());
-                if let Some(st) = &self.status {
-                    st.set_text(settings::bool_word(choice.unwrap_or(b)));
+                if let Some(status_label) = &self.status {
+                    status_label.set_text(settings::bool_word(choice.unwrap_or(b)));
                 }
             }
             LiveValue::Str(raw) => {
@@ -246,14 +246,11 @@ impl SettingCard {
             Control::Switch(sw) => {
                 // Initial position: a stored choice if any, else the neutral
                 // placeholder the live read corrects a moment later.
-                let choice_now = match desired.borrow().settings.get(key) {
-                    Some(SettingValue::Bool(b)) => Some(*b),
-                    _ => None,
-                };
+                let choice_now = settings::stored_bool(&desired.borrow().settings, key);
                 sw.set_active(choice_now.unwrap_or(false));
                 self.reset.set_sensitive(choice_now.is_some());
-                if let Some(st) = &self.status {
-                    st.set_text(settings::bool_word(choice_now.unwrap_or(false)));
+                if let Some(status_label) = &self.status {
+                    status_label.set_text(settings::bool_word(choice_now.unwrap_or(false)));
                 }
                 let live_cell = self.live_bool.clone();
                 let syncing = self.syncing.clone();
@@ -280,8 +277,8 @@ impl SettingCard {
                         }
                     }
                     reset.set_sensitive(choice.is_some());
-                    if let Some(st) = &status {
-                        st.set_text(settings::bool_word(choice.unwrap_or(live)));
+                    if let Some(status_label) = &status {
+                        status_label.set_text(settings::bool_word(choice.unwrap_or(live)));
                     }
                     save();
                     glib::Propagation::Proceed
@@ -349,12 +346,10 @@ impl SettingCard {
                 live_str.borrow().as_deref(),
             );
             syncing.set(false);
-            if let Some(st) = &status {
-                let on = match desired.borrow().settings.get(key) {
-                    Some(SettingValue::Bool(b)) => *b,
-                    _ => live_bool.get().unwrap_or(false),
-                };
-                st.set_text(settings::bool_word(on));
+            if let Some(status_label) = &status {
+                let on = settings::stored_bool(&desired.borrow().settings, key)
+                    .unwrap_or_else(|| live_bool.get().unwrap_or(false));
+                status_label.set_text(settings::bool_word(on));
             }
             reset.set_sensitive(false);
             save();
