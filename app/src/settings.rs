@@ -474,6 +474,24 @@ pub fn bool_word(on: bool) -> &'static str {
     }
 }
 
+/// A setting's chosen value worded the way its control shows it: booleans as
+/// capitalised On/Off, choices as their plain-language option, strings as
+/// themselves. Unknown values fall back to their raw form. Lets read-only
+/// surfaces (Your system) mirror the Settings editor's wording.
+pub fn value_plain(spec: &Spec, value: &SettingValue) -> String {
+    match (&spec.kind, value) {
+        (ValueKind::Boolean, SettingValue::Bool(b)) => bool_word(*b).to_string(),
+        (ValueKind::Choice(options), SettingValue::Str(s)) => options
+            .iter()
+            .find(|(v, _)| v == s)
+            .map(|(_, p)| *p)
+            .unwrap_or(s)
+            .to_string(),
+        (_, SettingValue::Str(s)) => s.clone(),
+        (_, SettingValue::Bool(b)) => bool_word(*b).to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -622,6 +640,30 @@ mod tests {
     fn bool_word_is_capitalised_regardless_of_state() {
         assert_eq!(bool_word(true), "On");
         assert_eq!(bool_word(false), "Off");
+    }
+
+    #[test]
+    fn value_plain_words_booleans_choices_and_strings() {
+        let b = bool_spec("system", "x.b", "B", "b", "d");
+        let c = choice_spec(
+            "system",
+            "x.c",
+            "C",
+            "c",
+            "d",
+            &[("--delete-older-than 7d", "Keep about 7 days")],
+        );
+        let s = str_spec("system", "x.s", "S", "s", "d", |_| Ok(()));
+        assert_eq!(value_plain(&b, &SettingValue::Bool(true)), "On");
+        assert_eq!(value_plain(&b, &SettingValue::Bool(false)), "Off");
+        assert_eq!(
+            value_plain(&c, &SettingValue::Str("--delete-older-than 7d".into())),
+            "Keep about 7 days"
+        );
+        assert_eq!(
+            value_plain(&s, &SettingValue::Str("Europe/Berlin".into())),
+            "Europe/Berlin"
+        );
     }
 
     #[test]

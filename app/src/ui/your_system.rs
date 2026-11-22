@@ -107,13 +107,6 @@ impl YourSystemPage {
             let row = gtk4::ListBoxRow::new();
             row.set_selectable(false);
             row.set_activatable(false);
-            let boxed = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-            let label_w = gtk4::Label::new(Some(&label));
-            label_w.set_xalign(0.0);
-            label_w.set_hexpand(true);
-            label_w.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-            let scope_w = gtk4::Label::new(Some(&scope));
-            scope_w.add_css_class("dim-label");
             let remove = gtk4::Button::with_label("Remove");
             remove.add_css_class("flat");
             remove.add_css_class("destructive-action");
@@ -121,10 +114,68 @@ impl YourSystemPage {
                 "Stop asking for “{label}”. It stays on this computer until a \
                  future clean-up; nothing is removed until you apply a change."
             )));
-            boxed.append(&label_w);
-            boxed.append(&scope_w);
-            boxed.append(&remove);
-            row.set_child(Some(&boxed));
+            if package_scope.is_none() {
+                // A stored setting: read like the Settings card (title + info
+                // icon carrying details, short summary) with the chosen value
+                // worded plainly and Remove as the review action.
+                let spec = settings::SPECS.iter().find(|s| s.key == attr);
+                let value_text = match spec {
+                    Some(s) => doc
+                        .settings
+                        .get(s.key)
+                        .map(|v| crate::settings::value_plain(s, v))
+                        .unwrap_or_else(|| "—".to_string()),
+                    None => "—".to_string(),
+                };
+                let boxed = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+                let head = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+                let label_w = gtk4::Label::new(Some(&label));
+                label_w.add_css_class("heading");
+                label_w.set_xalign(0.0);
+                head.append(&label_w);
+                if let Some(s) = spec {
+                    let info = gtk4::Label::new(Some("ⓘ"));
+                    info.add_css_class("dim-label");
+                    info.set_halign(gtk4::Align::Start);
+                    info.set_tooltip_text(Some(s.details));
+                    head.append(&info);
+                    let value_w = gtk4::Label::new(Some(&value_text));
+                    value_w.set_halign(gtk4::Align::End);
+                    value_w.set_hexpand(true);
+                    value_w.set_xalign(1.0);
+                    value_w.add_css_class("dim-label");
+                    head.append(&value_w);
+                    let blurb_w = gtk4::Label::new(Some(s.blurb));
+                    blurb_w.set_xalign(0.0);
+                    blurb_w.set_wrap(true);
+                    blurb_w.add_css_class("dim-label");
+                    boxed.append(&head);
+                    boxed.append(&blurb_w);
+                } else {
+                    let value_w = gtk4::Label::new(Some(&value_text));
+                    value_w.set_halign(gtk4::Align::End);
+                    value_w.set_hexpand(true);
+                    value_w.set_xalign(1.0);
+                    value_w.add_css_class("dim-label");
+                    head.append(&value_w);
+                    boxed.append(&head);
+                }
+                head.append(&remove);
+                row.set_child(Some(&boxed));
+            } else {
+                // Packages: a single-line row (no summary or value wording).
+                let boxed = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+                let label_w = gtk4::Label::new(Some(&label));
+                label_w.set_xalign(0.0);
+                label_w.set_hexpand(true);
+                label_w.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+                let scope_w = gtk4::Label::new(Some(&scope));
+                scope_w.add_css_class("dim-label");
+                boxed.append(&label_w);
+                boxed.append(&scope_w);
+                boxed.append(&remove);
+                row.set_child(Some(&boxed));
+            }
             self.list.append(&row);
 
             let desired = desired.clone();

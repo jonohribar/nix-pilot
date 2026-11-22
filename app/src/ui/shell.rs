@@ -475,8 +475,26 @@ pub fn run(
         &global.entry,
     );
 
-    // Dev/test deep-link: NIX_PILOT_GO=settings|updates opens a non-default
-    // page (used by screenshot and AT-SPI drives; core keeps the default).
+    // Dev/test demo: seed a few settings so read-only review pages render
+    // non-empty rows for screenshots/AT-SPI drives (never in the core path).
+    if std::env::var("NIX_PILOT_DEMO").as_deref() == Ok("1") {
+        desired.borrow_mut().settings.insert(
+            "services.pipewire.enable".into(),
+            crate::desired_state::SettingValue::Bool(true),
+        );
+        desired.borrow_mut().settings.insert(
+            "time.timeZone".into(),
+            crate::desired_state::SettingValue::Str("Europe/Berlin".into()),
+        );
+        desired.borrow_mut().settings.insert(
+            "nix.gc.options".into(),
+            crate::desired_state::SettingValue::Str("--delete-older-than 7d".into()),
+        );
+    }
+
+    // Dev/test deep-link: NIX_PILOT_GO=settings|updates|your-system opens a
+    // non-default page (used by screenshot and AT-SPI drives; the core keeps
+    // the store list).
     match std::env::var("NIX_PILOT_GO").as_deref() {
         Ok("settings") => {
             let first = crate::settings::SETTINGS_CATEGORIES
@@ -486,6 +504,10 @@ pub fn run(
             select_category(first);
         }
         Ok("updates") => stack.set_visible_child_name("updates"),
+        Ok("your-system") => {
+            your_system.refresh(&desired, &on_package_intent_change_for_sidebar);
+            stack.set_visible_child_name("your-system");
+        }
         _ => {}
     }
     let body = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
