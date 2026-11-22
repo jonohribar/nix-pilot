@@ -34,6 +34,16 @@ Each setting workflow is versioned record with the following fields:
 - When a setting's backing option no longer applies (renamed, removed or moved), the UI tells the user "this setting no longer applies" instead of generating stale configuration ([architecture.md, Settings surface](../architecture.md#settings-surface)).  *(Shipped 2026-11-20: the current-value read-out classifies a missing-attribute eval failure as NoSuchOption and the Settings page shows this exact message.)*
 - A version change is additive and migration-bearing; old versions of a setting record remain readable so installed state can be upgraded rather than dropped.  *(The versioned migration *map* itself is added when a backing option actually renames; none of the shipped workflows has renamed in the pinned snapshot yet.)*
 
+## Control layout
+
+Each setting renders as one card with three stacked rows:
+
+- A title row: the setting's plain-language name with a small info icon; hovering the icon shows the detailed description (`details`), keeping the card compact.
+- A short summary line above the control (the `blurb`).
+- One horizontal control row: the control (switch, dropdown or text entry), an inline capitalised status for switches (`On`/`Off`, mirror-reality: the effective value, stored choice else the live system value), and a `Reset to default` button to its right.
+
+`Reset to default` is always visible and only greyed when no change is stored, so the control never pops in or out; it points the setting back at the system value (removing the stored choice). Text and choice rows preselect the live system value when nothing is stored, under a guard so the prefill is never recorded as the user's choice.
+
 ## Initial surface
 
 The first-release surface covers the areas in REQ-5: networking, display, sound, printers, users, power and remote access. Each area is a set of setting workflows meeting the boundary above; anything in those areas that fails the boundary (for example display appearance, which is desktop chrome) is exposed as a pointer, not a workflow.

@@ -37,6 +37,8 @@ pub struct Spec {
     pub label: &'static str,
     /// One-line plain-language behaviour (REQ-6).
     pub blurb: &'static str,
+    /// Longer plain-language detail shown behind the info icon.
+    pub details: &'static str,
     /// Value type, shared by validation and UI construction.
     pub kind: ValueKind,
     /// Category page that owns this setting ("system", "network", "time",
@@ -63,12 +65,14 @@ const fn str_spec(
     key: &'static str,
     label: &'static str,
     blurb: &'static str,
+    details: &'static str,
     validate: fn(&str) -> Result<(), String>,
 ) -> Spec {
     Spec {
         key,
         label,
         blurb,
+        details,
         kind: ValueKind::String,
         category,
         tags: &[],
@@ -87,7 +91,8 @@ pub static SPECS: &[Spec] = &[
         "system",
         "networking.hostName",
         "Device name",
-        "The machine's name on the network (a simple name, no domain or spaces).",
+        "The machine's name on the network.",
+        "Shown to other computers on your network so they can tell machines apart. Use a simple name without spaces or punctuation.",
         |v| {
             if v.len() > 63 {
                 Err("too long (max 63 characters)".into())
@@ -103,7 +108,8 @@ pub static SPECS: &[Spec] = &[
         "network",
         "networking.networkmanager.enable",
         "Network connections",
-        "Manage Wi-Fi and wired connections (NetworkManager) instead of static settings.",
+        "Manage Wi-Fi and wired connections.",
+        "Lets the desktop manage Wi-Fi, wired and VPN connections for you. Turn it off only if you set networking up manually in the system configuration.",
     )
     .with_tags(&[
         "wifi",
@@ -116,22 +122,24 @@ pub static SPECS: &[Spec] = &[
         "network",
         "hardware.bluetooth.enable",
         "Bluetooth",
-        "Use Bluetooth devices (headphones, mice, keyboards).",
+        "Use Bluetooth devices.",
+        "Lets this computer use Bluetooth headphones, mice and keyboards. Turning it off disables Bluetooth entirely.",
     )
     .with_tags(&["wireless", "headphones", "mice", "keyboards"]),
     bool_spec(
         "network",
         "hardware.bluetooth.powerOnBoot",
         "Bluetooth at startup",
-        "Turn Bluetooth on when the computer starts (needs Bluetooth to be \
-         enabled).",
+        "Turn Bluetooth on when the computer starts.",
+        "Whether Bluetooth turns on by itself at startup. It only matters when Bluetooth is enabled.",
     )
     .with_tags(&["boot", "start up", "wireless"]),
     str_spec(
         "time",
         "time.timeZone",
         "Time zone",
-        "The time zone used for times and dates (like Europe/Berlin).",
+        "The time zone used for times and dates.",
+        "Pick your region so times and dates are correct. Uses standard IANA names like Europe/Berlin.",
         |v| {
             if v.chars().any(char::is_whitespace) {
                 Err("no spaces — use an IANA name like Europe/Berlin".into())
@@ -145,7 +153,8 @@ pub static SPECS: &[Spec] = &[
         "time",
         "i18n.defaultLocale",
         "Language and region",
-        "The language for messages, dates and numbers (like en_US.UTF-8).",
+        "The language for messages, dates and numbers.",
+        "Sets the language for messages and how dates and numbers are written. Example: en_US.UTF-8.",
         |v| {
             if v.chars()
                 .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '@' | '-'))
@@ -162,37 +171,40 @@ pub static SPECS: &[Spec] = &[
         "system",
         "services.printing.enable",
         "Printing",
-        "Start the printing service so the machine can use and share printers.",
+        "Start the printing service.",
+        "Starts the printing service so this computer can use and share printers.",
     )
     .with_tags(&["printer", "print"]),
     bool_spec(
         "system",
         "powerManagement.enable",
         "Power management",
-        "Enable suspend and power-saving features (mainly for laptops).",
+        "Enable suspend and power-saving.",
+        "Turns on suspend and power-saving so the machine uses less energy; mainly useful on laptops.",
     )
     .with_tags(&["battery", "suspend", "sleep", "power saving"]),
     bool_spec(
         "system",
         "services.pipewire.enable",
         "Sound",
-        "Play and record sound through the desktop (PipeWire).",
+        "Play and record sound.",
+        "Provides sound playback and recording through the desktop using PipeWire.",
     )
     .with_tags(&["audio", "speakers", "microphone", "volume"]),
     bool_spec(
         "privacy",
         "services.openssh.enable",
         "Remote access (SSH)",
-        "Allow connecting to this computer from elsewhere (remote shell).",
+        "Allow connecting to this computer remotely.",
+        "Lets you connect to this computer from another machine using a secure shell. Before enabling it, set up remote access keys.",
     )
     .with_tags(&["ssh", "remote", "remote shell", "secure shell"]),
     bool_spec(
         "software",
         "nixpkgs.config.allowUnfree",
         "Restricted-licence software",
-        "Allow installing apps whose licence restricts redistribution or \
-         modification (for example proprietary apps); off, a restricted \
-         app cannot be installed.",
+        "Allow apps whose licence restricts use.",
+        "Lets you install apps whose licence restricts copying or changes, including some common proprietary apps. Leave it off to install only free and open-source apps.",
     )
     .with_tags(&[
         "unfree",
@@ -207,8 +219,8 @@ pub static SPECS: &[Spec] = &[
         "updates",
         "nix.gc.automatic",
         "Automatic cleanup",
-        "Regularly remove packages and files nothing needs anymore, so the \
-         system does not fill up over time.",
+        "Regularly remove files nothing needs.",
+        "Periodically removes old versions and unused files so the system does not fill up over time.",
     )
     .with_tags(&["garbage", "disk space", "free space", "delete files"]),
     choice_spec(
@@ -216,6 +228,7 @@ pub static SPECS: &[Spec] = &[
         "nix.gc.options",
         "What cleanup keeps",
         "How old a version must be before cleanup removes it.",
+        "How many days of history cleanup keeps. Shorter protects less disk; longer keeps more versions to fall back to.",
         &[
             ("--delete-older-than 7d", "Keep about 7 days"),
             ("--delete-older-than 30d", "Keep about 30 days"),
@@ -226,22 +239,24 @@ pub static SPECS: &[Spec] = &[
         "updates",
         "nix.optimise.automatic",
         "Reclaim storage",
-        "Periodically link identical files together to save disk space.",
+        "Join identical files together.",
+        "Periodically links identical files together to save disk space.",
     )
     .with_tags(&["disk space", "deduplicate", "same files", "compact"]),
     bool_spec(
         "updates",
         "system.autoUpgrade.enable",
         "Automatic system updates",
-        "Check for and switch to new system versions on a schedule.",
+        "Check for and switch to new versions.",
+        "Checks for a new system version on the schedule and switches to it automatically.",
     )
     .with_tags(&["upgrade", "security", "patches", "new version"]),
     str_spec(
         "updates",
         "system.autoUpgrade.dates",
         "Update schedule",
-        "When to check for updates, like 02:00 (empty = the system's \
-         default schedule).",
+        "When to check for updates.",
+        "The time of day to check and apply updates, in 24-hour time like 02:00. Leave empty for the system's default schedule.",
         |v| {
             fn valid(t: &str) -> bool {
                 let mut parts = t.split(':');
@@ -265,7 +280,8 @@ pub static SPECS: &[Spec] = &[
         "updates",
         "system.autoUpgrade.randomizedDelaySec",
         "Update delay",
-        "Spread updates out within a window so they do not all happen at once.",
+        "Spread updates out within a window.",
+        "Spreads scheduled updates across a window so not all machines on a network update in the same instant.",
         &[
             ("300", "Within about 5 minutes"),
             ("1800", "Within about 30 minutes"),
@@ -276,7 +292,8 @@ pub static SPECS: &[Spec] = &[
         "updates",
         "system.autoUpgrade.operation",
         "Update action",
-        "What happens after a new version is checked and built.",
+        "What happens after a new version is built.",
+        "What to do once a new version is ready: switch now, or prepare it and apply at the next restart.",
         &[
             ("switch", "Apply right away"),
             ("boot", "Apply at the next restart"),
@@ -287,8 +304,8 @@ pub static SPECS: &[Spec] = &[
         "updates",
         "system.autoUpgrade.flake",
         "System configuration",
-        "Which description of this computer automatic updates follow (empty = \
-         this computer's standard setup).",
+        "Which setup automatic updates follow.",
+        "The source the automatic updater follows. Leave empty to use this computer's standard setup.",
         |v| {
             if v.is_empty() || !v.chars().any(char::is_whitespace) {
                 Ok(())
@@ -299,6 +316,7 @@ pub static SPECS: &[Spec] = &[
     )
     .with_tags(&["flake", "configuration", "description"]),
 ];
+
 /// The settings categories shown as the two-column router: (label, summary,
 /// child-id). The sidebar renders this list; SettingsPage keys its card
 /// pages by the same child-id so the two can never disagree.
@@ -321,11 +339,13 @@ const fn bool_spec(
     key: &'static str,
     label: &'static str,
     blurb: &'static str,
+    details: &'static str,
 ) -> Spec {
     Spec {
         key,
         label,
         blurb,
+        details,
         kind: ValueKind::Boolean,
         category,
         tags: &[],
@@ -340,12 +360,14 @@ const fn choice_spec(
     key: &'static str,
     label: &'static str,
     blurb: &'static str,
+    details: &'static str,
     options: &'static [(&'static str, &'static str)],
 ) -> Spec {
     Spec {
         key,
         label,
         blurb,
+        details,
         kind: ValueKind::Choice(options),
         category,
         tags: &[],
@@ -442,21 +464,13 @@ pub fn apply_bool_toggle(live: bool, toggled_to: bool) -> Option<bool> {
     }
 }
 
-/// Plain-language status for a boolean setting: what the system does now and
-/// whether the user has a pending change.
-pub fn bool_status_text(live: bool, choice: Option<bool>) -> String {
-    let word = |b: bool| if b { "on" } else { "off" };
-    match choice {
-        None => format!("currently: {} — what your system does (system)", word(live)),
-        Some(c) if c == live => format!(
-            "currently: {} — your choice matches your system",
-            word(live)
-        ),
-        Some(c) => format!(
-            "currently: {} — you chose {} (applies when you next update)",
-            word(live),
-            word(c)
-        ),
+/// The capitalised state word shown beside a boolean switch: the toggle's
+/// effective position spelt out for users who do not read a switch's fill.
+pub fn bool_word(on: bool) -> &'static str {
+    if on {
+        "On"
+    } else {
+        "Off"
     }
 }
 
@@ -605,19 +619,9 @@ mod tests {
     }
 
     #[test]
-    fn bool_status_distinguishes_system_from_pending_choice() {
-        assert_eq!(
-            bool_status_text(true, None),
-            "currently: on — what your system does (system)"
-        );
-        let pending = bool_status_text(true, Some(false));
-        assert!(pending.contains("you chose off"), "{pending}");
-        assert!(
-            pending.contains("applies when you next update"),
-            "{pending}"
-        );
-        // A stored choice equal to the live value reads as "matches".
-        assert!(bool_status_text(false, Some(false)).contains("matches your system"));
+    fn bool_word_is_capitalised_regardless_of_state() {
+        assert_eq!(bool_word(true), "On");
+        assert_eq!(bool_word(false), "Off");
     }
 
     #[test]

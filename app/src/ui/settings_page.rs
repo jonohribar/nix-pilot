@@ -11,7 +11,7 @@ use std::sync::mpsc;
 use gtk4::prelude::*;
 
 use crate::account::{self, AccountPresence};
-use crate::config_value::{read_config_value, ConfigValue, ConfigValueError};
+use crate::config_value::{read_config_value, ConfigValue};
 use crate::desired_state::{AccountProfile, DesiredDoc, SettingValue};
 use crate::settings::{self, ValueKind};
 
@@ -32,26 +32,85 @@ impl Clone for Control {
     }
 }
 
-/// A current-value/label in-flight result: a live bool (switch rows) or the
-/// plain text for other control rows.
+/// A live-value read result: a boolean (switch rows) or a raw text value
+/// (entry/dropdown rows), filled as the read lands.
 enum RowLive {
     Bool(bool),
-    Text(String),
+    Str(String),
 }
 
 #[derive(Clone)]
 struct RowData {
     key: &'static str,
     control: Control,
-    current_label: gtk4::Label,
-    /// For boolean rows: the live system value, filled as the read lands.
+    /// Inline status: capitalised On/Off beside boolean switches.
+    status: Option<gtk4::Label>,
+    /// Live system value for boolean rows (mirror-reality).
     live_bool: std::cell::Cell<Option<bool>>,
-    /// For boolean rows: suppresses the toggle handler during a programmatic
-    /// `set_active`, so reflecting the live value never re-persists a choice.
+    /// Live system value for entry/dropdown rows.
+    live_str: std::cell::RefCell<Option<String>>,
+    /// Suppresses a widget handler during a programmatic prefill, so
+    /// reflecting the live value never re-persists a choice.
     syncing: std::rc::Rc<std::cell::Cell<bool>>,
-    /// For boolean rows: a per-setting 'Reset' button, shown only while a
-    /// stored change makes it meaningful.
-    reset: Option<gtk4::Button>,
+    /// Per-setting 'Reset to default': always visible, greyed when no change
+    /// is stored.
+    reset: gtk4::Button,
+}
+
+/// Restore a row's control to its "no stored change" state (mirror-reality's
+/// reset-to-default): the stored choice has already been removed; this points
+/// the widget at the effective value without emitting a change that would
+/// re-persist a choice.
+fn restore_live(control: &Control, live_bool: bool, live_str: Option<&str>) {
+    match control {
+        Control::Switch(sw) => sw.set_active(live_bool),
+        // The dropdown's first seat is the explicit "use the system default".
+        Control::Dropdown(combo) => {
+            let _ = live_str;
+            combo.set_active(Some(0));
+        }
+        Control::Entry(entry) => {
+            let _ = live_bool;
+            entry.set_text(live_str.unwrap_or(""));
+        }
+    }
+}
+
+/// Wire the per-setting 'Reset to default' button: point the setting back at
+/// the system value (removing the stored choice), then keep it greyed until a
+/// new choice is stored. Always visible so the control never pops in and out.
+fn wire_reset_to_default(row: &RowData, desired: &Rc<RefCell<DesiredDoc>>, save: Rc<dyn Fn()>) {
+    let key = row.key;
+    let control = row.control.clone();
+    let live_bool = row.live_bool.clone();
+    let live_str = row.live_str.clone();
+    let syncing = row.syncing.clone();
+    let status = row.status.clone();
+    let reset = row.reset.clone();
+    let desired = desired.clone();
+    let button = reset.clone();
+    button.connect_clicked(move |_| {
+        if syncing.get() {
+            return;
+        }
+        desired.borrow_mut().settings.remove(key);
+        syncing.set(true);
+        restore_live(
+            &control,
+            live_bool.get().unwrap_or(false),
+            live_str.borrow().as_deref(),
+        );
+        syncing.set(false);
+        if let Some(st) = &status {
+            let on = match desired.borrow().settings.get(key) {
+                Some(SettingValue::Bool(b)) => *b,
+                _ => live_bool.get().unwrap_or(false),
+            };
+            st.set_text(settings::bool_word(on));
+        }
+        reset.set_sensitive(false);
+        save();
+    });
 }
 
 /// Settings surface containing the profile, category navigation, and controls.
@@ -105,71 +164,83 @@ impl SettingsPage {
             let card = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
             card.add_css_class("card");
             card.set_margin_top(6);
+            card.set_margin_start(4);
+            card.set_margin_end(4);
+
+            // Title row: heading + info icon carrying the detailed description.
+            let title_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
             let label = gtk4::Label::new(Some(spec.label));
             label.add_css_class("heading");
-            label.set_xalign(0.0);
+            label.set_halign(gtk4::Align::Start);
+            title_row.append(&label);
+            let info = gtk4::Label::new(Some("ⓘ"));
+            info.add_css_class("dim-label");
+            info.set_halign(gtk4::Align::Start);
+            info.set_valign(gtk4::Align::Start);
+            info.set_tooltip_text(Some(spec.details));
+            title_row.append(&info);
+            card.append(&title_row);
+
+            // Short summary, above the control.
             let blurb = gtk4::Label::new(Some(spec.blurb));
             blurb.set_xalign(0.0);
             blurb.set_wrap(true);
             blurb.add_css_class("dim-label");
-            card.append(&label);
             card.append(&blurb);
 
-            // bool → switch; authored value set → dropdown; other strings
-            // → free-text entry (S3/D14 authored controls, C2).
-            let mut reset_button: Option<gtk4::Button> = None;
+            // One horizontal row: the control, inline status (capitalised
+            // On/Off for booleans), and the always-visible Reset button.
+            let control_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+            control_row.set_margin_top(6);
+
+            let mut status: Option<gtk4::Label> = None;
+            let reset = gtk4::Button::with_label("Reset to default");
+            reset.set_valign(gtk4::Align::Center);
+            reset.set_sensitive(false);
+
             let control = match spec.kind {
                 ValueKind::Boolean => {
                     let sw = gtk4::Switch::new();
-                    sw.set_halign(gtk4::Align::Start);
-                    sw.set_margin_top(4);
-                    card.append(&sw);
-                    // A boolean switch has no visible "system default" seat
-                    // (unlike a dropdown), so a per-setting Reset restores it
-                    // to the live value; shown only once a change is stored.
-                    let reset = gtk4::Button::with_label("Reset to default");
-                    reset.set_halign(gtk4::Align::Start);
-                    reset.set_margin_top(4);
-                    reset.set_visible(false);
-                    card.append(&reset);
-                    reset_button = Some(reset);
+                    sw.set_valign(gtk4::Align::Center);
+                    control_row.append(&sw);
+                    let st = gtk4::Label::new(Some("Off"));
+                    st.set_valign(gtk4::Align::Center);
+                    st.add_css_class("dim-label");
+                    st.set_tooltip_text(Some("the value that will apply"));
+                    control_row.append(&st);
+                    status = Some(st);
                     Control::Switch(sw)
                 }
                 ValueKind::Choice(options) => {
                     let combo = gtk4::ComboBoxText::new();
-                    combo.append(None, "(system default)");
+                    combo.append(None, "(use the system default)");
                     for (value, plain) in options {
                         combo.append(Some(value), plain);
                     }
                     combo.set_active(Some(0));
-                    combo.set_margin_top(4);
-                    card.append(&combo);
+                    combo.set_hexpand(true);
+                    control_row.append(&combo);
                     Control::Dropdown(combo)
                 }
                 ValueKind::String => {
                     let entry = gtk4::Entry::new();
-                    entry.set_placeholder_text(Some("(not set — uses your system default)"));
-                    entry.set_margin_top(4);
-                    card.append(&entry);
+                    entry.set_placeholder_text(Some("(empty = use the system default)"));
+                    entry.set_hexpand(true);
+                    control_row.append(&entry);
                     Control::Entry(entry)
                 }
             };
-
-            // Current value label (dim, shown under the control)
-            let current_label = gtk4::Label::new(None);
-            current_label.set_xalign(0.0);
-            current_label.add_css_class("dim-label");
-            current_label.set_margin_top(4);
-            current_label.set_visible(false);
-            card.append(&current_label);
+            control_row.append(&reset);
+            card.append(&control_row);
 
             rows.push(RowData {
                 key: spec.key,
                 control,
-                current_label,
+                status,
                 live_bool: std::cell::Cell::new(None),
+                live_str: std::cell::RefCell::new(None),
                 syncing: std::rc::Rc::new(std::cell::Cell::new(false)),
-                reset: reset_button,
+                reset,
             });
             cat_pages[spec.category].append(&card);
         }
@@ -289,19 +360,28 @@ impl SettingsPage {
             let key: &'static str = row.key;
             match &row.control {
                 Control::Entry(entry) => {
-                    let current = desired.borrow().settings.get(key).cloned();
-                    if let Some(SettingValue::Str(s)) = current {
+                    if let Some(SettingValue::Str(s)) = desired.borrow().settings.get(key).cloned()
+                    {
                         entry.set_text(&s);
+                        row.reset.set_sensitive(true);
                     }
+                    let syncing = row.syncing.clone();
+                    let reset = row.reset.clone();
                     let desired = desired.clone();
                     let save = save.clone();
                     let entry = entry.clone();
                     entry.connect_changed(move |e| {
+                        // A programmatic prefill (restoring the live value)
+                        // must not be recorded as the user's choice.
+                        if syncing.get() {
+                            return;
+                        }
                         let text = e.text().to_string();
                         if text.is_empty() {
                             e.remove_css_class("error");
                             e.set_tooltip_text(None);
                             desired.borrow_mut().settings.remove(key);
+                            reset.set_sensitive(false);
                             save();
                             return;
                         }
@@ -313,6 +393,7 @@ impl SettingsPage {
                                     .borrow_mut()
                                     .settings
                                     .insert(key.to_string(), SettingValue::Str(text));
+                                reset.set_sensitive(true);
                                 save();
                             }
                             Err(reason) => {
@@ -325,55 +406,30 @@ impl SettingsPage {
                 Control::Switch(sw) => {
                     // Initial position: a stored choice if any, else a neutral
                     // placeholder the live read corrects a moment later
-                    // (mirror-reality: the switch shows what the setting is).
+                    // (mirror-reality: the switch shows what the value is).
                     let choice_now = match desired.borrow().settings.get(key) {
                         Some(SettingValue::Bool(b)) => Some(*b),
                         _ => None,
                     };
                     sw.set_active(choice_now.unwrap_or(false));
-                    if let Some(reset) = &row.reset {
-                        reset.set_visible(choice_now.is_some());
+                    row.reset.set_sensitive(choice_now.is_some());
+                    if let Some(st) = &row.status {
+                        st.set_text(settings::bool_word(choice_now.unwrap_or(false)));
                     }
                     let live_cell = row.live_bool.clone();
                     let syncing = row.syncing.clone();
                     let reset = row.reset.clone();
-                    let current_label = row.current_label.clone();
+                    let status = row.status.clone();
                     let desired = desired.clone();
                     let save = save.clone();
                     let sw = sw.clone();
-                    if let Some(reset_btn) = &reset {
-                        let reset_btn = reset_btn.clone();
-                        let reset_sw = sw.clone();
-                        let reset_live = live_cell.clone();
-                        let reset_sync = syncing.clone();
-                        let reset_label = current_label.clone();
-                        let reset_desired = desired.clone();
-                        let reset_save = save.clone();
-                        reset_btn.clone().connect_clicked(move |_| {
-                            // Clear the stored choice back to the system value.
-                            reset_desired.borrow_mut().settings.remove(key);
-                            if let Some(live) = reset_live.get() {
-                                reset_sync.set(true);
-                                reset_sw.set_active(live);
-                                reset_sync.set(false);
-                                reset_label.set_text(&settings::bool_status_text(live, None));
-                                reset_label.set_visible(true);
-                            }
-                            reset_btn.set_visible(false);
-                            reset_save();
-                        });
-                    }
                     sw.connect_state_set(move |_, active| {
                         // A programmatic set_active (reflecting the live value)
                         // must not persist a choice.
                         if syncing.get() {
                             return glib::Propagation::Proceed;
                         }
-                        let live = match live_cell.get() {
-                            Some(live) => live,
-                            // Read not landed yet: record the flip literally.
-                            None => active,
-                        };
+                        let live = live_cell.get().unwrap_or(active);
                         let choice = settings::apply_bool_toggle(live, active);
                         match choice {
                             Some(b) => {
@@ -386,11 +442,10 @@ impl SettingsPage {
                                 desired.borrow_mut().settings.remove(key);
                             }
                         }
-                        if let Some(reset) = &reset {
-                            reset.set_visible(choice.is_some());
+                        reset.set_sensitive(choice.is_some());
+                        if let Some(st) = &status {
+                            st.set_text(settings::bool_word(choice.unwrap_or(live)));
                         }
-                        current_label.set_text(&settings::bool_status_text(live, choice));
-                        current_label.set_visible(true);
                         save();
                         glib::Propagation::Proceed
                     });
@@ -400,12 +455,18 @@ impl SettingsPage {
                     let current = desired.borrow().settings.get(key).cloned();
                     if let Some(SettingValue::Str(s)) = current {
                         combo.set_active_id(Some(&s));
+                        row.reset.set_sensitive(true);
                     } else {
                         combo.set_active(Some(0));
                     }
+                    let syncing = row.syncing.clone();
+                    let reset = row.reset.clone();
                     let desired = desired.clone();
                     let save = save.clone();
                     combo.connect_changed(move |c| {
+                        if syncing.get() {
+                            return;
+                        }
                         let chosen = c.active_id().map(|g| g.to_string());
                         match chosen {
                             Some(v) if !v.is_empty() => {
@@ -413,15 +474,19 @@ impl SettingsPage {
                                     .borrow_mut()
                                     .settings
                                     .insert(key.to_string(), SettingValue::Str(v));
+                                reset.set_sensitive(true);
                             }
                             _ => {
                                 desired.borrow_mut().settings.remove(key);
+                                reset.set_sensitive(false);
                             }
                         }
                         save();
                     });
                 }
             }
+            // Always-visible Reset-to-default, greyed until a change is stored.
+            wire_reset_to_default(row, desired, save.clone());
         }
 
         // SSH authorized keys: debounced save of the multi-line editor.
@@ -567,33 +632,36 @@ impl SettingsPage {
     /// Non-blocking: runs on background threads and updates the UI via the
     /// main context. Only attempts to read if NixOS config is available.
     pub fn load_current_values(&self, desired: &Rc<RefCell<DesiredDoc>>) {
-        // Check availability heuristic (cheap, non-blocking)
+        // Check availability heuristic (cheap, non-blocking); rows stay at
+        // their placeholders when config values cannot be read.
         if !crate::config_value::is_available() {
-            for row in &self.rows {
-                row.current_label
-                    .set_text("could not read value (not on NixOS or nix unavailable)");
-                row.current_label.set_visible(true);
-            }
             return;
         }
 
         // Create a channel to receive results from background threads
         let (tx, rx) = mpsc::channel::<(String, RowLive)>();
 
-        // Spawn a thread for each option: boolean rows carry the live value,
-        // everything else carries plain label text.
+        // Spawn a thread per option: boolean rows carry the live bool, text
+        // and choice rows carry the raw live value for prefill.
         for row in &self.rows {
             let key = row.key;
             let is_switch = matches!(&row.control, Control::Switch(_));
             let tx = tx.clone();
             std::thread::spawn(move || {
                 let result = read_config_value(key);
-                let message = match (is_switch, result) {
-                    (true, Ok(ConfigValue::Bool(b))) => RowLive::Bool(b),
-                    // An unset nixpkgs.config.* subkey means the boolean
-                    // default (off) applies.
-                    (true, Ok(ConfigValue::Unset)) => RowLive::Bool(false),
-                    (_, other) => RowLive::Text(live_text(other)),
+                let message = if is_switch {
+                    match result {
+                        Ok(ConfigValue::Bool(b)) => RowLive::Bool(b),
+                        // An unset nixpkgs.config.* subkey means the boolean
+                        // default (off) applies.
+                        _ => RowLive::Bool(false),
+                    }
+                } else {
+                    RowLive::Str(match result {
+                        Ok(ConfigValue::Str(s)) => s,
+                        Ok(ConfigValue::Unparsed(u)) => u,
+                        _ => String::new(),
+                    })
                 };
                 let _ = tx.send((key.to_string(), message));
             });
@@ -614,9 +682,24 @@ impl SettingsPage {
                     Ok((key, message)) => {
                         if let Some(row) = rows.iter().find(|r| r.key == key) {
                             match message {
-                                RowLive::Text(text) => {
-                                    row.current_label.set_text(&text);
-                                    row.current_label.set_visible(true);
+                                RowLive::Str(raw) => {
+                                    *row.live_str.borrow_mut() = Some(raw.clone());
+                                    // Mirror-reality: an unset row shows the
+                                    // live value, prefils under the syncing
+                                    // guard so it is never recorded as a choice.
+                                    if !desired.borrow().settings.contains_key(row.key)
+                                        && !raw.is_empty()
+                                    {
+                                        row.syncing.set(true);
+                                        match &row.control {
+                                            Control::Entry(entry) => entry.set_text(&raw),
+                                            Control::Dropdown(combo) => {
+                                                let _ = combo.set_active_id(Some(raw.as_str()));
+                                            }
+                                            Control::Switch(_) => {}
+                                        }
+                                        row.syncing.set(false);
+                                    }
                                 }
                                 RowLive::Bool(live) => render_bool_row(row, &desired, live),
                             }
@@ -636,7 +719,7 @@ impl SettingsPage {
 
 /// Apply a freshly-read live system value to a boolean setting row: record it,
 /// point the switch at the effective value (stored choice when present, else
-/// the system value), and update the status label.
+/// the system value), and update the capitalised status label and Reset.
 fn render_bool_row(row: &RowData, desired: &Rc<RefCell<DesiredDoc>>, live: bool) {
     row.live_bool.set(Some(live));
     let choice = match desired.borrow().settings.get(row.key) {
@@ -648,26 +731,9 @@ fn render_bool_row(row: &RowData, desired: &Rc<RefCell<DesiredDoc>>, live: bool)
         sw.set_active(settings::bool_effective(live, choice));
         row.syncing.set(false);
     }
-    if let Some(reset) = &row.reset {
-        reset.set_visible(choice.is_some());
-    }
-    row.current_label
-        .set_text(&settings::bool_status_text(live, choice));
-    row.current_label.set_visible(true);
-}
-
-/// Plain text for a non-boolean (or errored) current-value read.
-fn live_text(result: Result<ConfigValue, ConfigValueError>) -> String {
-    match result {
-        Ok(ConfigValue::Str(s)) => format!("currently: {s}"),
-        Ok(ConfigValue::Bool(b)) => format!("currently: {}", if b { "on" } else { "off" }),
-        Ok(ConfigValue::Unparsed(u)) => format!("currently: {u}"),
-        Ok(ConfigValue::Unset) => "currently: (system default)".to_string(),
-        Err(ConfigValueError::NoSuchOption(_)) => {
-            "this setting no longer applies — the option was removed or renamed in a newer NixOS"
-                .to_string()
-        }
-        Err(_) => "could not read value".to_string(),
+    row.reset.set_sensitive(choice.is_some());
+    if let Some(st) = &row.status {
+        st.set_text(settings::bool_word(choice.unwrap_or(live)));
     }
 }
 
