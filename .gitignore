@@ -4,3 +4,6 @@
 *.db
 .beads-credential-key
 .beads/
+
+# VS Code settings
+.vscode/
