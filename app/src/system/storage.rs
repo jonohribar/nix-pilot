@@ -60,7 +60,7 @@ pub fn cleanup(action: CleanupAction, timeout: Duration) -> CleanupResult {
                 } else {
                     "storage upkeep failed".into()
                 },
-                log: tail(&combined),
+                log: process::tail(&combined, 12),
                 summary: parse_gc_estimate(&combined),
             }
         }
@@ -120,18 +120,6 @@ pub fn parse_gc_estimate(output: &str) -> Option<String> {
         .map(str::trim)
         .find(|line| line.ends_with("would be deleted"))
         .map(str::to_string)
-}
-
-fn tail(output: &str) -> String {
-    output
-        .lines()
-        .rev()
-        .take(12)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 #[cfg(test)]

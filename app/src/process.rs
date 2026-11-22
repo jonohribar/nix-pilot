@@ -155,6 +155,21 @@ pub fn run_with_stdin(
     run_inner(command, Some(stdin_data.to_vec()), timeout)
 }
 
+/// Keep only the trailing `lines` of `output`, oldest first, as a single
+/// string. Nix diagnostics are most useful at the end; this bounds what the
+/// UI surfaces from a long build or activation log.
+pub fn tail(output: &str, lines: usize) -> String {
+    output
+        .lines()
+        .rev()
+        .take(lines)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn run_inner(
     command: &mut Command,
     stdin_data: Option<Vec<u8>>,

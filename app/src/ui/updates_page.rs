@@ -147,8 +147,7 @@ fn prepare_changes(
     let report = updates::verify_package_intents(nix, changes, std::time::Duration::from_secs(60));
     let candidate = if report.all_ok() && !changes.is_empty() {
         if let Ok(sources) = crate::config_source::discover() {
-            let state_version =
-                build::system_state_version().unwrap_or_else(|| "26.05".to_string());
+            let state_version = build::state_version_or_default();
             Some(build::build_from_desired(
                 doc,
                 &state_version,

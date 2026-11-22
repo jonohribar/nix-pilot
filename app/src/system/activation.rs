@@ -63,7 +63,7 @@ pub fn activate(action: ActivateAction, doc: &DesiredDoc, timeout: Duration) -> 
         Ok(sources) => (Some(sources.configuration), sources.hardware_configuration),
         Err(_) => (None, None),
     };
-    let state_version = build::system_state_version().unwrap_or_else(|| "26.05".to_string());
+    let state_version = build::state_version_or_default();
     let directory =
         std::env::temp_dir().join(format!("nix-pilot-activation-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&directory);
@@ -134,7 +134,7 @@ fn activate_in_directory(
             ActivateResult {
                 ok,
                 note: note.into(),
-                log: tail(&format!("{}\n{}", output.stdout, output.stderr)),
+                log: process::tail(&format!("{}\n{}", output.stdout, output.stderr), 12),
             }
         }
         Err(error) => ActivateResult {
@@ -170,23 +170,11 @@ fn create_tar_gz(directory: &Path, timeout: Duration) -> Result<Vec<u8>, String>
         Ok(output) if output.status.success() => {
             std::fs::read(&archive).map_err(|error| error.to_string())
         }
-        Ok(output) => Err(format!("tar failed: {}", tail(&output.stderr))),
+        Ok(output) => Err(format!("tar failed: {}", process::tail(&output.stderr, 12))),
         Err(error) => Err(error.to_string()),
     };
     let _ = std::fs::remove_file(archive);
     result
-}
-
-fn tail(output: &str) -> String {
-    output
-        .lines()
-        .rev()
-        .take(12)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 #[cfg(test)]

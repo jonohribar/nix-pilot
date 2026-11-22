@@ -372,6 +372,89 @@ fn build_sidebar(
 }
 
 /// Build and present the window for a loaded catalogue.
+/// The Store surface's callbacks: return-to-list, unfree-filter, and open-a-
+/// package. Built here so `run` stays a thin composition and each surface's
+/// wiring is one isolated function.
+type StoreCallbacks = (Rc<dyn Fn()>, Rc<dyn Fn(bool)>, Rc<dyn Fn(IndexEntry)>);
+
+#[allow(clippy::type_complexity)]
+fn wire_store_callbacks(
+    stack: &gtk4::Stack,
+    detail: &Rc<detail::DetailUi>,
+    desired: &Rc<RefCell<DesiredDoc>>,
+    account: &str,
+    catalogue: &store_search::StoreSearch,
+    corpus: &Rc<RefCell<SearchCorpus>>,
+    full_entries: &[IndexEntry],
+) -> StoreCallbacks {
+    let stack_for_store_query = stack.clone();
+    let on_store_query: Rc<dyn Fn()> = Rc::new(move || {
+        stack_for_store_query.set_visible_child_name("list");
+    });
+    let detail_for_store = detail.clone();
+    let desired_for_store = desired.clone();
+    let account_for_store = account.to_string();
+    let stack_for_store = stack.clone();
+    let on_store_package: Rc<dyn Fn(IndexEntry)> = Rc::new(move |entry| {
+        detail_for_store.populate(&entry);
+        detail_for_store.sync_added(&desired_for_store.borrow(), &account_for_store);
+        stack_for_store.set_visible_child_name("detail");
+    });
+    let full_entries_for_filter = full_entries.to_vec();
+    let corpus_for_filter = corpus.clone();
+    let catalogue_for_filter = catalogue.clone_handles();
+    let search_for_filter = catalogue_for_filter.search.clone();
+    let on_filter: Rc<dyn Fn(bool)> = Rc::new(move |hide_unfree| {
+        let next = SearchCorpus::new(&full_entries_for_filter, hide_unfree);
+        *corpus_for_filter.borrow_mut() = next;
+        catalogue_for_filter.refresh(&corpus_for_filter.borrow(), &search_for_filter.text());
+    });
+    (on_store_query, on_filter, on_store_package)
+}
+
+/// The app-wide search's callbacks: show the results page, return to the
+/// store, and handle a package/setting selection.
+type GlobalCallbacks = (
+    Rc<dyn Fn()>,
+    Rc<dyn Fn()>,
+    Rc<dyn Fn(global_search::GlobalSelection)>,
+);
+
+#[allow(clippy::type_complexity)]
+fn wire_global_callbacks(
+    stack: &gtk4::Stack,
+    detail: &Rc<detail::DetailUi>,
+    desired: &Rc<RefCell<DesiredDoc>>,
+    account: &str,
+    select_category: &Rc<dyn Fn(&str)>,
+) -> GlobalCallbacks {
+    let stack_for_global_query = stack.clone();
+    let on_global_query: Rc<dyn Fn()> = Rc::new(move || {
+        stack_for_global_query.set_visible_child_name("global-search");
+    });
+    let stack_for_escape = stack.clone();
+    let on_return_to_store: Rc<dyn Fn()> = Rc::new(move || {
+        stack_for_escape.set_visible_child_name("list");
+    });
+    let detail_for_global = detail.clone();
+    let desired_for_global = desired.clone();
+    let account_for_global = account.to_string();
+    let stack_for_global = stack.clone();
+    let select_category_for_global = select_category.clone();
+    let on_global_selection: Rc<dyn Fn(global_search::GlobalSelection)> =
+        Rc::new(move |target| match target {
+            global_search::GlobalSelection::Package(entry) => {
+                detail_for_global.populate(&entry);
+                detail_for_global.sync_added(&desired_for_global.borrow(), &account_for_global);
+                stack_for_global.set_visible_child_name("detail");
+            }
+            global_search::GlobalSelection::Setting(spec) => {
+                select_category_for_global(spec.category);
+            }
+        });
+    (on_global_query, on_return_to_store, on_global_selection)
+}
+
 pub fn run(
     app: &gtk4::Application,
     entries: Vec<IndexEntry>,
@@ -527,55 +610,20 @@ pub fn run(
 
     catalogue.set_initial_summary(&corpus.borrow(), load_error.as_deref());
     catalogue.render(&corpus.borrow(), &catalogue.search.text());
-    let stack_for_store_query = stack.clone();
-    let on_store_query: Rc<dyn Fn()> = Rc::new(move || {
-        stack_for_store_query.set_visible_child_name("list");
-    });
-    let detail_for_store = detail.clone();
-    let desired_for_store = desired.clone();
-    let account_for_store = account.clone();
-    let stack_for_store = stack.clone();
-    let on_store_package: Rc<dyn Fn(IndexEntry)> = Rc::new(move |entry| {
-        detail_for_store.populate(&entry);
-        detail_for_store.sync_added(&desired_for_store.borrow(), &account_for_store);
-        stack_for_store.set_visible_child_name("detail");
-    });
-    let full_entries_for_filter = full_entries.clone();
-    let corpus_for_filter = corpus.clone();
-    let catalogue_for_filter = catalogue.clone_handles();
-    let search_for_filter = catalogue_for_filter.search.clone();
-    let on_filter: Rc<dyn Fn(bool)> = Rc::new(move |hide_unfree| {
-        let next = SearchCorpus::new(&full_entries_for_filter, hide_unfree);
-        *corpus_for_filter.borrow_mut() = next;
-        catalogue_for_filter.refresh(&corpus_for_filter.borrow(), &search_for_filter.text());
-    });
+    let (on_store_query, on_filter, on_store_package) = wire_store_callbacks(
+        &stack,
+        &detail,
+        &desired,
+        &account,
+        &catalogue,
+        &corpus,
+        &full_entries,
+    );
     catalogue.wire(&corpus, on_store_query, on_filter, on_store_package);
 
     wire_search_shortcut(&global.entry, &window);
-    let stack_for_global_query = stack.clone();
-    let on_global_query: Rc<dyn Fn()> = Rc::new(move || {
-        stack_for_global_query.set_visible_child_name("global-search");
-    });
-    let stack_for_escape = stack.clone();
-    let on_return_to_store: Rc<dyn Fn()> = Rc::new(move || {
-        stack_for_escape.set_visible_child_name("list");
-    });
-    let detail_for_global = detail.clone();
-    let desired_for_global = desired.clone();
-    let account_for_global = account.clone();
-    let stack_for_global = stack.clone();
-    let select_category_for_global = select_category.clone();
-    let on_global_selection: Rc<dyn Fn(global_search::GlobalSelection)> =
-        Rc::new(move |target| match target {
-            global_search::GlobalSelection::Package(entry) => {
-                detail_for_global.populate(&entry);
-                detail_for_global.sync_added(&desired_for_global.borrow(), &account_for_global);
-                stack_for_global.set_visible_child_name("detail");
-            }
-            global_search::GlobalSelection::Setting(spec) => {
-                select_category_for_global(spec.category);
-            }
-        });
+    let (on_global_query, on_return_to_store, on_global_selection) =
+        wire_global_callbacks(&stack, &detail, &desired, &account, &select_category);
     global.wire(
         &corpus,
         on_global_query,

@@ -68,6 +68,13 @@ pub fn system_state_version() -> Option<String> {
     parse_state_version(&output.stdout)
 }
 
+/// The system's state version, falling back to the pinned snapshot's default
+/// when it cannot be read. Single source of the default so build and
+/// activation cannot drift.
+pub fn state_version_or_default() -> String {
+    system_state_version().unwrap_or_else(|| "26.05".to_string())
+}
+
 /// Select the per-user package backend for generated configuration.
 ///
 /// Defaults to NixOS-native `users.users`. Home Manager mode is selected only
@@ -208,7 +215,7 @@ pub fn build_candidate(
         }
     };
     let combined = format!("{}\n{}", output.stdout, output.stderr);
-    let log = tail(&combined);
+    let log = process::tail(&combined, 12);
     let dry_prefix = if dry { "dry-" } else { "" };
     CandidateBuild {
         ok: output.status.success(),
@@ -230,18 +237,6 @@ fn which_timeout() -> Option<String> {
             .find(|path| path.exists())
             .map(|path| path.to_string_lossy().into_owned())
     })
-}
-
-fn tail(output: &str) -> String {
-    output
-        .lines()
-        .rev()
-        .take(12)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 #[cfg(test)]
