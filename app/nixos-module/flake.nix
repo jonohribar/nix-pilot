@@ -1,7 +1,7 @@
 # nix-pilot NixOS module — flake delivery surface (decision D23).
 #
 # Use from any NixOS flake:
-#   inputs.nix-pilot.url = "github:jonohribar/nix-pilot";
+#   inputs.nix-pilot.url = "github:jonohribar/nix-pilot/app/nixos-module";
 #   ... modules = [ nix-pilot.nixosModules.default ];
 #
 # The module (./nix-pilot.nix) evaluates against the consuming system's own
