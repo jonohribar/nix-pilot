@@ -71,7 +71,7 @@ let
           dead_paths=$(nix-store --gc --print-dead 2>/dev/null || true)
           if [ -n "$dead_paths" ]; then
             approx_bytes=$(echo "$dead_paths" | xargs -r nix path-info --closure-size 2>/dev/null | awk '{sum+=$1} END {if (sum>0) printf "%.0f", sum; else print 0}')
-            echo "~${approx_bytes} bytes would be freed (approximate, all dead paths)"
+            echo "~$approx_bytes bytes would be freed (approximate, all dead paths)"
           else
             echo "~0 bytes would be freed (approximate, all dead paths)"
           fi
