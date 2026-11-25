@@ -356,7 +356,6 @@ impl DetailUi {
         let current_state = *self.try_state.borrow();
         match current_state {
             TryState::Idle => {
-                // Start a new try session
                 let Some(attr) = self.current_attr.borrow().clone() else {
                     return false;
                 };
@@ -365,7 +364,6 @@ impl DetailUi {
                         *self.try_session.borrow_mut() = Some(session);
                         *self.try_receiver.borrow_mut() = Some(receiver);
                         self.update_try_ui(TryState::Starting);
-                        // Poll for the terminal state.
                         self.poll_try_receiver();
                         // Move to Running once the app is likely up (the
                         // monitor reports only exit, so use a grace period).
@@ -549,27 +547,24 @@ fn start_availability_check(
     let expander = detail.expander.clone();
     let button = button.clone();
     let checked_attr = attr.clone();
-    let (sender, receiver) = std::sync::mpsc::channel::<install::CheckResult>();
-    std::thread::spawn(move || {
-        let result = install::check_availability(
-            &nix_path,
-            &attr,
-            allow_unfree,
-            std::time::Duration::from_secs(60),
-        );
-        let _ = sender.send(result);
-    });
-
-    // GTK stays on the main thread; only the completed check crosses threads.
-    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-        match receiver.try_recv() {
-            Ok(result) => {
+    crate::ui::async_task::run_on_main(
+        std::time::Duration::from_millis(100),
+        move || {
+            install::check_availability(
+                &nix_path,
+                &attr,
+                allow_unfree,
+                std::time::Duration::from_secs(60),
+            )
+        },
+        move |r| {
+            if let Ok(result) = r {
                 // Ignore results for a card that has since been replaced.
                 if !store::result_matches_selection(
                     current_attr.borrow().as_deref().unwrap_or(""),
                     &checked_attr,
                 ) {
-                    return glib::ControlFlow::Break;
+                    return;
                 }
                 match result.outcome {
                     install::Outcome::ConfirmedAvailable { note } => {
@@ -607,18 +602,14 @@ fn start_availability_check(
                         expander.set_expanded(false);
                     }
                 }
-                glib::ControlFlow::Break
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(_) => {
+            } else {
                 *state.borrow_mut() = InstallState::Unavailable;
                 button.set_sensitive(true);
                 button.set_label("Check again");
                 status.set_text("Could not be checked right now");
-                glib::ControlFlow::Break
             }
-        }
-    });
+        },
+    );
 }
 
 /// Connect the install button (availability check + desired state) and home-page button.

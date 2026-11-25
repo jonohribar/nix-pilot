@@ -2,7 +2,9 @@
 //! focused components (detail + install, updates review dialog). Pure logic and
 //! the nix adapter live in the sibling non-UI modules; this layer translates
 //! user actions into store/updates/install actions and renders their outcomes.
+mod async_task;
 pub mod detail;
+mod geom_dump;
 mod global_search;
 mod setting_card;
 pub mod settings_page;
@@ -40,26 +42,7 @@ mod tree_probe {
     fn collect(w: &impl IsA<gtk4::Widget>, out: &mut Vec<String>) {
         let w = w.upcast_ref::<gtk4::Widget>();
         let mut parts: Vec<String> = Vec::new();
-        if let Some(l) = w.downcast_ref::<gtk4::Label>() {
-            let t = l.text().to_string();
-            if !t.is_empty() {
-                parts.push(t);
-            }
-        }
-        if let Some(b) = w.downcast_ref::<gtk4::Button>() {
-            if let Some(t) = b.label() {
-                let t = t.to_string();
-                if !t.is_empty() {
-                    parts.push(t);
-                }
-            }
-        }
-        if let Some(t) = w.tooltip_text() {
-            let t = t.to_string();
-            if !t.is_empty() {
-                parts.push(format!("tip:{t}"));
-            }
-        }
+        crate::ui::widgets::widget_text(w, &mut parts);
         if !parts.is_empty() {
             out.push(parts.join(" | "));
         }

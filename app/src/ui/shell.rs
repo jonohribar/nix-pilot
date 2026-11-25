@@ -701,6 +701,7 @@ fn wire_settings_live_refresh(ctx: &ShellContext) {
 /// Dev/test demo seed and deep-link (screenshot and AT-SPI drives; never in
 /// the core path).
 fn wire_dev_hooks(ctx: &ShellContext) {
+    super::geom_dump::wire(&ctx.window, &ctx.stack);
     if std::env::var("NIX_PILOT_DEMO").as_deref() == Ok("1") {
         ctx.desired.borrow_mut().settings.insert(
             "services.pipewire.enable".into(),

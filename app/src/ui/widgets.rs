@@ -11,6 +11,37 @@ pub fn esc(s: &str) -> String {
     glib::markup_escape_text(s).to_string()
 }
 
+/// Recursively collect the human-readable text of a widget and its subtree
+/// into `out` (label text, button labels, tooltips). Shared by the geometry
+/// dump and the tree-probe GUI test so both walk the tree the same way.
+pub fn widget_text(w: &gtk4::Widget, out: &mut Vec<String>) {
+    if let Some(l) = w.downcast_ref::<gtk4::Label>() {
+        let t = l.text().to_string();
+        if !t.is_empty() {
+            out.push(t);
+        }
+    }
+    if let Some(b) = w.downcast_ref::<gtk4::Button>() {
+        if let Some(t) = b.label() {
+            let t = t.to_string();
+            if !t.is_empty() {
+                out.push(t);
+            }
+        }
+    }
+    if let Some(t) = w.tooltip_text() {
+        let t = t.to_string();
+        if !t.is_empty() {
+            out.push(format!("tip:{t}"));
+        }
+    }
+    let mut child = w.first_child();
+    while let Some(c) = child {
+        widget_text(&c, out);
+        child = c.next_sibling();
+    }
+}
+
 /// Build a catalogue row showing its name, class, version, and description.
 pub fn entry_row(e: &IndexEntry) -> gtk4::ListBoxRow {
     let boxv = gtk4::Box::new(gtk4::Orientation::Vertical, 2);

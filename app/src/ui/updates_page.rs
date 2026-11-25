@@ -248,16 +248,13 @@ fn run_storage_action(
     for b in [estimate, cleanup, optimise] {
         b.set_sensitive(false);
     }
-    let (tx, rx) = std::sync::mpsc::channel::<storage::CleanupResult>();
-    std::thread::spawn(move || {
-        let r = storage::cleanup(action, std::time::Duration::from_secs(600));
-        let _ = tx.send(r);
-    });
     let result = result.clone();
     let (estimate, cleanup, optimise) = (estimate.clone(), cleanup.clone(), optimise.clone());
-    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-        match rx.try_recv() {
-            Ok(r) => {
+    crate::ui::async_task::run_on_main(
+        std::time::Duration::from_millis(100),
+        move || storage::cleanup(action, std::time::Duration::from_secs(600)),
+        move |r| {
+            if let Ok(r) = r {
                 let text = match r.summary {
                     Some(s) => format!("{s} — {}", r.note),
                     None => r.note,
@@ -273,12 +270,9 @@ fn run_storage_action(
                         b.set_sensitive(activation::can_activate());
                     }
                 }
-                glib::ControlFlow::Break
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(_) => glib::ControlFlow::Break,
-        }
-    });
+        },
+    );
 }
 
 /// Outcome classification for a prepare run (pure, unit-testable).
@@ -640,27 +634,22 @@ impl UpdatesPage {
     /// The widget never crosses the thread boundary: the worker sends a plain
     /// String back and the GTK thread polls for it.
     fn refresh_storage_usage(&self) {
-        let (tx, rx) = std::sync::mpsc::channel::<String>();
-        std::thread::spawn(move || {
-            let _ = tx.send(match storage::store_usage_bytes() {
+        let label = self.storage_usage.clone();
+        crate::ui::async_task::run_on_main(
+            std::time::Duration::from_millis(100),
+            move || match storage::store_usage_bytes() {
                 Some(bytes) => format!(
                     "The package store holds {} on this computer.",
                     storage::human_bytes(bytes)
                 ),
                 None => "Could not read the store size on this computer.".to_string(),
-            });
-        });
-        let label = self.storage_usage.clone();
-        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-            match rx.try_recv() {
-                Ok(text) => {
+            },
+            move |r| {
+                if let Ok(text) = r {
                     label.set_text(&text);
-                    glib::ControlFlow::Break
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                Err(_) => glib::ControlFlow::Break,
-            }
-        });
+            },
+        );
     }
 
     /// Repopulate the System-versions card (read-only, shown when the page
@@ -872,38 +861,28 @@ impl UpdatesPage {
             }
             let snapshot = doc.clone();
             let changes = doc.package_intents_for(&account_for_prepare);
-            let (tx, rx) = std::sync::mpsc::channel::<PrepareResult>();
-            std::thread::spawn(move || {
-                let result = prepare_changes(&nixp, &changes, &doc);
-                let _ = tx.send(result);
-            });
             let result_ui = prepare_ui.clone();
             let result_snapshot = snapshot.clone();
             let result_prepared_doc = prepared_doc.clone();
             let result_package_names = package_names.clone();
-            glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-                match rx.try_recv() {
-                    Ok(result) => {
-                        render_prepare_result(
-                            result,
-                            result_snapshot.clone(),
-                            &result_ui,
-                            &result_prepared_doc,
-                            &result_package_names,
-                        );
-                        glib::ControlFlow::Break
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        fail_prepare(
-                            &result_ui,
-                            &result_prepared_doc,
-                            "Preparation ended before a result was received.",
-                        );
-                        glib::ControlFlow::Break
-                    }
-                }
-            });
+            crate::ui::async_task::run_on_main(
+                std::time::Duration::from_millis(100),
+                move || prepare_changes(&nixp, &changes, &doc),
+                move |r| match r {
+                    Ok(result) => render_prepare_result(
+                        result,
+                        result_snapshot.clone(),
+                        &result_ui,
+                        &result_prepared_doc,
+                        &result_package_names,
+                    ),
+                    Err(()) => fail_prepare(
+                        &result_ui,
+                        &result_prepared_doc,
+                        "Preparation ended before a result was received.",
+                    ),
+                },
+            );
         });
 
         // One stable handler dispatches Apply or confirmed rollback according
@@ -1028,21 +1007,18 @@ fn start_activation(
     doc: DesiredDoc,
     timeout_secs: u64,
 ) {
-    let (tx, rx) = std::sync::mpsc::channel::<ActivateResult>();
-    std::thread::spawn(move || {
-        let result =
-            activation::activate(action, &doc, std::time::Duration::from_secs(timeout_secs));
-        let _ = tx.send(ActivateResult { action, result });
-    });
-
-    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-        match rx.try_recv() {
+    crate::ui::async_task::run_on_main(
+        std::time::Duration::from_millis(100),
+        move || {
+            let result =
+                activation::activate(action, &doc, std::time::Duration::from_secs(timeout_secs));
+            ActivateResult { action, result }
+        },
+        move |r| match r {
             Ok(result) => {
                 handle_activate_result(result, &ui);
-                glib::ControlFlow::Break
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            Err(()) => {
                 handle_activate_result(
                     ActivateResult {
                         action,
@@ -1055,10 +1031,9 @@ fn start_activation(
                     },
                     &ui,
                 );
-                glib::ControlFlow::Break
             }
-        }
-    });
+        },
+    );
 }
 
 /// Apply operation results through the transaction reducer on the GTK thread.

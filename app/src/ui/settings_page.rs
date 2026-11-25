@@ -6,7 +6,6 @@
 //! the generated config. Out-of-scope desktop chrome stays a pointer.
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::mpsc;
 
 use gtk4::prelude::*;
 
@@ -296,52 +295,48 @@ impl SettingsPage {
             accounts_status.set_text("Checking whether this account name is available…");
             accounts_status.set_visible(true);
             let checked_name = name.clone();
-            let (sender, receiver) = mpsc::channel();
-            std::thread::spawn(move || {
-                let result = account::check_presence(&checked_name);
-                let _ = sender.send((checked_name, result));
-            });
-
             let add_btn = add_btn_for_click.clone();
             let add_name = add_name.clone();
             let add_full = add_full.clone();
             let add_admin = add_admin.clone();
             let accounts_status = accounts_status.clone();
-            glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-                match receiver.try_recv() {
-                    Ok((checked_name, presence)) => {
-                        add_btn.set_sensitive(true);
-                        if add_name.text().trim() != checked_name {
-                            accounts_status.set_text("The account name changed; check it again.");
-                            return glib::ControlFlow::Break;
-                        }
-                        match presence {
-                            AccountPresence::Exists => accounts_status.set_text(&format!(
-                                "\u{201c}{checked_name}\u{201d} already exists on this system — the app cannot own it."
-                            )),
-                            AccountPresence::NotFound => {
-                                finish_add(
-                                    checked_name,
-                                    add_full.text().to_string(),
-                                    add_admin.is_active(),
-                                )
-                            }
-                            AccountPresence::QueryFailed => accounts_status.set_text(
-                                "Could not check this account name. Try again before adding it.",
-                            ),
-                        }
-                        glib::ControlFlow::Break
-                    }
-                    Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(mpsc::TryRecvError::Disconnected) => {
+            crate::ui::async_task::run_on_main(
+                std::time::Duration::from_millis(50),
+                move || {
+                    let result = account::check_presence(&checked_name);
+                    (checked_name, result)
+                },
+                move |r| {
+                    let Ok((checked_name, presence)) = r else {
                         add_btn.set_sensitive(true);
                         accounts_status.set_text(
                             "Could not check this account name. Try again before adding it.",
                         );
-                        glib::ControlFlow::Break
+                        return;
+                    };
+                    add_btn.set_sensitive(true);
+                    if add_name.text().trim() != checked_name {
+                        accounts_status
+                            .set_text("The account name changed; check it again.");
+                        return;
                     }
-                }
-            });
+                    match presence {
+                        AccountPresence::Exists => accounts_status.set_text(&format!(
+                            "\u{201c}{checked_name}\u{201d} already exists on this system — the app cannot own it."
+                        )),
+                        AccountPresence::NotFound => {
+                            finish_add(
+                                checked_name,
+                                add_full.text().to_string(),
+                                add_admin.is_active(),
+                            )
+                        }
+                        AccountPresence::QueryFailed => accounts_status.set_text(
+                            "Could not check this account name. Try again before adding it.",
+                        ),
+                    }
+                },
+            );
         });
     }
 
