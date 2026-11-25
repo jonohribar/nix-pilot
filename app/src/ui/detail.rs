@@ -1,7 +1,10 @@
 //! Store detail/install page. It checks package availability and lets the user
 //! add or remove install intent; system changes are handled separately by Updates.
+//! The "Try it" action runs `nix run nixpkgs#<attr>` as a detached child with
+//! a Starting/Running/Ended lifecycle (try_run).
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::mpsc;
 
 use gtk4::prelude::*;
 
@@ -9,6 +12,7 @@ use crate::desired_state::{DesiredDoc, PackageScope};
 use crate::install;
 use crate::model::IndexEntry;
 use crate::store;
+use crate::try_run::{should_show_try_button, TrySession, TryState};
 use crate::ui::widgets::{esc, meta_row};
 
 /// Availability and queue state shown by the detail card.
@@ -49,6 +53,8 @@ pub struct DetailUi {
     pub page: gtk4::Box,
     /// Adds or removes the selected package from desired state.
     pub btn_install: gtk4::Button,
+    /// Runs the app without installing (nix run). Visible for desktop apps only.
+    pub btn_try: gtk4::Button,
     /// Plain-language availability or selection status.
     pub status: gtk4::Label,
     /// Collapsible area for technical check output.
@@ -61,6 +67,12 @@ pub struct DetailUi {
     pub state: Rc<RefCell<InstallState>>,
     /// Attribute currently displayed; used to discard stale async check results.
     pub current_attr: Rc<RefCell<Option<String>>>,
+    /// Current try session state (Starting/Running/Ended/Idle).
+    pub try_state: Rc<RefCell<TryState>>,
+    /// Active try session handle (kills child on drop).
+    pub try_session: Rc<RefCell<Option<TrySession>>>,
+    /// Receiver for try session terminal state from monitor thread.
+    pub try_receiver: Rc<RefCell<Option<mpsc::Receiver<TryState>>>>,
 }
 
 impl DetailUi {
@@ -100,11 +112,16 @@ impl DetailUi {
         install.add_css_class("suggested-action");
         install.set_valign(gtk4::Align::Center);
         install.set_tooltip_text(Some("Adds this app to your ready-to-change list."));
+        let try_btn = gtk4::Button::with_label("Try it");
+        try_btn.set_valign(gtk4::Align::Center);
+        try_btn.set_tooltip_text(Some("Run this app without installing it"));
+        try_btn.set_visible(false); // shown only for desktop apps (Class::App)
         let hint = gtk4::Label::new(Some(install_hint));
         hint.set_wrap(true);
         hint.add_css_class("dim-label");
         hint.set_hexpand(true);
         inst_h.append(&install);
+        inst_h.append(&try_btn);
         inst_h.append(&hint);
         card.append(&inst_h);
 
@@ -168,12 +185,16 @@ impl DetailUi {
             home,
             page,
             btn_install: install,
+            btn_try: try_btn,
             status,
             expander,
             tech,
             home_url: Rc::new(RefCell::new(None)),
             state: Rc::new(RefCell::new(InstallState::Idle)),
             current_attr: Rc::new(RefCell::new(None)),
+            try_state: Rc::new(RefCell::new(TryState::Idle)),
+            try_session: Rc::new(RefCell::new(None)),
+            try_receiver: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -250,12 +271,19 @@ impl DetailUi {
             self.home.set_tooltip_text(None);
         }
 
+        // Try button: only for desktop apps (Class::App), not CLI/terminal apps.
+        let show_try = should_show_try_button(e);
+        self.btn_try.set_visible(show_try);
+
         // install card reset (the desired document re-syncs this via sync_added after).
         // Known-unavailable entries (linux_ok=false from the catalogue) are a
         // first-class state (architecture.md): the install action is not
         // offered, never an enabled CTA beside a "cannot be installed" note.
         *self.state.borrow_mut() = InstallState::Idle;
         *self.current_attr.borrow_mut() = Some(e.attr.clone());
+        *self.try_state.borrow_mut() = TryState::Idle;
+        *self.try_session.borrow_mut() = None;
+        *self.try_receiver.borrow_mut() = None;
         if e.linux_ok {
             self.btn_install.set_sensitive(true);
             self.btn_install.set_label("Install for me");
@@ -271,6 +299,9 @@ impl DetailUi {
         self.status.set_text("");
         self.expander.set_visible(false);
         self.expander.set_expanded(false);
+        self.btn_try.set_label(TryState::Idle.button_label());
+        self.btn_try
+            .set_tooltip_text(Some(TryState::Idle.button_tooltip()));
     }
 
     /// Reflect selection in the currently chosen scope. If this package is
@@ -317,6 +348,179 @@ impl DetailUi {
             self.btn_install.set_label("Add to ready-to-change list");
             self.status.set_text("Ready to add for the selected scope.");
         }
+    }
+
+    /// Handle the Try button click: start/stop/cancel a try session.
+    /// Returns true if a try session is active (Starting/Running), false if idle/ended.
+    pub fn handle_try_click(&self, allow_unfree: bool) -> bool {
+        let current_state = *self.try_state.borrow();
+        match current_state {
+            TryState::Idle => {
+                // Start a new try session
+                let Some(attr) = self.current_attr.borrow().clone() else {
+                    return false;
+                };
+                match TrySession::spawn(attr, allow_unfree) {
+                    Ok((session, receiver)) => {
+                        *self.try_session.borrow_mut() = Some(session);
+                        *self.try_receiver.borrow_mut() = Some(receiver);
+                        self.update_try_ui(TryState::Starting);
+                        // Poll for the terminal state.
+                        self.poll_try_receiver();
+                        // Move to Running once the app is likely up (the
+                        // monitor reports only exit, so use a grace period).
+                        self.schedule_running_transition();
+                        true
+                    }
+                    Err(err) => {
+                        self.status
+                            .set_text(&format!("Could not start try session: {err}"));
+                        false
+                    }
+                }
+            }
+            TryState::Starting => {
+                // Cancel the build
+                if let Some(mut session) = self.try_session.borrow_mut().take() {
+                    let _ = session.terminate();
+                }
+                self.update_try_ui(TryState::Ended {
+                    stopped_by_user: true,
+                });
+                false
+            }
+            TryState::Running => {
+                // Stop the running app
+                if let Some(mut session) = self.try_session.borrow_mut().take() {
+                    let _ = session.terminate();
+                }
+                self.update_try_ui(TryState::Ended {
+                    stopped_by_user: true,
+                });
+                false
+            }
+            TryState::Ended { .. } => {
+                // Terminal state: reset to idle on next click
+                self.reset_try_ui();
+                false
+            }
+        }
+    }
+
+    /// Update UI for a new try state.
+    fn update_try_ui(&self, state: TryState) {
+        *self.try_state.borrow_mut() = state;
+        self.btn_try.set_label(state.button_label());
+        self.btn_try.set_tooltip_text(Some(state.button_tooltip()));
+        self.btn_try.set_sensitive(state.is_sensitive());
+        let app_name = self.title.label().to_string();
+        self.status.set_text(&state.status_text(&app_name));
+    }
+
+    /// Reset try UI to idle state.
+    fn reset_try_ui(&self) {
+        *self.try_state.borrow_mut() = TryState::Idle;
+        *self.try_session.borrow_mut() = None;
+        *self.try_receiver.borrow_mut() = None;
+        self.btn_try.set_label(TryState::Idle.button_label());
+        self.btn_try
+            .set_tooltip_text(Some(TryState::Idle.button_tooltip()));
+        self.btn_try.set_sensitive(true);
+        // Don't clear status here — let the install/availability status show
+        // or keep the ended message until next action.
+    }
+
+    /// Poll the try receiver for terminal state updates.
+    fn poll_try_receiver(&self) {
+        // mpsc::Receiver is not Clone; take ownership once for the poll loop.
+        let receiver = match self.try_receiver.borrow_mut().take() {
+            Some(r) => r,
+            None => return,
+        };
+        let try_state = self.try_state.clone();
+        let btn_try = self.btn_try.clone();
+        let status = self.status.clone();
+        let title = self.title.clone();
+        let try_session = self.try_session.clone();
+        let try_receiver = self.try_receiver.clone();
+
+        glib::timeout_add_local(
+            std::time::Duration::from_millis(100),
+            move || match receiver.try_recv() {
+                Ok(terminal_state) => {
+                    *try_state.borrow_mut() = terminal_state;
+                    *try_session.borrow_mut() = None;
+                    *try_receiver.borrow_mut() = None;
+                    let app_name = title.label().to_string();
+                    btn_try.set_label(terminal_state.button_label());
+                    btn_try.set_tooltip_text(Some(terminal_state.button_tooltip()));
+                    btn_try.set_sensitive(true);
+                    status.set_text(&terminal_state.status_text(&app_name));
+                    glib::ControlFlow::Break
+                }
+                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(_) => {
+                    *try_state.borrow_mut() = TryState::Ended {
+                        stopped_by_user: false,
+                    };
+                    *try_session.borrow_mut() = None;
+                    *try_receiver.borrow_mut() = None;
+                    let app_name = title.label().to_string();
+                    btn_try.set_label(
+                        TryState::Ended {
+                            stopped_by_user: false,
+                        }
+                        .button_label(),
+                    );
+                    btn_try.set_tooltip_text(Some(
+                        TryState::Ended {
+                            stopped_by_user: false,
+                        }
+                        .button_tooltip(),
+                    ));
+                    btn_try.set_sensitive(true);
+                    status.set_text(
+                        &TryState::Ended {
+                            stopped_by_user: false,
+                        }
+                        .status_text(&app_name),
+                    );
+                    glib::ControlFlow::Break
+                }
+            },
+        );
+    }
+
+    /// After a grace period, move a live Starting session to Running so the
+    /// card reads "Running X" once the app is up. The monitor reports only
+    /// exit, so this is a defensible grace-period proxy; an actual exit keeps
+    /// the session at Started/Ended via the monitor, which overrides.
+    fn schedule_running_transition(&self) {
+        let try_state = self.try_state.clone();
+        let try_session = self.try_session.clone();
+        let btn_try = self.btn_try.clone();
+        let status = self.status.clone();
+        let title = self.title.clone();
+        glib::timeout_add_local(std::time::Duration::from_secs(15), move || {
+            if *try_state.borrow() != TryState::Starting {
+                return glib::ControlFlow::Break;
+            }
+            let alive = try_session
+                .borrow()
+                .as_ref()
+                .map(|s| s.is_running())
+                .unwrap_or(false);
+            if !alive {
+                return glib::ControlFlow::Break;
+            }
+            *try_state.borrow_mut() = TryState::Running;
+            let app_name = title.label().to_string();
+            btn_try.set_label(TryState::Running.button_label());
+            btn_try.set_tooltip_text(Some(TryState::Running.button_tooltip()));
+            btn_try.set_sensitive(true);
+            status.set_text(&TryState::Running.status_text(&app_name));
+            glib::ControlFlow::Break
+        });
     }
 }
 
@@ -428,7 +632,6 @@ pub fn wire(
     home_win: &gtk4::ApplicationWindow,
     on_change: Rc<dyn Fn()>,
 ) {
-    let d = d.clone();
     let home_btn = d.home.clone();
     let home_url = d.home_url.clone();
     let home_win = home_win.clone();
@@ -442,8 +645,9 @@ pub fn wire(
         scope_detail.sync_added(&scope_desired.borrow(), &scope_account);
     });
     let nix_click = nix.clone();
+    let d_click = d.clone();
     btn_install.connect_clicked(move |btn| {
-        let attr = match d.current_attr.borrow().clone() {
+        let attr = match d_click.current_attr.borrow().clone() {
             Some(a) => a,
             None => return,
         };
@@ -451,11 +655,11 @@ pub fn wire(
         // match (its temporaries live until the end of the match), which
         // would otherwise re-borrow panics in arms that mutate it (e.g. the
         // Idle/Unavailable arm's start_availability_check).
-        let state = *d.state.borrow();
+        let state = *d_click.state.borrow();
         match state {
             InstallState::Checking => {}
             InstallState::Added => {
-                let scope = if d.scope.is_active() {
+                let scope = if d_click.scope.is_active() {
                     PackageScope::System
                 } else {
                     PackageScope::User
@@ -463,11 +667,11 @@ pub fn wire(
                 desired_click
                     .borrow_mut()
                     .remove_package(&account, &attr, scope);
-                d.sync_added(&desired_click.borrow(), &account);
+                d_click.sync_added(&desired_click.borrow(), &account);
                 on_change();
             }
             InstallState::Available => {
-                let scope = if d.scope.is_active() {
+                let scope = if d_click.scope.is_active() {
                     PackageScope::System
                 } else {
                     PackageScope::User
@@ -475,17 +679,18 @@ pub fn wire(
                 desired_click
                     .borrow_mut()
                     .add_package(&account, attr.clone(), scope);
-                d.sync_added(&desired_click.borrow(), &account);
+                d_click.sync_added(&desired_click.borrow(), &account);
                 on_change();
             }
             InstallState::Idle | InstallState::Unavailable => {
                 let Some(nixp) = nix_click.clone() else {
-                    d.status
+                    d_click
+                        .status
                         .set_text("The package checker is not available on this system");
                     return;
                 };
                 let allow_unfree = crate::settings::allow_unfree(&desired_click.borrow().settings);
-                start_availability_check(&d, btn, nixp, attr, allow_unfree);
+                start_availability_check(&d_click, btn, nixp, attr, allow_unfree);
             }
         }
     });
@@ -494,5 +699,14 @@ pub fn wire(
         if let Some(u) = home_url.borrow().as_deref() {
             gtk4::show_uri(Some(&home_win), u, gtk4::gdk::CURRENT_TIME);
         }
+    });
+
+    // Wire the Try button
+    let btn_try = d.btn_try.clone();
+    let desired_try = desired.clone();
+    let d_try = d.clone();
+    btn_try.connect_clicked(move |_| {
+        let allow_unfree = crate::settings::allow_unfree(&desired_try.borrow().settings);
+        d_try.handle_try_click(allow_unfree);
     });
 }

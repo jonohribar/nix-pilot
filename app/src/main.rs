@@ -20,6 +20,7 @@ mod setting_value;
 mod settings;
 mod store;
 mod system;
+mod try_run;
 mod ui;
 mod updates;
 
