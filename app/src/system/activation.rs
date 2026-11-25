@@ -53,9 +53,8 @@ pub fn activate(action: ActivateAction, doc: &DesiredDoc, timeout: Duration) -> 
     if !can_activate() {
         return ActivateResult {
             ok: false,
-            note: "activation is not enabled on this system".into(),
-            log: "set NIX_PILOT_ALLOW_SWITCH only with the nix-pilot system module installed."
-                .into(),
+            note: "System changes need the nix-pilot system module enabled".into(),
+            log: "Open Settings → System to enable activation.".into(),
         };
     }
 
@@ -202,7 +201,10 @@ mod tests {
             Duration::from_secs(5),
         );
         assert!(!result.ok);
-        assert_eq!(result.note, "activation is not enabled on this system");
+        assert_eq!(
+            result.note,
+            "System changes need the nix-pilot system module enabled"
+        );
     }
 
     #[test]

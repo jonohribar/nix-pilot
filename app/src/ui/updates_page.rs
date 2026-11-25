@@ -66,6 +66,7 @@ pub struct UpdatesPage {
     /// Root widget for the Updates surface.
     pub page: gtk4::Box,
     step_label: gtk4::Label,
+    step_spinner: gtk4::Spinner,
     step: Rc<RefCell<TxStep>>,
     prepared_doc: Rc<RefCell<Option<DesiredDoc>>>,
     /// Set-and-forget upkeep cards (category "updates"), rendered with the
@@ -84,6 +85,8 @@ pub struct UpdatesPage {
     queue_list: gtk4::ListBox,
     results_label: gtk4::Label,
     results_list: gtk4::ListBox,
+    /// Prominent completion banner (success/failure), shown after Apply/Rollback.
+    status_banner: gtk4::Label,
     config_view: gtk4::Label,
     build_btn: gtk4::Button,
     apply_btn: gtk4::Button,
@@ -94,10 +97,13 @@ pub struct UpdatesPage {
 struct TxUi {
     step: Rc<RefCell<TxStep>>,
     step_label: gtk4::Label,
+    step_spinner: gtk4::Spinner,
     results_label: gtk4::Label,
     results_list: gtk4::ListBox,
     build_btn: gtk4::Button,
     primary_btn: gtk4::Button,
+    /// Prominent completion banner shown after Apply/Rollback completes.
+    status_banner: gtk4::Label,
 }
 
 impl TxUi {
@@ -113,6 +119,19 @@ impl TxUi {
         self.primary_btn.set_label(view.primary_label);
         self.primary_btn.set_sensitive(view.primary_enabled);
         self.primary_btn.set_tooltip_text(view.primary_tooltip);
+
+        // Show the spinner during active phases (Explaining, Applying, RollingBack).
+        let is_busy = matches!(
+            step,
+            TxStep::Explaining | TxStep::Applying | TxStep::RollingBack
+        );
+        if is_busy {
+            self.step_spinner.start();
+            self.step_spinner.set_visible(true);
+        } else {
+            self.step_spinner.stop();
+            self.step_spinner.set_visible(false);
+        }
     }
 }
 
@@ -404,7 +423,17 @@ impl UpdatesPage {
         let step_label = gtk4::Label::new(Some(TxStep::Ready.label()));
         step_label.set_xalign(0.0);
         step_label.add_css_class("dim-label");
-        page.append(&step_label);
+
+        // Spinner shown during active phases (checking, applying, rolling back).
+        let step_spinner = gtk4::Spinner::new();
+        step_spinner.set_visible(false);
+        step_spinner.set_size_request(16, 16);
+
+        let step_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        step_row.set_halign(gtk4::Align::Start);
+        step_row.append(&step_label);
+        step_row.append(&step_spinner);
+        page.append(&step_row);
 
         // Automatic upkeep (set-and-forget defaults; category "updates").
         let automatic_card = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
@@ -513,6 +542,14 @@ impl UpdatesPage {
         let results_list = gtk4::ListBox::new();
         page.append(&results_list);
 
+        // Prominent completion banner (success/failure), shown after Apply/Rollback.
+        let status_banner = gtk4::Label::new(None);
+        status_banner.set_xalign(0.0);
+        status_banner.set_wrap(true);
+        status_banner.set_visible(false);
+        status_banner.add_css_class("dim-label");
+        page.append(&status_banner);
+
         // developer diagnostic (constraint C8): the config the desired-state
         // renderer would hand to nixos-rebuild. Hidden until prepared.
         let config_expander = gtk4::Expander::new(Some("Generated configuration (developer)"));
@@ -563,6 +600,7 @@ impl UpdatesPage {
         UpdatesPage {
             page,
             step_label,
+            step_spinner,
             step,
             prepared_doc: Rc::new(RefCell::new(None)),
             auto_cards,
@@ -577,6 +615,7 @@ impl UpdatesPage {
             queue_list,
             results_label,
             results_list,
+            status_banner,
             config_view,
             build_btn,
             apply_btn,
@@ -588,10 +627,12 @@ impl UpdatesPage {
         TxUi {
             step: self.step.clone(),
             step_label: self.step_label.clone(),
+            step_spinner: self.step_spinner.clone(),
             results_label: self.results_label.clone(),
             results_list: self.results_list.clone(),
             build_btn: self.build_btn.clone(),
             primary_btn: self.apply_btn.clone(),
+            status_banner: self.status_banner.clone(),
         }
     }
 
@@ -761,49 +802,27 @@ impl UpdatesPage {
         }
         wire_storage_buttons(&storage_result, &estimate_btn, &cleanup_btn, &optimise_btn);
 
-        // System versions: go back to the previous generation, gated exactly
-        // like the storage/apply actions (module + flag). Rollback reuses the
-        // helper's fixed `rollback` action (no helper change needed).
+        // System versions: the canonical revert lives on the primary action button
+        // (Updates page header). The rollback button here is disabled with a clear
+        // explanation so users aren't presented with two competing controls.
         let gens_result = self.gens_result.clone();
         let gens_rollback = self.rollback_btn.clone();
-        gens_rollback.set_sensitive(activate);
-        gens_rollback.set_tooltip_text(Some(match activate {
-            true => "Starts the previous system version now (root).",
-            false => {
-                "Rollback runs through the nix-pilot system module; activate it \
-                 (NIX_PILOT_ALLOW_SWITCH) to enable it."
-            }
-        }));
-        let doc_rc = desired.clone();
-        gens_rollback.connect_clicked(move |b| {
-            b.set_sensitive(false);
-            gens_result.set_text("Starting the previous version…");
-            let (tx, rx) = std::sync::mpsc::channel::<activation::ActivateResult>();
-            let doc = doc_rc.borrow().clone();
-            std::thread::spawn(move || {
-                let r = activation::activate(
-                    activation::ActivateAction::Rollback,
-                    &doc,
-                    std::time::Duration::from_secs(900),
-                );
-                let _ = tx.send(r);
-            });
-            let res = gens_result.clone();
-            let btn = b.clone();
-            glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-                match rx.try_recv() {
-                    Ok(r) => {
-                        res.set_text(&r.note);
-                        btn.set_sensitive(activation::can_activate());
-                        glib::ControlFlow::Break
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(_) => {
-                        btn.set_sensitive(activation::can_activate());
-                        glib::ControlFlow::Break
-                    }
-                }
-            });
+        let activate = activation::can_activate();
+        gens_rollback.set_sensitive(false);
+        gens_rollback.set_tooltip_text(Some(
+            "Use the \"Go back to the previous system\" button above to restore the previous generation. \
+             This button is a duplicate kept for context; it cannot be activated separately.",
+        ));
+        if !activate {
+            // Even if this were enabled, the reason would be the activation gate.
+            // We leave it disabled with the duplicate explanation regardless.
+        }
+        gens_rollback.connect_clicked(move |_| {
+            // This button is intentionally disabled; the handler is a no-op.
+            // It exists only for context in the System versions card.
+            gens_result.set_text(
+                "Use the primary \"Go back to the previous system\" button in the action bar to restore the previous generation.",
+            );
         });
 
         let ui = self.transaction_ui();
@@ -825,6 +844,7 @@ impl UpdatesPage {
                 prepare_ui.results_list.remove(&child);
             }
             prepare_ui.results_label.set_text("");
+            prepare_ui.status_banner.set_visible(false);
             prepare_ui.render();
 
             let Some(nixp) = nix.clone() else {
@@ -949,6 +969,7 @@ fn start_apply(
     }
     *prepared_doc.borrow_mut() = None;
     ui.results_label.set_text("Applying the change…");
+    ui.status_banner.set_visible(false);
     ui.render();
     start_activation(ui, activation::ActivateAction::Switch, doc, 1800);
 }
@@ -988,6 +1009,7 @@ fn show_rollback_confirmation(ui: TxUi, desired: Rc<RefCell<DesiredDoc>>) {
             return;
         }
         ui.results_label.set_text("Restoring the previous system…");
+        ui.status_banner.set_visible(false);
         ui.render();
         start_activation(
             ui.clone(),
@@ -1066,6 +1088,18 @@ fn handle_activate_result(ar: ActivateResult, ui: &TxUi) {
         ar.result.note
     };
     ui.results_label.set_text(&note);
+
+    // Prominent completion banner with color-coded class.
+    ui.status_banner.set_text(&note);
+    ui.status_banner.set_visible(true);
+    if ar.result.ok {
+        ui.status_banner.remove_css_class("dim-label");
+        ui.status_banner.add_css_class("success");
+    } else {
+        ui.status_banner.remove_css_class("success");
+        ui.status_banner.add_css_class("error");
+    }
+
     ui.render();
 }
 

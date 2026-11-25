@@ -161,7 +161,7 @@ pub fn view_for(step: TxStep, activation_allowed: bool) -> TxView {
         Action::Rollback => "Go back to the previous system",
     };
     let primary_tooltip = if !activation_allowed {
-        Some("Activation requires NIX_PILOT_ALLOW_SWITCH to be set and the nix-pilot-apply helper installed (nixos-module).")
+        Some("System changes need the nix-pilot system module enabled. Open Settings → System to enable activation.")
     } else if primary_action == Action::Rollback {
         Some("Return to the system generation before this change was applied.")
     } else {
@@ -221,7 +221,7 @@ pub fn verify_package_intents(
         let note = match r.outcome {
             install::Outcome::ConfirmedAvailable { note } => note,
             install::Outcome::UnfreeEvalBlocked => {
-                "Restricted licence — allow it in Settings -> Software".to_string()
+                "Restricted licence — allow it in Settings → Software".to_string()
             }
             install::Outcome::Unavailable => "not available for this system".to_string(),
             install::Outcome::CheckFailed { reason } => reason,
@@ -258,7 +258,7 @@ mod tests {
         r.items.push(BuildItem {
             attr: "b".into(),
             ok: false,
-            note: "blocked".into(),
+            note: "blocked".to_string(),
         });
         assert!(!r.all_ok());
         assert_eq!(r.items.len(), 2);
