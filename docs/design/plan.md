@@ -102,6 +102,7 @@ Each destination document folds in the review changes recorded in `docs/research
 | UI transaction lifecycle | `nix-pilot-ddr` | 3 | Fix callback lifecycle; centralize transitions and worker completion |
 | System backend cohesion | `nix-pilot-mf8` | 2 | Separate backend operation responsibilities and unify process handling |
 | Shell and search presentation | `nix-pilot-4kl` | 2 | Isolate search UI and clarify derived search-cache lifecycle |
+| Configuration authority | `nix-pilot-072` | — | Module-in-config source of truth (D31); rework the build/activation path; adopt-on-first-run + override authority |
 
 ## Decisions
 
@@ -116,6 +117,7 @@ All product decisions D1–D15 are resolved; their outcomes are maintained in on
 - The app-wide search sits at the top of the sidebar and searches packages + settings (D28, fyq); the store's local search + Hide non-free filter live inside the Packages tab (D29).
 - The Updates page drives the transaction machine and carries an Automatic upkeep card (GC, store optimisation, system auto-upgrade), a Storage card (read-only usage + run-now cleanup through the helper) and a System-versions card (generations list + rollback).
 - The app builds a candidate generation from a persisted desired-state doc (D20/D21) and ships the activation module + polkit helper (D24–D26) with the added `gc`/`optimise`/`gc-estimate` fixed actions; activation itself is spec/test-only until an installed-host verification.
+- Configuration authority direction (D31): the app module lives inside the user's own config, desired-state is the single source of truth for packages + app-owned settings, and overrides make the app authoritative over a pre-filled base without a clean config. Full direction in the spec: [config-authority.md](specifications/config-authority.md).
 - Further work tracked in beads: `7wo.3` (installed-host activation), `7wo.4` (catalogue service; slices `7wo.5`/`6`/`7`), `9f3.13` (try-without-installing), `9f3.9` (per-app version channels); catalogue service/distribution is the next big body. The 2026-11-20 visual/usability review filed UX follow-ups (gih, mmj, jag, sje, dxy, rqe, ae7, hd9, x6r, 7pa, sqi) — the spec-side rules are already folded into the destinations above; the app-side fixes are tracked on those beads.
 - The app-internals review identified ownership and dependency crossings, concentrated UI composition, a possible Apply/rollback callback lifecycle defect, and backend responsibility overlap. The scoped refactor is planned in sections 8–12 and tracked by `nix-pilot-25p`, `nix-pilot-0bt`, `nix-pilot-ddr`, `nix-pilot-mf8`, and `nix-pilot-4kl`; implementation order and boundary rules are in [refactor-plan.md](refactor-plan.md).
 - All destinations under `docs/` are written except `validation.md` (planned placeholder; its epic is created when content exists). The destination map above records the beads task that produced each.
