@@ -26,7 +26,14 @@ if [ -z "${NIX_PILOT_CATALOGUE:-}" ]; then
   if [ -f "$cand" ]; then
     export NIX_PILOT_CATALOGUE="$cand"
   else
-    echo "warning: catalogue index not found; catalogue-dependent tests may fail" >&2
+    # CI and fresh checkouts have no generated index; fall back to the small
+    # committed fixture so store/search tests remain functional.
+    cand="$APP_DIR/testdata/catalogue-index.json"
+    if [ -f "$cand" ]; then
+      export NIX_PILOT_CATALOGUE="$cand"
+    else
+      echo "warning: catalogue index not found; catalogue-dependent tests may fail" >&2
+    fi
   fi
 fi
 # The test driver starts launcher + app itself inside this single session.

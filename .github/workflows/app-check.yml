@@ -24,3 +24,10 @@ jobs:
         run: >-
           nix-shell app/shell.nix --run
           'cd app && cargo build && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && ./scripts/smoke.sh'
+
+      - name: Run headless AT-SPI GUI integration tests (nav + search)
+        working-directory: app
+        run: >-
+          nix-shell test-atspi.nix --run
+          './scripts/a11y/run-test.sh scripts/a11y/test_nav_settings.py target/debug/nix-pilot-app
+          && ./scripts/a11y/run-test.sh scripts/a11y/test_search.py target/debug/nix-pilot-app'
