@@ -54,14 +54,22 @@ pub(super) fn can_activate() -> bool {
     std::env::var_os("NIX_PILOT_ALLOW_SWITCH").is_some() && find_helper().is_some()
 }
 
+/// Ordered candidate locations for the helper, PATH first then the two
+/// well-known locations. The /etc/nix-pilot self-copy survives generation
+/// switches that drop the module, so the app can still revert after an apply
+/// that removed it (nix-pilot-r3j).
+fn helper_candidates() -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> =
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .map(|directory| directory.join("nix-pilot-apply"))
+            .collect();
+    candidates.push(PathBuf::from("/run/current-system/sw/bin/nix-pilot-apply"));
+    candidates.push(PathBuf::from("/etc/nix-pilot/nix-pilot-apply"));
+    candidates
+}
+
 fn find_helper() -> Option<PathBuf> {
-    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
-        .map(|directory| directory.join("nix-pilot-apply"))
-        .find(|path| path.is_file())
-        .or_else(|| {
-            let path = PathBuf::from("/run/current-system/sw/bin/nix-pilot-apply");
-            path.is_file().then_some(path)
-        })
+    helper_candidates().into_iter().find(|path| path.is_file())
 }
 
 pub(super) fn run_action(
@@ -89,6 +97,20 @@ mod tests {
         assert_eq!(HelperAction::Gc.subcommand(), "gc");
         assert_eq!(HelperAction::Optimise.subcommand(), "optimise");
         assert_eq!(HelperAction::GcEstimate.subcommand(), "gc-estimate");
+    }
+
+    #[test]
+    fn helper_candidates_include_the_persistent_self_copy() {
+        // The /etc/nix-pilot copy must be a fallback, so the app can still
+        // revert after a switch that dropped the module (nix-pilot-r3j).
+        let candidates = helper_candidates();
+        assert!(candidates
+            .iter()
+            .any(|c| c.as_path() == std::path::Path::new("/etc/nix-pilot/nix-pilot-apply")));
+        assert!(candidates
+            .iter()
+            .any(|c| c.as_path()
+                == std::path::Path::new("/run/current-system/sw/bin/nix-pilot-apply")));
     }
 
     #[test]
