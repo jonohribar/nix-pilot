@@ -40,7 +40,11 @@ The module survives every switch, so the app keeps its apply and revert capabili
 
 Base selection is no longer guessed. "The base" is the user's own config, because the module lives in it.
 
-Open requirement: how desired-state reaches the evaluator. A pure flake evaluation cannot read a runtime file under `$HOME/.local`; the module must obtain desired-state through a mechanism the spec decides. Options: impure evaluation (`--impure` plus `builtins.readFile` on the absolute path), or a managed state artifact the flake imports. The mechanism must not require the app to write into the user's configuration repository (D21: the app never edits the user's config files). This is a prerequisite to settle before implementation.
+State reachability (decided 2026-11-25, D32): the module reads the persisted desired-state at `$HOME/.local/share/nix-pilot/desired-state.json` with `builtins.readFile` plus `builtins.fromJSON`, and the app's switch runs with `--impure`.
+State stays in the app's own area and never enters the user's configuration repository, so D21 is preserved rather than relaxed.
+The impurity is scoped to the app-managed surface (packages and owned settings); the built lines they produce remain content-addressed.
+The module is tolerant: a missing or malformed state file evaluates to an empty desired-state, so a fresh or manually repaired system adopts on its next run instead of failing the switch.
+A future per-user prime mode (a git-tracked state module the flake imports) stays an explicit opt-in, not the default.
 
 ## Adoption on first run
 
