@@ -61,7 +61,8 @@ pub fn cleanup(action: CleanupAction, timeout: Duration) -> CleanupResult {
                     "storage upkeep failed".into()
                 },
                 log: process::tail(&combined, 12),
-                summary: parse_gc_estimate(&combined),
+                summary: parse_gc_estimate(&combined)
+                    .map(|(count, bytes)| format!("{count}; {bytes}")),
             }
         }
         Err(error) => CleanupResult {
@@ -113,13 +114,13 @@ pub fn human_bytes(bytes: u64) -> String {
     }
 }
 
-/// Extract the summary line from `nix-collect-garbage --dry-run` output.
-pub fn parse_gc_estimate(output: &str) -> Option<String> {
-    output
-        .lines()
-        .map(str::trim)
-        .find(|line| line.ends_with("would be deleted"))
-        .map(str::to_string)
+/// Extract the summary from `gc-estimate` helper output.
+/// Returns a tuple of (count_line, approximate_bytes_line) when both are present.
+pub fn parse_gc_estimate(output: &str) -> Option<(String, String)> {
+    let lines: Vec<&str> = output.lines().map(str::trim).collect();
+    let count_line = lines.iter().find(|l| l.ends_with("would be deleted"))?;
+    let bytes_line = lines.iter().find(|l| l.contains("bytes would be freed"))?;
+    Some((count_line.to_string(), bytes_line.to_string()))
 }
 
 #[cfg(test)]
@@ -128,16 +129,26 @@ mod tests {
 
     #[test]
     fn parses_gc_estimate_summary() {
+        let output = "removing stale link...\n1056 store paths would be deleted\n~2147483648 bytes would be freed (approximate, all dead paths)";
         assert_eq!(
-            parse_gc_estimate("removing stale link...\n1056 store paths would be deleted"),
-            Some("1056 store paths would be deleted".into())
+            parse_gc_estimate(output),
+            Some((
+                "1056 store paths would be deleted".into(),
+                "~2147483648 bytes would be freed (approximate, all dead paths)".into()
+            ))
         );
+        let output = "determining live/dead paths...\n0 store paths would be deleted\n~0 bytes would be freed (approximate, all dead paths)";
         assert_eq!(
-            parse_gc_estimate("determining live/dead paths...\n0 store paths would be deleted\n"),
-            Some("0 store paths would be deleted".into())
+            parse_gc_estimate(output),
+            Some((
+                "0 store paths would be deleted".into(),
+                "~0 bytes would be freed (approximate, all dead paths)".into()
+            ))
         );
         assert_eq!(parse_gc_estimate("nothing here"), None);
         assert_eq!(parse_gc_estimate(""), None);
+        // Missing bytes line returns None
+        assert_eq!(parse_gc_estimate("1056 store paths would be deleted"), None);
     }
 
     #[test]
