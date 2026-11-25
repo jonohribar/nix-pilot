@@ -42,7 +42,9 @@ pub(super) enum HelperError {
 impl fmt::Display for HelperError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Disabled => f.write_str("activation is not enabled on this system"),
+            Self::Disabled => {
+                f.write_str("System changes need the nix-pilot system module enabled")
+            }
             Self::MissingHelper => f.write_str("nix-pilot-apply helper not found"),
             Self::Process(error) => error.fmt(f),
         }
