@@ -39,6 +39,9 @@ verify: build
       else \
         nix-shell ./shell.nix --run 'cargo fmt --check && cargo clippy -- -D warnings && cargo test'; \
       fi
+    # The activation module is not compiled by cargo; parse it so a Nix string
+    # edit cannot slip through with broken syntax.
+    @if command -v nix-instantiate >/dev/null 2>&1; then nix-instantiate --parse nixos-module/nix-pilot.nix >/dev/null || exit 1; else echo "warning: nix-instantiate not on PATH; skipping module parse"; fi
     @nix-shell test-atspi.nix --run './scripts/a11y/run-test.sh scripts/a11y/test_nav_settings.py target/debug/nix-pilot-app'
     @nix-shell test-atspi.nix --run './scripts/a11y/run-test.sh scripts/a11y/test_search.py target/debug/nix-pilot-app'
     @./scripts/smoke.sh
