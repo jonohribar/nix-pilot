@@ -431,12 +431,13 @@ fn build_sidebar(
 /// wiring is one isolated function.
 type StoreCallbacks = (Rc<dyn Fn()>, Rc<dyn Fn(bool)>, Rc<dyn Fn(IndexEntry)>);
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn wire_store_callbacks(
     stack: &gtk4::Stack,
     detail: &Rc<detail::DetailUi>,
     desired: &Rc<RefCell<DesiredDoc>>,
     account: &str,
+    nix: &Option<std::path::PathBuf>,
     catalogue: &store_search::StoreSearch,
     corpus: &Rc<RefCell<SearchCorpus>>,
     full_entries: &[IndexEntry],
@@ -449,9 +450,12 @@ fn wire_store_callbacks(
     let desired_for_store = desired.clone();
     let account_for_store = account.to_string();
     let stack_for_store = stack.clone();
+    let nix_for_store = nix.clone();
     let on_store_package: Rc<dyn Fn(IndexEntry)> = Rc::new(move |entry| {
         detail_for_store.populate(&entry);
         detail_for_store.sync_added(&desired_for_store.borrow(), &account_for_store);
+        let allow_unfree = crate::settings::allow_unfree(&desired_for_store.borrow().settings);
+        detail_for_store.auto_check(&nix_for_store, allow_unfree);
         stack_for_store.set_visible_child_name("detail");
     });
     let full_entries_for_filter = full_entries.to_vec();
@@ -480,6 +484,7 @@ fn wire_global_callbacks(
     detail: &Rc<detail::DetailUi>,
     desired: &Rc<RefCell<DesiredDoc>>,
     account: &str,
+    nix: &Option<std::path::PathBuf>,
     select_category: &Rc<dyn Fn(&str)>,
 ) -> GlobalCallbacks {
     let stack_for_global_query = stack.clone();
@@ -495,11 +500,15 @@ fn wire_global_callbacks(
     let account_for_global = account.to_string();
     let stack_for_global = stack.clone();
     let select_category_for_global = select_category.clone();
+    let nix_for_global = nix.clone();
     let on_global_selection: Rc<dyn Fn(global_search::GlobalSelection)> =
         Rc::new(move |target| match target {
             global_search::GlobalSelection::Package(entry) => {
                 detail_for_global.populate(&entry);
                 detail_for_global.sync_added(&desired_for_global.borrow(), &account_for_global);
+                let allow_unfree =
+                    crate::settings::allow_unfree(&desired_for_global.borrow().settings);
+                detail_for_global.auto_check(&nix_for_global, allow_unfree);
                 stack_for_global.set_visible_child_name("detail");
             }
             global_search::GlobalSelection::Setting(spec) => {
@@ -517,6 +526,7 @@ struct ShellContext {
     header: HeaderWidgets,
     stack: gtk4::Stack,
     desired: Rc<RefCell<DesiredDoc>>,
+    nix: Option<std::path::PathBuf>,
     account: String,
     detail: Rc<detail::DetailUi>,
     catalogue: store_search::StoreSearch,
@@ -621,8 +631,8 @@ pub fn run(
 
     let stack = gtk4::Stack::new();
     stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
-    stack.add_named(&catalogue.page, Some("list"));
-    stack.add_named(&detail.page, Some("detail"));
+    stack.add_named(&catalogue.page, Some("list")); // the store list scrolls internally
+    stack.add_named(&scrolled_page(&detail.page), Some("detail"));
     stack.add_named(&scrolled_page(&global.page), Some("global-search"));
     // Tall surfaces scroll; a plain Box would push content below the window
     // edge with no way to reach it. Wrap them so everything is shown.
@@ -649,6 +659,7 @@ pub fn run(
         header,
         stack: stack.clone(),
         desired,
+        nix,
         account,
         detail,
         catalogue,
@@ -757,6 +768,7 @@ fn wire_store(ctx: &ShellContext, load_error: Option<&str>, full_entries: &[Inde
         &ctx.detail,
         &ctx.desired,
         &ctx.account,
+        &ctx.nix,
         &ctx.catalogue,
         &ctx.corpus,
         full_entries,
@@ -774,6 +786,7 @@ fn wire_global_search(ctx: &ShellContext) {
         &ctx.detail,
         &ctx.desired,
         &ctx.account,
+        &ctx.nix,
         &ctx.select_category,
     );
     ctx.global.wire(

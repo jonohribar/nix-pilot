@@ -57,6 +57,10 @@ pub struct SettingCard {
     syncing: Rc<Cell<bool>>,
     /// 'Reset to default': always visible, greyed when no change is stored.
     reset: gtk4::Button,
+    /// Dim "(reading the system value…)" note shown until the live read lands.
+    reading: gtk4::Label,
+    /// Whether the card is still awaiting its live value (control insensitive).
+    loading: Rc<Cell<bool>>,
 }
 
 impl SettingCard {
@@ -104,6 +108,9 @@ impl SettingCard {
             ValueKind::Boolean => {
                 let sw = gtk4::Switch::new();
                 sw.set_valign(gtk4::Align::Center);
+                // Await the mirror-reality live read before the control is
+                // usable, so a card never appears to change itself on load.
+                sw.set_sensitive(false);
                 control_row.append(&sw);
                 let status_label = gtk4::Label::new(Some("Off"));
                 status_label.set_valign(gtk4::Align::Center);
@@ -124,6 +131,7 @@ impl SettingCard {
                 }
                 combo.set_active(Some(0));
                 combo.set_hexpand(true);
+                combo.set_sensitive(false);
                 control_row.append(&combo);
                 Control::Dropdown(combo)
             }
@@ -131,12 +139,18 @@ impl SettingCard {
                 let entry = gtk4::Entry::new();
                 entry.set_placeholder_text(Some("(empty = use the system default)"));
                 entry.set_hexpand(true);
+                entry.set_sensitive(false);
                 control_row.append(&entry);
                 Control::Entry(entry)
             }
         };
         control_row.append(&reset);
         card.append(&control_row);
+
+        let reading = gtk4::Label::new(Some("(reading the system value…)"));
+        reading.add_css_class("dim-label");
+        reading.set_xalign(0.0);
+        card.append(&reading);
 
         SettingCard {
             card,
@@ -147,7 +161,23 @@ impl SettingCard {
             live_str: RefCell::new(None),
             syncing: Rc::new(Cell::new(false)),
             reset,
+            reading,
+            loading: Rc::new(Cell::new(true)),
         }
+    }
+
+    /// Release the reading state now that the live value is known (or that no
+    /// live value is available): enable the control and drop the note, once.
+    fn set_loaded(&self) {
+        if !self.loading.replace(false) {
+            return;
+        }
+        match &self.control {
+            Control::Entry(e) => e.set_sensitive(true),
+            Control::Switch(s) => s.set_sensitive(true),
+            Control::Dropdown(c) => c.set_sensitive(true),
+        }
+        self.reading.set_visible(false);
     }
 
     /// The built card widget, for appending into a page.
@@ -195,6 +225,7 @@ impl SettingCard {
                 }
             }
         }
+        self.set_loaded();
     }
 
     /// Connect the control and Reset handlers for a desired-state + save pair.
@@ -317,6 +348,12 @@ impl SettingCard {
                 });
             }
         }
+        // A stored choice already renders its value, so it needs no live read:
+        // release the reading state immediately. Cards without a stored choice
+        // wait for their live value (or the read-unavailable fallback).
+        if desired.borrow().settings.contains_key(self.key) {
+            self.set_loaded();
+        }
         self.wire_reset_to_default(desired, save);
     }
 
@@ -379,6 +416,11 @@ fn restore_live(control: &Control, live_bool: bool, live_str: Option<&str>) {
 /// values cannot be read; non-blocking on the main context.
 pub fn refresh_live_values(cards: &[SettingCard], desired: &Rc<RefCell<DesiredDoc>>) {
     if !crate::config_value::is_available() {
+        // No live value can ever arrive (non-NixOS): release every card's
+        // reading state so controls are usable with their placeholder.
+        for card in cards {
+            card.set_loaded();
+        }
         return;
     }
     let (tx, rx) = mpsc::channel::<(String, LiveValue)>();

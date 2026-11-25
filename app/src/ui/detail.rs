@@ -275,6 +275,24 @@ impl DetailUi {
 
     /// Reflect selection in the currently chosen scope. If this package is
     /// selected only in the other scope, keep it ready to add here as well.
+    /// Start the availability check when an entry opens, so the install button
+    /// lands on one already-verified "Add to ready-to-change list" instead of
+    /// a misleading manual "Install for me" check click.
+    pub fn auto_check(&self, nix: &Option<std::path::PathBuf>, allow_unfree: bool) {
+        if !matches!(*self.state.borrow(), InstallState::Idle) {
+            return;
+        }
+        let Some(attr) = self.current_attr.borrow().clone() else {
+            return;
+        };
+        let Some(nixp) = nix.clone() else {
+            self.status
+                .set_text("The package checker is not available on this system");
+            return;
+        };
+        start_availability_check(self, &self.btn_install, nixp, attr, allow_unfree);
+    }
+
     pub fn sync_added(&self, desired: &DesiredDoc, account: &str) {
         let Some(attr) = self.current_attr.borrow().clone() else {
             return;
@@ -302,14 +320,14 @@ impl DetailUi {
     }
 }
 
-const ADDED_TEXT: &str =
-    "Added to your ready-to-change list — review and prepare it in Updates. Applying is not available in this build.";
+const ADDED_TEXT: &str = "Added to your ready-to-change list — review and prepare it in Updates.";
 
 fn start_availability_check(
-    detail: &Rc<DetailUi>,
+    detail: &DetailUi,
     button: &gtk4::Button,
     nix_path: std::path::PathBuf,
     attr: String,
+    allow_unfree: bool,
 ) {
     // Evaluate off the GTK thread; the main-loop poller updates widgets and
     // rejects the result if navigation has since selected another entry.
@@ -329,8 +347,12 @@ fn start_availability_check(
     let checked_attr = attr.clone();
     let (sender, receiver) = std::sync::mpsc::channel::<install::CheckResult>();
     std::thread::spawn(move || {
-        let result =
-            install::check_availability(&nix_path, &attr, std::time::Duration::from_secs(60));
+        let result = install::check_availability(
+            &nix_path,
+            &attr,
+            allow_unfree,
+            std::time::Duration::from_secs(60),
+        );
         let _ = sender.send(result);
     });
 
@@ -462,7 +484,8 @@ pub fn wire(
                         .set_text("The package checker is not available on this system");
                     return;
                 };
-                start_availability_check(&d, btn, nixp, attr);
+                let allow_unfree = crate::settings::allow_unfree(&desired_click.borrow().settings);
+                start_availability_check(&d, btn, nixp, attr, allow_unfree);
             }
         }
     });

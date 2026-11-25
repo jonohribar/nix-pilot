@@ -76,11 +76,23 @@ pub fn discover_nix() -> Option<PathBuf> {
 /// Runs a dry-run availability evaluation with a deadline; it does not fetch,
 /// build, or write a system configuration. Evaluation output is retained in
 /// `detail` while `outcome` provides a stable classification for the UI.
-pub fn check_availability(nix: &std::path::Path, attr: &str, timeout: Duration) -> CheckResult {
+pub fn check_availability(
+    nix: &std::path::Path,
+    attr: &str,
+    allow_unfree: bool,
+    timeout: Duration,
+) -> CheckResult {
     // Wrap in timeout(1) when available so an orphaned check (app closed
     // mid-run) still terminates instead of lingering on a stalled download.
     let mut parts = vec![nix.to_string_lossy().into_owned()];
     parts.extend(["build", "--dry-run", "--no-link"].map(String::from));
+    if allow_unfree {
+        // A bare `nixpkgs#` evaluation defaults to allowUnfree=false, so an
+        // unfree app is refused no matter the user's choice. Once restricted-
+        // licence software is allowed, evaluate impurely so NIXPKGS_ALLOW_UNFREE
+        // is read and the verdict reflects the build that would follow.
+        parts.push("--impure".into());
+    }
     parts.push(format!("nixpkgs#{attr}"));
     if let Some(t) = which_timeout() {
         parts.insert(0, timeout.as_secs().max(1).to_string());
@@ -88,6 +100,9 @@ pub fn check_availability(nix: &std::path::Path, attr: &str, timeout: Duration) 
     }
     let mut cmd = Command::new(&parts[0]);
     cmd.args(&parts[1..]);
+    if allow_unfree {
+        cmd.env("NIXPKGS_ALLOW_UNFREE", "1");
+    }
     let output = match process::run(&mut cmd, timeout) {
         Ok(output) => output,
         Err(error) => {
@@ -229,7 +244,7 @@ mod tests {
     #[ignore]
     fn real_nix_hello_is_available() {
         let nix = discover_nix().expect("nix client not found");
-        let r = check_availability(&nix, "hello", Duration::from_secs(90));
+        let r = check_availability(&nix, "hello", false, Duration::from_secs(90));
         assert!(
             matches!(r.outcome, Outcome::ConfirmedAvailable { .. }),
             "detail: {}",
@@ -244,9 +259,22 @@ mod tests {
         let r = check_availability(
             &nix,
             "this-definitely-does-not-exist",
+            false,
             Duration::from_secs(90),
         );
         assert_eq!(r.outcome, Outcome::Unavailable);
         assert!(r.detail.contains("does not provide attribute"));
+    }
+
+    #[test]
+    #[ignore]
+    fn real_nix_unfree_is_allowed_when_enabled() {
+        let nix = discover_nix().expect("nix client not found");
+        // _1password-gui is unfree: with the app's restricted-licence setting
+        // off the default eval must refuse; with it on the check must pass.
+        let r = check_availability(&nix, "_1password-gui", false, Duration::from_secs(90));
+        assert_eq!(r.outcome, Outcome::UnfreeEvalBlocked);
+        let r = check_availability(&nix, "_1password-gui", true, Duration::from_secs(90));
+        assert!(matches!(r.outcome, Outcome::ConfirmedAvailable { .. }));
     }
 }

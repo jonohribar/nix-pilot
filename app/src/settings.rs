@@ -453,6 +453,29 @@ pub fn stored_bool(settings: &BTreeMap<String, SettingValue>, key: &str) -> Opti
     }
 }
 
+/// Whether restricted-licence software is effectively allowed, driving the
+/// unfree availability check so its verdict matches the build that follows.
+/// A stored choice decides; otherwise mirror the system's own setting (the
+/// preserved base configuration may already allow unfree and is applied).
+/// The user's stored restricted-licence choice, if explicitly decided.
+pub fn stored_unfree(settings: &BTreeMap<String, SettingValue>) -> Option<bool> {
+    stored_bool(settings, "nixpkgs.config.allowUnfree")
+}
+
+/// Whether restricted-licence software is effectively allowed, driving the
+/// unfree availability check so its verdict matches the build that follows.
+/// A stored choice decides; otherwise mirror the system's own setting (the
+/// preserved base configuration may already allow unfree and is applied).
+pub fn allow_unfree(settings: &BTreeMap<String, SettingValue>) -> bool {
+    match stored_unfree(settings) {
+        Some(stored) => stored,
+        None => matches!(
+            crate::config_value::read_config_value("nixpkgs.config.allowUnfree"),
+            Ok(crate::config_value::ConfigValue::Bool(true))
+        ),
+    }
+}
+
 /// The switch position to show for a boolean setting (mirror-reality): the
 /// user's stored choice when one exists, otherwise the live system value.
 /// The toggle therefore always shows what the setting effectively is.
@@ -623,6 +646,26 @@ mod tests {
         .is_err());
         let out = render_block(&m);
         assert!(out.contains("  nixpkgs.config.allowUnfree = lib.mkOverride 10 true;\n"));
+    }
+
+    #[test]
+    fn stored_unfree_distinguishes_a_choice_from_the_system_default() {
+        let mut m = BTreeMap::new();
+        // No stored choice: the effective gate mirrors the live system value.
+        assert_eq!(stored_unfree(&m), None);
+        // An explicit stored choice wins over the mirror, with no system read.
+        m.insert(
+            "nixpkgs.config.allowUnfree".into(),
+            SettingValue::Bool(true),
+        );
+        assert_eq!(stored_unfree(&m), Some(true));
+        assert!(allow_unfree(&m));
+        m.insert(
+            "nixpkgs.config.allowUnfree".into(),
+            SettingValue::Bool(false),
+        );
+        assert_eq!(stored_unfree(&m), Some(false));
+        assert!(!allow_unfree(&m));
         // Search + category placement are wired through the spec table.
         let spec = SPECS
             .iter()

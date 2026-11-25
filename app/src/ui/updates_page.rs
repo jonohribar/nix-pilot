@@ -144,8 +144,18 @@ fn prepare_changes(
     changes: &[PackageIntent],
     doc: &DesiredDoc,
 ) -> PrepareResult {
-    let report = updates::verify_package_intents(nix, changes, std::time::Duration::from_secs(60));
-    let candidate = if report.all_ok() && !changes.is_empty() {
+    let allow_unfree = crate::settings::allow_unfree(&doc.settings);
+    let report = updates::verify_package_intents(
+        nix,
+        changes,
+        allow_unfree,
+        std::time::Duration::from_secs(60),
+    );
+    // Stored settings are queueable changes too: a settings-only queue must
+    // still build a candidate, otherwise Prepare reports "nothing queued" and
+    // Apply can never enable (packages and settings share the same count).
+    let settings_queued = !doc.settings.is_empty();
+    let candidate = if report.all_ok() && (!changes.is_empty() || settings_queued) {
         if let Ok(sources) = crate::config_source::discover() {
             let state_version = build::state_version_or_default();
             Some(build::build_from_desired(
@@ -268,9 +278,10 @@ enum PrepareVerdict {
 fn classify_prepare(
     report_ok: bool,
     items_empty: bool,
+    settings_queued: bool,
     candidate_ok: Option<bool>,
 ) -> PrepareVerdict {
-    if items_empty {
+    if items_empty && !settings_queued {
         PrepareVerdict::NotQueued
     } else if !report_ok {
         PrepareVerdict::Blocked
@@ -313,6 +324,7 @@ fn render_prepare_result(
     let classification = classify_prepare(
         result.report.all_ok(),
         result.report.items.is_empty(),
+        !snapshot.settings.is_empty(),
         result.candidate.as_ref().map(|c| c.ok),
     );
     let event = match classification {
@@ -1064,12 +1076,19 @@ mod tests {
 
     #[test]
     fn classify_prepare_ready_needs_a_green_candidate() {
+        // packages green: ready
         assert_eq!(
-            classify_prepare(true, false, Some(true)),
+            classify_prepare(true, false, false, Some(true)),
             PrepareVerdict::Ready
         );
+        // settings-only queue, green build: also ready (settings share the queue)
         assert_eq!(
-            classify_prepare(true, true, Some(true)),
+            classify_prepare(true, true, true, Some(true)),
+            PrepareVerdict::Ready
+        );
+        // truly nothing queued (no items and no settings): not queued
+        assert_eq!(
+            classify_prepare(true, true, false, Some(true)),
             PrepareVerdict::NotQueued
         );
     }
@@ -1077,11 +1096,16 @@ mod tests {
     #[test]
     fn classify_prepare_blocked_when_checks_or_build_fail() {
         assert_eq!(
-            classify_prepare(false, false, Some(true)),
+            classify_prepare(false, false, false, Some(true)),
             PrepareVerdict::Blocked
         );
         assert_eq!(
-            classify_prepare(true, false, Some(false)),
+            classify_prepare(true, false, false, Some(false)),
+            PrepareVerdict::Blocked
+        );
+        // settings-only queue whose candidate build failed is blocked
+        assert_eq!(
+            classify_prepare(true, true, true, Some(false)),
             PrepareVerdict::Blocked
         );
     }
@@ -1091,7 +1115,12 @@ mod tests {
         // green checks but no candidate (non-NixOS / no config) must never read
         // as "ready" — the page must not claim nothing can be built is fine
         assert_eq!(
-            classify_prepare(true, false, None),
+            classify_prepare(true, false, false, None),
+            PrepareVerdict::NoSystemConfig
+        );
+        // settings-only queue with no config to build for is equally honest
+        assert_eq!(
+            classify_prepare(true, true, true, None),
             PrepareVerdict::NoSystemConfig
         );
     }

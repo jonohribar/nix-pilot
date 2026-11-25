@@ -154,7 +154,10 @@ pub fn view_for(step: TxStep, activation_allowed: bool) -> TxView {
         _ => Action::None,
     };
     let primary_label = match primary_action {
-        Action::Apply | Action::None => "Apply changes",
+        Action::Apply => "Apply changes",
+        // No action in the current step: the button is disabled, so say how to
+        // get one instead of promising a disabled "Apply changes".
+        Action::None => "Check and build first",
         Action::Rollback => "Go back to the previous system",
     };
     let primary_tooltip = if !activation_allowed {
@@ -208,11 +211,12 @@ pub fn advance(step: TxStep, event: TxEvent) -> Option<TxStep> {
 pub fn verify_package_intents(
     nix: &std::path::Path,
     changes: &[PackageIntent],
+    allow_unfree: bool,
     timeout: Duration,
 ) -> BuildReport {
     let mut report = BuildReport::default();
     for c in changes {
-        let r = install::check_availability(nix, &c.attr, timeout);
+        let r = install::check_availability(nix, &c.attr, allow_unfree, timeout);
         let ok = matches!(r.outcome, install::Outcome::ConfirmedAvailable { .. });
         let note = match r.outcome {
             install::Outcome::ConfirmedAvailable { note } => note,
@@ -370,6 +374,22 @@ mod tests {
         assert!(failed_rollback.prepare_enabled);
         assert_eq!(failed_rollback.primary_action, Rollback);
         assert!(failed_rollback.primary_enabled);
+    }
+
+    #[test]
+    fn idle_primary_button_says_check_first_not_apply() {
+        use PrimaryAction::*;
+        use TxStep::*;
+        // The primary button must not claim "Apply changes" while it is
+        // disabled at Ready; it should say how to get to a buildable state.
+        let ready = view_for(Ready, true);
+        assert_eq!(ready.primary_action, None);
+        assert!(!ready.primary_enabled);
+        assert_eq!(ready.primary_label, "Check and build first");
+        let build_ready = view_for(BuildCheck, true);
+        assert_eq!(build_ready.primary_action, Apply);
+        assert!(build_ready.primary_enabled);
+        assert_eq!(build_ready.primary_label, "Apply changes");
     }
 
     #[test]

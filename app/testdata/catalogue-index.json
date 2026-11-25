@@ -1,0 +1,173 @@
+{
+  "schemaVersion": "0.1",
+  "generated": {
+    "pin": "test-fixture",
+    "date": "2026-11-25T07:12:00.177Z",
+    "note": "Small committed fixture for headless/CI tests; regenerate from experiments/catalogue."
+  },
+  "counts": {
+    "entries": 10
+  },
+  "entries": [
+    {
+      "attr": "_1password-cli",
+      "pname": "1password-cli",
+      "version": "2.34.0",
+      "description": "1Password command-line tool",
+      "homePage": "https://developer.1password.com/docs/cli/",
+      "mainProgram": "op",
+      "unfree": true,
+      "linuxOK": true,
+      "class": "cli",
+      "tier": "heuristic",
+      "install": {
+        "attr": "_1password-cli",
+        "scopeDefault": "user"
+      }
+    },
+    {
+      "attr": "_1password-gui",
+      "pname": "1password",
+      "version": "8.12.21",
+      "description": "Multi-platform password manager",
+      "homePage": "https://1password.com/",
+      "mainProgram": "1password",
+      "unfree": true,
+      "linuxOK": true,
+      "class": "app",
+      "tier": "heuristic",
+      "install": {
+        "attr": "_1password-gui",
+        "scopeDefault": "user"
+      }
+    },
+    {
+      "attr": "emacs",
+      "pname": "emacs",
+      "version": "30.2",
+      "description": "Extensible, customizable GNU text editor",
+      "homePage": "https://www.gnu.org/software/emacs/",
+      "mainProgram": "emacs",
+      "unfree": false,
+      "linuxOK": true,
+      "class": "app",
+      "tier": "heuristic",
+      "install": {
+        "attr": "emacs",
+        "scopeDefault": "user"
+      }
+    },
+    {
+      "attr": "firefox",
+      "pname": "firefox",
+      "version": "160.0",
+      "description": "Web browser built from Firefox source tree",
+      "homePage": "http://www.mozilla.com/en-US/firefox/",
+      "mainProgram": "firefox",
+      "unfree": false,
+      "linuxOK": true,
+      "class": "app",
+      "tier": "heuristic",
+      "install": {
+        "attr": "firefox",
+        "scopeDefault": "user"
+      }
+    },
+    {
+      "attr": "htop",
+      "pname": "htop",
+      "version": "3.5.1",
+      "description": "Interactive process viewer",
+      "homePage": "https://htop.dev",
+      "mainProgram": "htop",
+      "unfree": false,
+      "linuxOK": true,
+      "class": "app",
+      "tier": "heuristic",
+      "install": {
+        "attr": "htop",
+        "scopeDefault": "user"
+      }
+    },
+    {
+      "attr": "krita",
+      "pname": "krita",
+      "version": "6.0.2.1",
+      "description": "Free and open source painting application",
+      "homePage": "https://krita.org/",
+      "mainProgram": "krita",
+      "unfree": false,
+      "linuxOK": true,
+      "class": "cli",
+      "tier": "heuristic",
+      "install": {
+        "attr": "krita",
+        "scopeDefault": "user"
+      }
+    },
+    {
+      "attr": "obsidian",
+      "pname": "obsidian",
+      "version": "1.13.7",
+      "description": "Powerful knowledge base that works on top of a local folder of plain text Markdown files",
+      "homePage": "https://obsidian.md",
+      "mainProgram": "obsidian",
+      "unfree": true,
+      "linuxOK": true,
+      "class": "cli",
+      "tier": "heuristic",
+      "install": {
+        "attr": "obsidian",
+        "scopeDefault": "user"
+      }
+    },
+    {
+      "attr": "ripgrep",
+      "pname": "ripgrep",
+      "version": "15.1.0",
+      "description": "Utility that combines the usability of The Silver Searcher with the raw speed of grep",
+      "homePage": "https://github.com/BurntSushi/ripgrep",
+      "mainProgram": "rg",
+      "unfree": false,
+      "linuxOK": true,
+      "class": "cli",
+      "tier": "heuristic",
+      "install": {
+        "attr": "ripgrep",
+        "scopeDefault": "user"
+      }
+    },
+    {
+      "attr": "spotify",
+      "pname": "spotify",
+      "version": "1.2.90.451.gb094aab0",
+      "description": "Play music from the Spotify music service",
+      "homePage": "https://www.spotify.com/",
+      "mainProgram": "spotify",
+      "unfree": true,
+      "linuxOK": true,
+      "class": "cli",
+      "tier": "heuristic",
+      "install": {
+        "attr": "spotify",
+        "scopeDefault": "user"
+      }
+    },
+    {
+      "attr": "vlc",
+      "pname": "vlc",
+      "version": "3.0.24",
+      "description": "Cross-platform media player and streaming server",
+      "homePage": "https://www.videolan.org/vlc/",
+      "mainProgram": "vlc",
+      "unfree": false,
+      "linuxOK": true,
+      "class": "app",
+      "tier": "heuristic",
+      "install": {
+        "attr": "vlc",
+        "scopeDefault": "user"
+      }
+    }
+  ]
+}

@@ -142,7 +142,10 @@ pub struct IndexEntry {
     #[serde(default)]
     pub unfree: bool,
     /// Whether the package supports the Linux target represented by the index.
-    #[serde(default)]
+    // The generator emits the field as `linuxOK` (all-caps acronym), not the
+    // camelCase `linuxOk` that rename_all would produce; rename explicitly so
+    // every entry does not silently deserialize as unsupported.
+    #[serde(default, rename = "linuxOK")]
     pub linux_ok: bool,
     /// Product-facing category for grouping the entry in the store.
     #[serde(default)]
@@ -242,6 +245,52 @@ mod tests {
         let t: Tier = serde_json::from_str("\"heuristic\"").unwrap();
         assert_eq!(t, Tier::Other);
         assert_eq!(t.label(), "Not yet verified");
+    }
+
+    #[test]
+    fn index_entry_deserializes_real_index_fields() {
+        // Representative of the generated catalogue index (schema 0.1): the
+        // linux-capability flag is emitted as `linuxOK`, and entries must not
+        // silently default to unsupported when that key is present.
+        let json = r#"{
+            "attr": "ripgrep",
+            "pname": "ripgrep",
+            "version": "15.1.0",
+            "linuxOK": true,
+            "unfree": false,
+            "class": "cli",
+            "tier": "heuristic",
+            "install": { "attr": "ripgrep", "scopeDefault": "user" }
+        }"#;
+        let e: IndexEntry = serde_json::from_str(json).unwrap();
+        assert!(e.linux_ok, "linuxOK key must deserialize onto linux_ok");
+        assert!(!e.unfree);
+        assert_eq!(e.class, Class::Cli);
+        assert_eq!(e.tier, Tier::Other);
+        assert_eq!(e.install.unwrap().scope_default.as_deref(), Some("user"));
+    }
+
+    #[test]
+    fn committed_test_fixture_parses_with_linux_flags() {
+        // The committed app/testdata catalogue keeps headless/CI store tests
+        // functional without the generated index, and guards the model from
+        // drifting away from the real index shape (linuxOK key and friends).
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/catalogue-index.json");
+        let data = std::fs::read_to_string(path).expect("test fixture missing");
+        let idx: CatalogueIndex = serde_json::from_str(&data).unwrap();
+        assert!(idx.entries.len() >= 8, "fixture too small");
+        // Every fixture entry must be Linux-available and carry class+install.
+        assert!(
+            idx.entries.iter().all(|e| e.linux_ok),
+            "fixture entries must all be linuxOK"
+        );
+        assert!(idx.entries.iter().any(|e| e.unfree));
+        assert!(idx.entries.iter().any(|e| e.class == Class::Cli));
+        assert!(idx.entries.iter().any(|e| e.class == Class::App));
+        assert!(
+            idx.entries.iter().any(|e| e.attr == "firefox"),
+            "fixture must keep firefox for the search a11y test"
+        );
     }
 
     #[test]
