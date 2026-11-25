@@ -23,6 +23,15 @@ let
       area=/etc/nix-pilot/generated
       config=$area/configuration.nix
       ensure_area() { mkdir -p "$area"; }
+      # Self-preserve (nix-pilot-r3j): keep a working copy of this helper in
+      # /etc/nix-pilot so it survives switches that drop the module, letting
+      # the app still roll back. Never fails the switch if it cannot copy.
+      self_preserve() {
+        mkdir -p /etc/nix-pilot 2>/dev/null || return 0
+        cp -f "$0" /etc/nix-pilot/nix-pilot-apply 2>/dev/null || return 0
+        chmod +x /etc/nix-pilot/nix-pilot-apply 2>/dev/null || true
+      }
+      self_preserve || true
       # In-band publish-before-switch (D26): the generated area (a tar of
       # configuration.nix + generated-desired.nix) arrives on stdin and is
       # written into the app-owned area before anything builds/switches. Empty
