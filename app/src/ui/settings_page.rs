@@ -10,8 +10,10 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use crate::account::{self, AccountPresence};
+use crate::config_source::ConfigRoot;
 use crate::desired_state::{AccountProfile, DesiredDoc};
 use crate::settings;
+use crate::setup;
 use crate::ui::setting_card::{refresh_live_values, SettingCard};
 
 /// Settings surface containing the profile, category navigation, and controls.
@@ -31,11 +33,17 @@ pub struct SettingsPage {
     add_admin: gtk4::Switch,
     add_btn: gtk4::Button,
     accounts_status: gtk4::Label,
+    /// Live integration status of the nix-pilot module in the user's config.
+    integration_status: gtk4::Label,
+    /// Root of the user's configuration, when detected (shared with the
+    /// card's action handlers).
+    integration_root: Rc<RefCell<Option<ConfigRoot>>>,
 }
 
 impl SettingsPage {
-    /// Build the settings surface for the account whose user-scoped data it edits.
-    pub fn new(account: &str) -> SettingsPage {
+    /// Build the settings surface for the account whose user-scoped data it
+    /// edits. `open_setup` reopens the first-run setup page in the shell.
+    pub fn new(account: &str, open_setup: Rc<dyn Fn()>) -> SettingsPage {
         // Settings is a stack of one page per category, selected from the
         // sidebar's two-column router (the category list lives there, not in
         // a drill-in home page).
@@ -66,6 +74,102 @@ impl SettingsPage {
             cat_pages[spec.category].append(card.card());
             cards.push(card);
         }
+
+        // Integration card (System page, top): the nix-pilot module connection
+        // status, the path back to the setup steps, and removal. Ongoing
+        // status lives here rather than in a separate nav surface (4tk.5).
+        let integration_card = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+        integration_card.add_css_class("card");
+        integration_card.set_margin_top(6);
+        let integration_label = gtk4::Label::new(Some("nix-pilot connection"));
+        integration_label.add_css_class("heading");
+        integration_label.set_xalign(0.0);
+        let integration_blurb = gtk4::Label::new(Some(
+            "This app manages your NixOS system through a small module inside your \
+             configuration. The connection is one import line; everything else \
+             happens in the app.",
+        ));
+        integration_blurb.set_xalign(0.0);
+        integration_blurb.set_wrap(true);
+        integration_blurb.add_css_class("dim-label");
+        let integration_status = gtk4::Label::new(None);
+        integration_status.set_xalign(0.0);
+        integration_status.set_wrap(true);
+        let integration_actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        let integration_steps_btn = gtk4::Button::with_label("Setup steps");
+        let integration_open_btn = gtk4::Button::with_label("Open my config");
+        let integration_remove_btn = gtk4::Button::with_label("Remove nix-pilot");
+        integration_remove_btn.add_css_class("destructive-action");
+        integration_actions.append(&integration_steps_btn);
+        integration_actions.append(&integration_open_btn);
+        integration_actions.append(&integration_remove_btn);
+        integration_card.append(&integration_label);
+        integration_card.append(&integration_blurb);
+        integration_card.append(&integration_status);
+        integration_card.append(&integration_actions);
+        cat_pages["system"].prepend(&integration_card);
+
+        // Wire the card actions: reopen the setup steps, open the config
+        // folder, and confirmed removal of the app-owned files.
+        let integration_root: Rc<RefCell<Option<ConfigRoot>>> = Rc::new(RefCell::new(None));
+        let open_setup_for_steps = open_setup.clone();
+        integration_steps_btn.connect_clicked(move |_| open_setup_for_steps());
+
+        let root_for_open = integration_root.clone();
+        integration_open_btn.connect_clicked(move |_| {
+            if let Some(root) = root_for_open.borrow().clone() {
+                let mut command = std::process::Command::new("xdg-open");
+                command.arg(&root.path);
+                if let Err(error) =
+                    crate::process::run(&mut command, std::time::Duration::from_secs(10))
+                {
+                    log::warn!("could not open the configuration folder: {error}");
+                }
+            }
+        });
+
+        let root_for_remove = integration_root.clone();
+        let status_for_remove = integration_status.clone();
+        let remove_handler = integration_remove_btn.clone();
+        integration_remove_btn.connect_clicked(move |_| {
+            let Some(root) = root_for_remove.borrow().clone() else {
+                status_for_remove.set_text("No NixOS configuration was found on this computer.");
+                return;
+            };
+            let Some(parent) = remove_handler
+                .root()
+                .and_then(|root| root.downcast::<gtk4::Window>().ok())
+            else {
+                return;
+            };
+            let dialog = gtk4::MessageDialog::builder()
+                .transient_for(&parent)
+                .modal(true)
+                .message_type(gtk4::MessageType::Question)
+                .buttons(gtk4::ButtonsType::None)
+                .text("Remove nix-pilot from your configuration?")
+                .secondary_text(
+                    "The app-owned files will be deleted from your configuration. \
+                     Your import line stays — you remove that yourself to finish.",
+                )
+                .build();
+            dialog.add_button("Cancel", gtk4::ResponseType::Cancel);
+            dialog.add_button("Remove", gtk4::ResponseType::Accept);
+            let root_for_work = root.clone();
+            let status_for_work = status_for_remove.clone();
+            dialog.connect_response(move |dialog, response| {
+                dialog.close();
+                if response != gtk4::ResponseType::Accept {
+                    return;
+                }
+                match setup::uninstall(&root_for_work) {
+                    Ok(instructions) => status_for_work.set_text(&instructions),
+                    Err(error) => status_for_work
+                        .set_text(&format!("Could not remove the nix-pilot files: {error}")),
+                }
+            });
+            dialog.present();
+        });
 
         let keys_card = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
         keys_card.add_css_class("card");
@@ -188,6 +292,8 @@ impl SettingsPage {
             add_admin,
             add_btn,
             accounts_status,
+            integration_status,
+            integration_root,
         }
     }
 
@@ -347,6 +453,26 @@ impl SettingsPage {
     /// preselection), non-blocking, when the Settings page becomes visible.
     pub fn load_current_values(&self, desired: &Rc<RefCell<DesiredDoc>>) {
         refresh_live_values(&self.cards, desired);
+        self.refresh_integration();
+    }
+
+    /// Re-read the integration status of the nix-pilot module and re-render
+    /// the card. Called whenever the Settings page becomes visible.
+    pub fn refresh_integration(&self) {
+        *self.integration_root.borrow_mut() = setup::resolve_root();
+        let root = self.integration_root.borrow().clone();
+        let text = match &root {
+            Some(root) if setup::is_integrated(root) => {
+                "Connected — your configuration imports the nix-pilot module.".into()
+            }
+            Some(root) => format!(
+                "Not connected yet — your configuration at {} does not import \
+                 the nix-pilot module yet.",
+                root.path.display()
+            ),
+            None => "No NixOS configuration was found on this computer.".into(),
+        };
+        self.integration_status.set_text(&text);
     }
 }
 

@@ -6,9 +6,11 @@ cd "$(dirname "$0")/.."
 # Isolate data and GTK preferences so the test cannot write to or inherit
 # settings from the real home (for example, a host dark-theme preference).
 TEST_HOME="$(mktemp -d)"
+export HOME="$TEST_HOME"
 export XDG_DATA_HOME="$TEST_HOME/data"
 export XDG_CONFIG_HOME="$TEST_HOME/config"
 export GDK_BACKEND=x11
+export NIX_PILOT_SKIP_SETUP=1
 # A fresh session bus gives this process its own primary GtkApplication
 # instance. Without it the new instance either hands off to an already-running
 # nix-pilot and exits 0 before ever running `activate` (no window here), or has

@@ -18,6 +18,7 @@ mod process;
 mod search;
 mod setting_value;
 mod settings;
+mod setup;
 mod store;
 mod system;
 mod try_run;

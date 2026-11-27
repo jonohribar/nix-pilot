@@ -10,7 +10,9 @@ use log::error;
 use crate::desired_state::DesiredDoc;
 use crate::model::{IndexEntry, PackageNames};
 use crate::search::SearchCorpus;
-use crate::ui::{detail, global_search, settings_page, store_search, updates_page, your_system};
+use crate::ui::{
+    detail, global_search, settings_page, setup_page, store_search, updates_page, your_system,
+};
 
 fn wire_search_shortcut(search: &gtk4::SearchEntry, window: &gtk4::ApplicationWindow) {
     let search = search.clone();
@@ -567,7 +569,18 @@ pub fn run(
         "Installs into your user account — no administrator rights needed",
     ));
     let updates = Rc::new(updates_page::UpdatesPage::new(package_names.clone()));
-    let settings = Rc::new(settings_page::SettingsPage::new(&account));
+    // The Integration card reopens the first-run setup page; the stack is
+    // created below, so the shell fills this handle once it exists.
+    let stack_handle: Rc<RefCell<Option<gtk4::Stack>>> = Rc::new(RefCell::new(None));
+    let open_setup: Rc<dyn Fn()> = {
+        let stack_handle = stack_handle.clone();
+        Rc::new(move || {
+            if let Some(stack) = stack_handle.borrow().as_ref() {
+                stack.set_visible_child_name("setup");
+            }
+        })
+    };
+    let settings = Rc::new(settings_page::SettingsPage::new(&account, open_setup));
     let your_system = Rc::new(your_system::YourSystemPage::new(
         &account,
         package_names.clone(),
@@ -630,6 +643,7 @@ pub fn run(
     refresh_pending();
 
     let stack = gtk4::Stack::new();
+    *stack_handle.borrow_mut() = Some(stack.clone());
     stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
     stack.add_named(&catalogue.page, Some("list")); // the store list scrolls internally
     stack.add_named(&scrolled_page(&detail.page), Some("detail"));
@@ -639,7 +653,47 @@ pub fn run(
     stack.add_named(&scrolled_page(&updates.page), Some("updates"));
     stack.add_named(&scrolled_page(&settings.page), Some("settings"));
     stack.add_named(&scrolled_page(&your_system.page), Some("your-system"));
-    stack.set_visible_child_name("list");
+    // First-run: until the user's config references nix-pilot, the setup
+    // page is the initial surface. Demo/screenshot mode always starts in the
+    // store (dev hook; the harness has no integrated config to detect).
+    let setup = Rc::new(setup_page::SetupPage::new(&window, &stack));
+    stack.add_named(&setup.page, Some("setup"));
+    {
+        // Re-run detection whenever the setup page is shown, so reopening it
+        // from Settings reflects the current integration state.
+        let setup_for_refresh = setup.clone();
+        stack.connect_visible_child_name_notify(move |s| {
+            if s.visible_child_name().as_deref() == Some("setup") {
+                setup_for_refresh.refresh();
+            }
+        });
+    }
+    let setup_skipped = std::env::var("NIX_PILOT_SKIP_SETUP").as_deref() == Ok("1")
+        || std::env::var("NIX_PILOT_DEMO").as_deref() == Ok("1");
+    let root = crate::setup::resolve_root();
+    let integrated = root.as_ref().is_some_and(crate::setup::is_integrated);
+    if !integrated && !setup_skipped {
+        // The snippet imports ./nix-pilot/module.nix and state.nix; write
+        // the app-owned files (and track them once) so the user's first
+        // rebuild after pasting has real files to import. Best-effort: a
+        // failure is logged and surfaces at verify/apply time.
+        if let Some(root) = root.as_ref() {
+            if let Err(error) = crate::setup::write_app_files(root, &desired.borrow()) {
+                log::warn!("could not write the nix-pilot files into your configuration: {error}");
+            }
+            if let Err(error) = crate::system::state_file::git_add_once(&root.path) {
+                log::warn!(
+                    "could not track the nix-pilot files in your configuration's git repository: \
+                     {error}"
+                );
+            }
+        }
+    }
+    stack.set_visible_child_name(if integrated || setup_skipped {
+        "list"
+    } else {
+        "setup"
+    });
 
     let sidebar = build_sidebar(
         &stack,
@@ -718,6 +772,7 @@ fn wire_dev_hooks(ctx: &ShellContext) {
     }
 
     match std::env::var("NIX_PILOT_GO").as_deref() {
+        Ok("setup") => ctx.stack.set_visible_child_name("setup"),
         Ok("settings") => {
             let first = crate::settings::SETTINGS_CATEGORIES
                 .first()

@@ -19,6 +19,9 @@ APP_BIN="$2"
 # Let the Python driver own the one Xvfb process; choosing a display here
 # avoids the runner starting a second, unused server.
 export NIX_PILOT_A11Y_DISPLAY=":${3:-$(shuf -i 100-5000 -n 1)}"
+# The nav/search tests drive the store shell, not first-run setup; and the
+# harness must never write app files into a real configuration found via HOME.
+export NIX_PILOT_SKIP_SETUP=1
 # Point the app at a real catalogue index. CI may set NIX_PILOT_CATALOGUE;
 # otherwise use the index in this repository checkout when available.
 if [ -z "${NIX_PILOT_CATALOGUE:-}" ]; then

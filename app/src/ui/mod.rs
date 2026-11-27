@@ -8,6 +8,7 @@ mod geom_dump;
 mod global_search;
 mod setting_card;
 pub mod settings_page;
+mod setup_page;
 mod store_search;
 pub mod updates_page;
 pub mod widgets;
@@ -66,7 +67,8 @@ mod tree_probe {
         // up (same as main.rs). The probe never opens a window.
         let _ = libadwaita::init();
         let account = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
-        let settings = super::settings_page::SettingsPage::new(&account);
+        let no_op: std::rc::Rc<dyn Fn()> = std::rc::Rc::new(|| {});
+        let settings = super::settings_page::SettingsPage::new(&account, no_op);
         let package_names = std::rc::Rc::new(crate::model::PackageNames::default());
         let updates = super::updates_page::UpdatesPage::new(package_names.clone());
         let your_system = super::your_system::YourSystemPage::new(&account, package_names);
