@@ -41,10 +41,14 @@ pub fn index_entries() -> (Vec<model::IndexEntry>, Option<String>) {
 /// Initialize logging and the GTK application, then run its event loop.
 fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    info!("nix-pilot starting");
+    let display = std::env::var("DISPLAY").unwrap_or_else(|_| "(unset)".into());
+    info!("nix-pilot starting on display {display}");
 
-    if libadwaita::init().is_err() {
-        error!("failed to initialise libadwaita");
+    // GTK init can fail headless (no display, missing schemas); surface the
+    // actual gtk error so a CI-only failure reports its cause instead of
+    // a bare "failed to initialise libadwaita".
+    if let Err(error) = libadwaita::init() {
+        error!("failed to initialise libadwaita: {error}");
         return ExitCode::FAILURE;
     }
 
