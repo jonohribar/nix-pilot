@@ -1,4 +1,6 @@
-//! Navigable GTK wireframe prototype built from Blueprint-compiled `.ui` pages.
+//! Dev-only navigable GTK wireframe prototype (not part of the product UI).
+//! Built from Blueprint-compiled `.ui` pages for visual iteration and screenshot capture.
+//! Run via `just proto` or `wireframes/render.sh`.
 //!
 //! Pages are placed in one stack so sidebar, detail, and store-search
 //! navigation can be exercised without the product data/backend. Store search
