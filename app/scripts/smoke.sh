@@ -23,10 +23,12 @@ trap 'rm -rf "$TEST_HOME"' EXIT
 # Bounded end to end: a stall is a failure (timeout rc 124), never a hang.
 timeout 60 dbus-run-session -- xvfb-run -a bash -c '
 	set -euo pipefail
-	# Do not let the backgrounded app inherit this shell's stdout: during its
-	# slow shutdown it holds the pipe open, so the xvfb-run/dbus-run-session
-	# teardown never closes and the test hangs.
-	./target/debug/nix-pilot-app >/dev/null 2>&1 &
+	# Keep the app's own output for diagnosis: the smoke currently fails only
+	# on the ubuntu CI runner, never locally, so a failure must reveal why.
+	# A file (not the shell's stdout) keeps the app from holding the pipe open
+	# and blocking xvfb-run/dbus-run-session teardown on slow shutdown.
+	app_log="$TEST_HOME/app.log"
+	./target/debug/nix-pilot-app >"$app_log" 2>&1 &
 	app_pid=$!
 	# The windowed app does not exit promptly on SIGTERM under this env, so
 	# never `wait` on it here: kill it and return immediately, or the EXIT trap
@@ -40,6 +42,8 @@ timeout 60 dbus-run-session -- xvfb-run -a bash -c '
 		if ! kill -0 "$app_pid" 2>/dev/null; then
 			wait "$app_pid" || true
 			echo "smoke: app exited before presenting its window" >&2
+			echo "--- app log ---" >&2
+			cat "$app_log" >&2 || true
 			exit 1
 		fi
 		if xwininfo -root -tree 2>/dev/null | grep -q "\"nix-pilot\""; then
@@ -50,5 +54,7 @@ timeout 60 dbus-run-session -- xvfb-run -a bash -c '
 	done
 
 	echo "smoke: app window did not appear within 5 seconds" >&2
+	echo "--- app log ---" >&2
+	cat "$app_log" >&2 || true
 	exit 1
 '
