@@ -407,12 +407,13 @@ impl DetailUi {
 
     /// Update UI for a new try state.
     fn update_try_ui(&self, state: TryState) {
-        *self.try_state.borrow_mut() = state;
-        self.btn_try.set_label(state.button_label());
-        self.btn_try.set_tooltip_text(Some(state.button_tooltip()));
-        self.btn_try.set_sensitive(state.is_sensitive());
-        let app_name = self.title.label().to_string();
-        self.status.set_text(&state.status_text(&app_name));
+        apply_try_state(
+            state,
+            &self.try_state,
+            &self.btn_try,
+            &self.status,
+            &self.title,
+        );
     }
 
     /// Reset try UI to idle state.
@@ -442,51 +443,21 @@ impl DetailUi {
         let try_session = self.try_session.clone();
         let try_receiver = self.try_receiver.clone();
 
-        glib::timeout_add_local(
-            std::time::Duration::from_millis(100),
-            move || match receiver.try_recv() {
-                Ok(terminal_state) => {
-                    *try_state.borrow_mut() = terminal_state;
-                    *try_session.borrow_mut() = None;
-                    *try_receiver.borrow_mut() = None;
-                    let app_name = title.label().to_string();
-                    btn_try.set_label(terminal_state.button_label());
-                    btn_try.set_tooltip_text(Some(terminal_state.button_tooltip()));
-                    btn_try.set_sensitive(true);
-                    status.set_text(&terminal_state.status_text(&app_name));
-                    glib::ControlFlow::Break
-                }
-                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                Err(_) => {
-                    *try_state.borrow_mut() = TryState::Ended {
-                        stopped_by_user: false,
-                    };
-                    *try_session.borrow_mut() = None;
-                    *try_receiver.borrow_mut() = None;
-                    let app_name = title.label().to_string();
-                    btn_try.set_label(
-                        TryState::Ended {
-                            stopped_by_user: false,
-                        }
-                        .button_label(),
-                    );
-                    btn_try.set_tooltip_text(Some(
-                        TryState::Ended {
-                            stopped_by_user: false,
-                        }
-                        .button_tooltip(),
-                    ));
-                    btn_try.set_sensitive(true);
-                    status.set_text(
-                        &TryState::Ended {
-                            stopped_by_user: false,
-                        }
-                        .status_text(&app_name),
-                    );
-                    glib::ControlFlow::Break
-                }
-            },
-        );
+        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+            // A dropped sender means the monitor is gone: report a plain
+            // end rather than leaving the card on "Starting".
+            let terminal = match receiver.try_recv() {
+                Ok(state) => state,
+                Err(mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
+                Err(mpsc::TryRecvError::Disconnected) => TryState::Ended {
+                    stopped_by_user: false,
+                },
+            };
+            *try_session.borrow_mut() = None;
+            *try_receiver.borrow_mut() = None;
+            apply_try_state(terminal, &try_state, &btn_try, &status, &title);
+            glib::ControlFlow::Break
+        });
     }
 
     /// After a grace period, move a live Starting session to Running so the
@@ -523,6 +494,25 @@ impl DetailUi {
 }
 
 const ADDED_TEXT: &str = "Added to your ready-to-change list — review and prepare it in Updates.";
+
+/// Apply a try state to the card widgets.
+///
+/// Shared by the click handlers and the background poll, so both paths render
+/// a state identically.
+fn apply_try_state(
+    state: TryState,
+    try_state: &Rc<RefCell<TryState>>,
+    btn_try: &gtk4::Button,
+    status: &gtk4::Label,
+    title: &gtk4::Label,
+) {
+    *try_state.borrow_mut() = state;
+    btn_try.set_label(state.button_label());
+    btn_try.set_tooltip_text(Some(state.button_tooltip()));
+    btn_try.set_sensitive(state.is_sensitive());
+    let app_name = title.label().to_string();
+    status.set_text(&state.status_text(&app_name));
+}
 
 fn start_availability_check(
     detail: &DetailUi,
