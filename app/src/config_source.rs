@@ -53,30 +53,45 @@ pub enum ConfigKind {
 pub const CONFIG_ROOT_ENV: &str = "NIX_PILOT_CONFIG_DIR";
 
 /// Resolve the user's configuration root: the env override first (when it
-/// names a real config), then the conventional locations. The first directory
-/// that looks like a NixOS configuration wins.
+/// names a real config), then the conventional locations.
 pub fn resolve_config_root() -> Option<ConfigRoot> {
     if let Some(dir) = std::env::var_os(CONFIG_ROOT_ENV) {
         if let Some(root) = classify_root(&PathBuf::from(dir)) {
             return Some(root);
         }
     }
-    conventional_candidates()
-        .into_iter()
-        .find_map(|dir| classify_root(&dir))
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    resolve_in(conventional_candidates(home.as_deref()))
 }
 
-/// Conventional configuration locations: the system path, then well-known
-/// home flake locations, in discovery order.
-fn conventional_candidates() -> Vec<PathBuf> {
-    let mut candidates = vec![PathBuf::from("/etc/nixos")];
-    if let Some(home) = std::env::var_os("HOME") {
-        let home = PathBuf::from(home);
+/// Conventional configuration locations: well-known home flake directories,
+/// then the system path. A flake is an actively-maintained config, while a
+/// classic `/etc/nixos` on a flake-driven machine is usually a stale copy a
+/// rebuild ignores — so a flake anywhere wins over a classic `/etc/nixos`.
+fn conventional_candidates(home: Option<&Path>) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(home) = home {
         for relative in ["nixos-config", "Projects/nixos-config", "dotfiles", "nixos"] {
             candidates.push(home.join(relative));
         }
     }
+    candidates.push(PathBuf::from("/etc/nixos"));
     candidates
+}
+
+/// First flake wins (home dirs are scanned first), else the first classic.
+fn resolve_in(candidates: Vec<PathBuf>) -> Option<ConfigRoot> {
+    let mut classic = None;
+    for candidate in candidates {
+        if let Some(root) = classify_root(&candidate) {
+            match root.kind {
+                ConfigKind::Flake => return Some(root),
+                ConfigKind::Classic if classic.is_none() => classic = Some(root),
+                ConfigKind::Classic => {}
+            }
+        }
+    }
+    classic
 }
 
 /// Classify a directory as a configuration root, or `None` when it is not one.
@@ -211,6 +226,45 @@ mod tests {
         let empty = Fixture::new("root-empty");
         assert_eq!(classify_root(&empty.0), None);
         assert_eq!(classify_root(Path::new("/definitely/not/here")), None);
+    }
+
+    #[test]
+    fn conventional_candidates_scan_home_before_the_system_path() {
+        let home =
+            std::env::temp_dir().join(format!("nix-pilot-candidates-{}", std::process::id()));
+        let candidates = conventional_candidates(Some(&home));
+        assert_eq!(candidates.last(), Some(&PathBuf::from("/etc/nixos")));
+        assert_eq!(candidates[0], home.join("nixos-config"));
+    }
+
+    #[test]
+    fn resolve_in_prefers_a_flake_over_an_earlier_classic() {
+        let classic = Fixture::new("classic-first");
+        classic.write("configuration.nix");
+        let flake = Fixture::new("flake-second");
+        flake.write("flake.nix");
+        assert_eq!(
+            resolve_in(vec![classic.0.clone(), flake.0.clone()]),
+            Some(ConfigRoot {
+                path: flake.0.clone(),
+                kind: ConfigKind::Flake,
+            })
+        );
+    }
+
+    #[test]
+    fn resolve_in_takes_the_first_classic_without_a_flake() {
+        let first = Fixture::new("classic-a");
+        first.write("configuration.nix");
+        let second = Fixture::new("classic-b");
+        second.write("configuration.nix");
+        assert_eq!(
+            resolve_in(vec![first.0.clone(), second.0.clone()]),
+            Some(ConfigRoot {
+                path: first.0.clone(),
+                kind: ConfigKind::Classic,
+            })
+        );
     }
 
     #[test]
