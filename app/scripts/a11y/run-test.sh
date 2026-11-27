@@ -39,5 +39,9 @@ if [ -z "${NIX_PILOT_CATALOGUE:-}" ]; then
     fi
   fi
 fi
+# Locate the session.conf shipped by the nix dbus package so the harness
+# works on non-NixOS hosts (e.g. ubuntu-latest) that lack /etc/dbus-1/session.conf.
+DBUS_BIN=$(command -v dbus-run-session)
+DBUS_SESSION_CONF="${DBUS_BIN%/bin/dbus-run-session}/share/dbus-1/session.conf"
 # The test driver starts launcher + app itself inside this single session.
-dbus-run-session -- python3 "$TEST" "$APP_BIN"
+dbus-run-session --config-file="$DBUS_SESSION_CONF" -- python3 "$TEST" "$APP_BIN"
