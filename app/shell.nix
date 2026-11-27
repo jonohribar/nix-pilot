@@ -7,7 +7,24 @@
 #         then: cd app && cargo build && cargo run
 {
   pkgs ? (builtins.getFlake "nixpkgs").legacyPackages.x86_64-linux,
-}:
+}: with pkgs.lib;
+let
+  # GSettings schema dirs for every GUI package in this shell. Mirrors
+  # test-atspi.nix; keep the two in sync. Without libadwaita's own schema
+  # (org.gnome.Adw), adw_init fails and the app exits before its window,
+  # which the smoke test only catches on machines without a desktop
+  # libadwaita hiding the gap.
+  schemas-dir = p:
+    let dir = "${p}/share/gsettings-schemas";
+    in if builtins.pathExists dir then
+      let dirs = builtins.attrNames (builtins.readDir dir);
+      in "${dir}/${builtins.head dirs}"
+    else null;
+  GSETTINGS_SCHEMAS_PATH = builtins.concatStringsSep ":"
+    (builtins.filter (x: x != null)
+      (builtins.map schemas-dir
+        [ pkgs.gsettings-desktop-schemas pkgs.gtk4 pkgs.libadwaita pkgs.gtk3 ]));
+in
 pkgs.mkShell {
   name = "nix-pilot-app-dev";
 
@@ -33,12 +50,4 @@ pkgs.mkShell {
   # gtk4-rs builds need to find the C libraries via pkg-config; nixpkgs'
   # dev outputs put the .pc files on PKG_CONFIG_PATH through propagation.
   RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
-
-  # GTK4's gsettings schemas: without a resolvable schema dir, GTK's settings
-  # backend fails to look up keys and floods stderr with a GLib-GIO-CRITICAL
-  # on every launch. Point glib at the gtk4 + desktop-schemas schema dirs.
-  GSETTINGS_SCHEMA_DIR = pkgs.lib.concatStringsSep ":" [
-    "${pkgs.gtk4}/share/gsettings-schemas/${pkgs.gtk4.name}/glib-2.0/schemas"
-    "${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}/glib-2.0/schemas"
-  ];
 }

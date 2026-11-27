@@ -12,6 +12,7 @@ and assert on semantic properties (role + accessible name).
 import os
 import sys
 import time
+import signal
 import subprocess
 import shutil
 import tempfile
@@ -251,12 +252,19 @@ class AtspiDriver:
         """Clean up all processes."""
         for proc in reversed(self.processes):
             if proc.poll() is None:
+                # Terminate the whole group and never wait unboundedly: the
+                # app does not exit promptly on SIGTERM in a headless session,
+                # and an uncapped wait() turned every successful test into a
+                # teardown hang.
                 try:
-                    proc.terminate()
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
                     proc.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait()
+                except (ProcessLookupError, subprocess.TimeoutExpired):
+                    try:
+                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                        proc.wait(timeout=1)
+                    except (ProcessLookupError, subprocess.TimeoutExpired):
+                        pass
             shutil.rmtree(self.test_home, ignore_errors=True)
 
 
