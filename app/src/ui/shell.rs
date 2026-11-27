@@ -306,17 +306,29 @@ struct Sidebar {
     set_pending_count: Rc<dyn Fn(usize)>,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn build_sidebar(
-    stack: &gtk4::Stack,
-    settings: &Rc<settings_page::SettingsPage>,
-    updates: &Rc<updates_page::UpdatesPage>,
-    your_system: &Rc<your_system::YourSystemPage>,
-    desired: &Rc<RefCell<DesiredDoc>>,
-    account: &str,
-    on_package_intent_change: &Rc<dyn Fn()>,
-    global_search: &gtk4::SearchEntry,
-) -> Sidebar {
+/// The surfaces and shared state the sidebar wires its rows to.
+struct SidebarInputs<'a> {
+    stack: &'a gtk4::Stack,
+    settings: &'a Rc<settings_page::SettingsPage>,
+    updates: &'a Rc<updates_page::UpdatesPage>,
+    your_system: &'a Rc<your_system::YourSystemPage>,
+    desired: &'a Rc<RefCell<DesiredDoc>>,
+    account: &'a str,
+    on_package_intent_change: &'a Rc<dyn Fn()>,
+    global_search: &'a gtk4::SearchEntry,
+}
+
+fn build_sidebar(inputs: SidebarInputs<'_>) -> Sidebar {
+    let SidebarInputs {
+        stack,
+        settings,
+        updates,
+        your_system,
+        desired,
+        account,
+        on_package_intent_change,
+        global_search,
+    } = inputs;
     let sidebar = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     sidebar.set_width_request(240);
     sidebar.add_css_class("np-sidebar");
@@ -695,16 +707,16 @@ pub fn run(
         "setup"
     });
 
-    let sidebar = build_sidebar(
-        &stack,
-        &settings,
-        &updates,
-        &your_system,
-        &desired,
-        &account,
-        &on_package_intent_change_for_sidebar,
-        &global.entry,
-    );
+    let sidebar = build_sidebar(SidebarInputs {
+        stack: &stack,
+        settings: &settings,
+        updates: &updates,
+        your_system: &your_system,
+        desired: &desired,
+        account: &account,
+        on_package_intent_change: &on_package_intent_change_for_sidebar,
+        global_search: &global.entry,
+    });
     *pending_setter.borrow_mut() = Some(sidebar.set_pending_count.clone());
     refresh_pending();
 
