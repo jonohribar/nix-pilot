@@ -8,4 +8,5 @@ pub mod activation;
 pub mod build;
 pub mod generation;
 mod helper;
+pub mod state_file;
 pub mod storage;

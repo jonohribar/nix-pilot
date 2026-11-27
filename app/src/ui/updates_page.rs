@@ -175,18 +175,31 @@ fn prepare_changes(
     // Apply can never enable (packages and settings share the same count).
     let settings_queued = !doc.settings.is_empty();
     let candidate = if report.all_ok() && (!changes.is_empty() || settings_queued) {
-        if let Ok(sources) = crate::config_source::discover() {
-            let state_version = build::state_version_or_default();
-            Some(build::build_from_desired(
-                doc,
-                &state_version,
-                Some(&sources.configuration),
-                sources.hardware_configuration.as_deref(),
-                std::time::Duration::from_secs(1500),
-            ))
-        } else {
-            None
-        }
+        crate::config_source::resolve_config_root().map(|root| {
+            // The candidate is the user's own config with the app's current
+            // state module written in, so the check matches what apply would
+            // switch. The state file is app-owned; writing it here is the
+            // D33 apply contract (the user's config imports it).
+            match crate::system::state_file::write_state_file(&root.path, doc) {
+                Ok(_) => match crate::system::state_file::git_add_once(&root.path) {
+                    Ok(()) => {
+                        build::build_user_config(&root, false, std::time::Duration::from_secs(1500))
+                    }
+                    Err(error) => build::CandidateBuild {
+                        ok: false,
+                        note: "could not track the state module in your configuration's git \
+                               repository"
+                            .into(),
+                        log: error.to_string(),
+                    },
+                },
+                Err(error) => build::CandidateBuild {
+                    ok: false,
+                    note: "could not write the state module into your configuration".into(),
+                    log: error.to_string(),
+                },
+            }
+        })
     } else {
         None
     };

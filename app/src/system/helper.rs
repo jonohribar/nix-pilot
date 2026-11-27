@@ -5,7 +5,7 @@
 //! caller-provided command or argument string reaches the helper.
 
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
@@ -74,9 +74,13 @@ fn find_helper() -> Option<PathBuf> {
     helper_candidates().into_iter().find(|path| path.is_file())
 }
 
+/// Run a fixed helper action, optionally naming the user's configuration
+/// directory (D33: switch/build act on the user's own config, not a
+/// generated area). Only `Switch` passes a directory; every other action
+/// must pass `None`.
 pub(super) fn run_action(
     action: HelperAction,
-    stdin: &[u8],
+    config_dir: Option<&Path>,
     timeout: Duration,
 ) -> Result<Output, HelperError> {
     if std::env::var_os("NIX_PILOT_ALLOW_SWITCH").is_none() {
@@ -85,7 +89,10 @@ pub(super) fn run_action(
     let helper = find_helper().ok_or(HelperError::MissingHelper)?;
     let mut command = Command::new("pkexec");
     command.arg(helper).arg(action.subcommand());
-    process::run_with_stdin(&mut command, stdin, timeout).map_err(HelperError::Process)
+    if let Some(dir) = config_dir {
+        command.arg(dir);
+    }
+    process::run(&mut command, timeout).map_err(HelperError::Process)
 }
 
 #[cfg(test)]
@@ -120,7 +127,7 @@ mod tests {
         std::env::remove_var("NIX_PILOT_ALLOW_SWITCH");
         assert!(!can_activate());
         assert!(matches!(
-            run_action(HelperAction::Switch, &[], Duration::from_secs(1)),
+            run_action(HelperAction::Switch, None, Duration::from_secs(1)),
             Err(HelperError::Disabled)
         ));
     }

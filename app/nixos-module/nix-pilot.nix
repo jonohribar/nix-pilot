@@ -1,15 +1,14 @@
 # nix-pilot NixOS module — the app's system integration.
 #
-# Installs the sanctioned apply helper and a polkit action so a *future* app
-# codepath can have the user write the app-owned configuration area and
-# switch/rollback generations through one controlled, argument-free
-# interface. Nothing here parses or edits the user's configuration; the
-# generated config area is the app's own and the switch always targets
-# exactly /etc/nix-pilot/generated/configuration.nix (decision D21 pointer
-# import; see apply-activation.md). Per decision D20, no product code calls
-# these yet — the helper is the spec + test surface (VM harness) for activation.
-#
 # Enable with: services.nix-pilot.enable = true;  (in the user's flake/modules)
+#
+# D33 model (config-authority.md): the app writes a generated module
+# `nix-pilot/state.nix` into the user's config tree carrying the app-owned
+# surface (packages, settings, accounts, keys), and the user's config imports
+# it — one config, one switch, fully pure: the state travels with the repo, so
+# the config stays reproducible and portable. This module provides only the
+# sanctioned apply helper (which switches the user's own config) and the
+# polkit action.
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.nix-pilot;
@@ -17,12 +16,9 @@ let
   # The root-only operations the desktop app is allowed to request.
   nix-pilot-apply = pkgs.writeShellApplication {
     name = "nix-pilot-apply";
-    runtimeInputs = [ pkgs.gnutar pkgs.nixos-rebuild pkgs.nix ];
+    runtimeInputs = [ pkgs.nixos-rebuild pkgs.nix ];
     text = ''
       set -euo pipefail
-      area=/etc/nix-pilot/generated
-      config=$area/configuration.nix
-      ensure_area() { mkdir -p "$area"; }
       # Self-preserve (nix-pilot-r3j): keep a working copy of this helper in
       # /etc/nix-pilot so it survives switches that drop the module, letting
       # the app still roll back. Never fails the switch if it cannot copy.
@@ -32,23 +28,22 @@ let
         chmod +x /etc/nix-pilot/nix-pilot-apply 2>/dev/null || true
       }
       self_preserve || true
-      # In-band publish-before-switch (D26): the generated area (a tar of
-      # configuration.nix + generated-desired.nix) arrives on stdin and is
-      # written into the app-owned area before anything builds/switches. Empty
-      # stdin fails closed — there is never a stale or missing config to
-      # switch by accident.
-      publish() {
-        ensure_area
-        tar -xzf - -C "$area"
+      # D33: the app writes its nix-pilot/state.nix module into the user's
+      # config tree and this helper switches that same config — one config,
+      # one pure rebuild (no generated area, no stdin archive). The config
+      # directory is the only accepted argument.
+      require_config_dir() {
+        [ $# -ge 2 ] || { echo "nix-pilot-apply: '$1' needs a config directory" >&2; exit 2; }
+        [ -d "$2" ] || { echo "nix-pilot-apply: not a directory: $2" >&2; exit 2; }
       }
       case "$1" in
-        build)
-          publish
-          nixos-rebuild build -I nixos-config="$config"
-          ;;
         switch)
-          publish
-          nixos-rebuild switch -I nixos-config="$config"
+          require_config_dir "$@"
+          if [ -f "$2/flake.nix" ]; then
+            nixos-rebuild switch --flake "$2"
+          else
+            nixos-rebuild switch -I "nixos-config=$2/configuration.nix"
+          fi
           ;;
         rollback)
           ensure_area
@@ -78,7 +73,7 @@ let
           ;;
         *)
           echo "nix-pilot-apply: unknown subcommand '$1' \
-(build|switch|rollback|gc|optimise|gc-estimate)" >&2
+(switch|rollback|gc|optimise|gc-estimate)" >&2
           exit 2
           ;;
       esac
@@ -93,14 +88,19 @@ let
       cp org.nix-pilot.apply.policy "$out/share/polkit-1/actions/"
     '';
   };
+
+  appBinaries = [ nix-pilot-apply apply-action ];
 in
 {
   options.services.nix-pilot = {
     enable = lib.mkEnableOption "the nix-pilot system module";
   };
 
+  # The managed surface (packages, settings, accounts, keys) is not processed
+  # here: the app renders it into a generated `nix-pilot/state.nix` module the
+  # user's config imports (D33), keeping this module pure and static.
   config = lib.mkIf cfg.enable {
-    environment.systemPackages = [ nix-pilot-apply apply-action ];
+    environment.systemPackages = appBinaries;
 
     security.polkit.extraConfig = ''
       polkit.addRule(function(action, subject) {

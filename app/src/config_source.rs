@@ -31,6 +31,73 @@ pub fn discover() -> Result<NixOSSources, DiscoveryError> {
     discover_in(Path::new("/etc/nixos"))
 }
 
+/// The user's NixOS configuration root and how to rebuild it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigRoot {
+    /// Directory holding the configuration (flake or classic layout).
+    pub path: PathBuf,
+    /// Whether the root is a flake or a classic `configuration.nix` layout.
+    pub kind: ConfigKind,
+}
+
+/// How a configuration root is rebuilt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigKind {
+    /// A `flake.nix` layout; rebuilt with `--flake`.
+    Flake,
+    /// A classic `configuration.nix` layout; rebuilt with `-I nixos-config`.
+    Classic,
+}
+
+/// Environment override naming the user's configuration root (dev/test hook).
+pub const CONFIG_ROOT_ENV: &str = "NIX_PILOT_CONFIG_DIR";
+
+/// Resolve the user's configuration root: the env override first (when it
+/// names a real config), then the conventional locations. The first directory
+/// that looks like a NixOS configuration wins.
+pub fn resolve_config_root() -> Option<ConfigRoot> {
+    if let Some(dir) = std::env::var_os(CONFIG_ROOT_ENV) {
+        if let Some(root) = classify_root(&PathBuf::from(dir)) {
+            return Some(root);
+        }
+    }
+    conventional_candidates()
+        .into_iter()
+        .find_map(|dir| classify_root(&dir))
+}
+
+/// Conventional configuration locations: the system path, then well-known
+/// home flake locations, in discovery order.
+fn conventional_candidates() -> Vec<PathBuf> {
+    let mut candidates = vec![PathBuf::from("/etc/nixos")];
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        for relative in ["nixos-config", "Projects/nixos-config", "dotfiles", "nixos"] {
+            candidates.push(home.join(relative));
+        }
+    }
+    candidates
+}
+
+/// Classify a directory as a configuration root, or `None` when it is not one.
+fn classify_root(path: &Path) -> Option<ConfigRoot> {
+    if !path.is_dir() {
+        return None;
+    }
+    if path.join("flake.nix").is_file() {
+        return Some(ConfigRoot {
+            path: path.to_path_buf(),
+            kind: ConfigKind::Flake,
+        });
+    }
+    path.join("configuration.nix")
+        .is_file()
+        .then(|| ConfigRoot {
+            path: path.to_path_buf(),
+            kind: ConfigKind::Classic,
+        })
+}
+
 /// Discover the supported layout under `base`; separated for filesystem tests.
 pub fn discover_in(base: &Path) -> Result<NixOSSources, DiscoveryError> {
     if !base.is_dir() {
@@ -117,6 +184,59 @@ mod tests {
                 hardware_configuration: None,
             })
         );
+    }
+
+    #[test]
+    fn classifies_flake_and_classic_roots() {
+        let flake = Fixture::new("root-flake");
+        flake.write("flake.nix");
+        assert_eq!(
+            classify_root(&flake.0),
+            Some(ConfigRoot {
+                path: flake.0.clone(),
+                kind: ConfigKind::Flake,
+            })
+        );
+
+        let classic = Fixture::new("root-classic");
+        classic.write("configuration.nix");
+        assert_eq!(
+            classify_root(&classic.0),
+            Some(ConfigRoot {
+                path: classic.0.clone(),
+                kind: ConfigKind::Classic,
+            })
+        );
+
+        let empty = Fixture::new("root-empty");
+        assert_eq!(classify_root(&empty.0), None);
+        assert_eq!(classify_root(Path::new("/definitely/not/here")), None);
+    }
+
+    #[test]
+    fn resolve_config_root_honours_the_override() {
+        let flake = Fixture::new("resolve-flake");
+        flake.write("flake.nix");
+        std::env::set_var(CONFIG_ROOT_ENV, &flake.0);
+        assert_eq!(
+            resolve_config_root(),
+            Some(ConfigRoot {
+                path: flake.0.clone(),
+                kind: ConfigKind::Flake,
+            })
+        );
+
+        let classic = Fixture::new("resolve-classic");
+        classic.write("configuration.nix");
+        std::env::set_var(CONFIG_ROOT_ENV, &classic.0);
+        assert_eq!(
+            resolve_config_root(),
+            Some(ConfigRoot {
+                path: classic.0.clone(),
+                kind: ConfigKind::Classic,
+            })
+        );
+        std::env::remove_var(CONFIG_ROOT_ENV);
     }
 
     #[test]

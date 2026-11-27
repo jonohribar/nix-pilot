@@ -45,7 +45,7 @@ pub struct CleanupResult {
 
 /// Run a fixed storage action through the privileged helper.
 pub fn cleanup(action: CleanupAction, timeout: Duration) -> CleanupResult {
-    match helper::run_action(action.helper_action(), &[], timeout) {
+    match helper::run_action(action.helper_action(), None, timeout) {
         Ok(output) => {
             let combined = format!("{}\n{}", output.stdout, output.stderr);
             let ok = output.status.success();
