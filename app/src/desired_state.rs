@@ -527,7 +527,9 @@ pub fn render_per_app_overlays(sources: &BTreeMap<String, PerAppSource>) -> Stri
     for rev in by_rev.keys() {
         let name = format!("p{}", import_of.len());
         let hash_line = match hash_of.get(rev.as_str()) {
-            Some(Some(hash)) => format!("      narHash = \"{hash}\";\n"),
+            Some(Some(hash)) => {
+                format!("      narHash = \"{}\";\n", escape_nix_str(hash))
+            }
             _ => String::new(),
         };
         out.push_str(&format!(
@@ -535,12 +537,13 @@ pub fn render_per_app_overlays(sources: &BTreeMap<String, PerAppSource>) -> Stri
                 type = \"github\";
                 owner = \"NixOS\";
                 repo = \"nixpkgs\";
-                rev = \"{rev}\";
+                rev = \"{}\";
                 {hash_line}
               }}) {{
                 system = prev.stdenv.hostPlatform.system;
               }};
-"
+",
+            escape_nix_str(rev)
         ));
         import_of.insert(rev.clone(), name);
     }

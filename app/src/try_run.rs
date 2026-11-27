@@ -199,25 +199,31 @@ impl TrySession {
     /// Kills the entire process group.
     pub fn terminate(&mut self) -> Result<(), String> {
         self.alive.store(false, Ordering::SeqCst);
-        if let Some(child_handle) = self.child.take() {
-            let mut guard = child_handle.child.lock().unwrap();
-            if let Some(mut child) = guard.take() {
-                #[cfg(unix)]
-                {
-                    let pgid = child_handle.pgid;
-                    unsafe {
-                        libc::kill(-(pgid as i32), libc::SIGTERM);
-                    }
-                    thread::sleep(Duration::from_millis(500));
-                    let _ = child.try_wait();
-                    let _ = child.kill();
-                }
-
-                #[cfg(not(unix))]
-                {
-                    let _ = child.kill();
-                }
+        let Some(child_handle) = self.child.take() else {
+            return Ok(());
+        };
+        // Take the child in a short scope so the monitor is never blocked
+        // behind the signal grace period below.
+        let taken = child_handle.child.lock().unwrap().take();
+        let Some(mut child) = taken else {
+            return Ok(());
+        };
+        #[cfg(unix)]
+        {
+            let pgid = child_handle.pgid;
+            unsafe {
+                libc::kill(-(pgid as i32), libc::SIGTERM);
             }
+            // Short grace: this runs on the UI thread, so stay well under a
+            // visible stall.
+            thread::sleep(Duration::from_millis(200));
+            let _ = child.try_wait();
+            let _ = child.kill();
+        }
+
+        #[cfg(not(unix))]
+        {
+            let _ = child.kill();
         }
         Ok(())
     }
