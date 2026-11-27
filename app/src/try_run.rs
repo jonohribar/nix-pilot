@@ -75,11 +75,18 @@ impl TryState {
     }
 }
 
+/// Inner handle to the child process with its process group ID.
+/// Separated so the monitor can poll without holding the lock across wait().
+struct ChildHandle {
+    child: Mutex<Option<std::process::Child>>,
+    pgid: u32,
+}
+
 /// Handle to a running try session. Keeps the child process alive and
 /// provides cancellation. When dropped without explicit stop, the child
 /// is reaped (parent-exit guard).
 pub struct TrySession {
-    child: Option<Arc<Mutex<Option<std::process::Child>>>>,
+    child: Option<Arc<ChildHandle>>,
     /// Whether the underlying child is still alive (not yet exited).
     alive: Arc<AtomicBool>,
 }
@@ -114,29 +121,67 @@ impl TrySession {
             .spawn()
             .map_err(|e| format!("failed to start nix run: {e}"))?;
 
-        let child_shared = Arc::new(Mutex::new(Some(child)));
+        #[cfg(unix)]
+        let pgid = child.id();
+        #[cfg(not(unix))]
+        let pgid = 0;
+
+        let child_handle = Arc::new(ChildHandle {
+            child: Mutex::new(Some(child)),
+            pgid,
+        });
         let alive = Arc::new(AtomicBool::new(true));
         let child_alive = alive.clone();
+        let child_for_monitor = child_handle.clone();
 
         let (monitor_tx, monitor_rx) = mpsc::channel();
-        let child_for_monitor = child_shared.clone();
         thread::spawn(move || {
-            let exit_status = {
-                let mut guard = child_for_monitor.lock().unwrap();
-                if let Some(child) = guard.as_mut() {
-                    child.wait()
-                } else {
-                    return;
+            loop {
+                let exit_status = {
+                    let mut guard = child_for_monitor.child.lock().unwrap();
+                    if let Some(child) = guard.as_mut() {
+                        child.try_wait()
+                    } else {
+                        // Child was taken by terminate() or already reaped.
+                        // Report Ended (not stopped_by_user) and exit.
+                        child_alive.store(false, Ordering::SeqCst);
+                        let terminal_state = TryState::Ended {
+                            stopped_by_user: false,
+                        };
+                        let _ = monitor_tx.send(terminal_state);
+                        return;
+                    }
+                };
+                match exit_status {
+                    Ok(Some(_)) => {
+                        child_alive.store(false, Ordering::SeqCst);
+                        // Normal exit (status) — not a user stop.
+                        let terminal_state = TryState::Ended {
+                            stopped_by_user: false,
+                        };
+                        let _ = monitor_tx.send(terminal_state);
+                        return;
+                    }
+                    Ok(None) => {
+                        // Still running; poll again after a short sleep.
+                        thread::sleep(Duration::from_millis(50));
+                        continue;
+                    }
+                    Err(_) => {
+                        // waitpid error (e.g., ECHILD after terminate() reaped).
+                        child_alive.store(false, Ordering::SeqCst);
+                        let terminal_state = TryState::Ended {
+                            stopped_by_user: false,
+                        };
+                        let _ = monitor_tx.send(terminal_state);
+                        return;
+                    }
                 }
-            };
-            child_alive.store(false, Ordering::SeqCst);
-            let stopped_by_user = exit_status.is_err();
-            let terminal_state = TryState::Ended { stopped_by_user };
-            let _ = monitor_tx.send(terminal_state);
+            }
         });
 
         let session = TrySession {
-            child: Some(child_shared),
+            child: Some(child_handle),
             alive,
         };
 
@@ -154,12 +199,12 @@ impl TrySession {
     /// Kills the entire process group.
     pub fn terminate(&mut self) -> Result<(), String> {
         self.alive.store(false, Ordering::SeqCst);
-        if let Some(child_shared) = self.child.take() {
-            let mut guard = child_shared.lock().unwrap();
+        if let Some(child_handle) = self.child.take() {
+            let mut guard = child_handle.child.lock().unwrap();
             if let Some(mut child) = guard.take() {
                 #[cfg(unix)]
                 {
-                    let pgid = child.id();
+                    let pgid = child_handle.pgid;
                     unsafe {
                         libc::kill(-(pgid as i32), libc::SIGTERM);
                     }
@@ -196,6 +241,159 @@ pub fn should_show_try_button(entry: &crate::model::IndexEntry) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    /// Test-only helper that mimics the monitor/terminate mechanism
+    /// with an arbitrary child command (e.g., `sleep 30`).
+    struct TestSession {
+        handle: Arc<ChildHandle>,
+        alive: Arc<AtomicBool>,
+        monitor_rx: mpsc::Receiver<TryState>,
+    }
+
+    impl TestSession {
+        fn spawn(cmd: &mut Command) -> Self {
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                unsafe {
+                    cmd.pre_exec(|| {
+                        libc::setsid();
+                        Ok(())
+                    });
+                }
+            }
+            let child = cmd.spawn().expect("failed to spawn test child");
+            #[cfg(unix)]
+            let pgid = child.id();
+            #[cfg(not(unix))]
+            let pgid = 0;
+
+            let handle = Arc::new(ChildHandle {
+                child: Mutex::new(Some(child)),
+                pgid,
+            });
+            let alive = Arc::new(AtomicBool::new(true));
+            let child_alive = alive.clone();
+            let child_for_monitor = handle.clone();
+
+            let (monitor_tx, monitor_rx) = mpsc::channel();
+            thread::spawn(move || loop {
+                let exit_status = {
+                    let mut guard = child_for_monitor.child.lock().unwrap();
+                    if let Some(child) = guard.as_mut() {
+                        child.try_wait()
+                    } else {
+                        // Child was taken by terminate() or already reaped.
+                        child_alive.store(false, Ordering::SeqCst);
+                        let _ = monitor_tx.send(TryState::Ended {
+                            stopped_by_user: false,
+                        });
+                        return;
+                    }
+                };
+                match exit_status {
+                    Ok(Some(_)) => {
+                        child_alive.store(false, Ordering::SeqCst);
+                        let _ = monitor_tx.send(TryState::Ended {
+                            stopped_by_user: false,
+                        });
+                        return;
+                    }
+                    Ok(None) => {
+                        thread::sleep(Duration::from_millis(50));
+                        continue;
+                    }
+                    Err(_) => {
+                        child_alive.store(false, Ordering::SeqCst);
+                        let _ = monitor_tx.send(TryState::Ended {
+                            stopped_by_user: false,
+                        });
+                        return;
+                    }
+                }
+            });
+
+            TestSession {
+                handle,
+                alive,
+                monitor_rx,
+            }
+        }
+
+        fn terminate(&mut self) {
+            self.alive.store(false, Ordering::SeqCst);
+            let mut guard = self.handle.child.lock().unwrap();
+            if let Some(mut child) = guard.take() {
+                #[cfg(unix)]
+                {
+                    let pgid = self.handle.pgid;
+                    unsafe {
+                        libc::kill(-(pgid as i32), libc::SIGTERM);
+                    }
+                    thread::sleep(Duration::from_millis(500));
+                    let _ = child.try_wait();
+                    let _ = child.kill();
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = child.kill();
+                }
+            }
+        }
+
+        fn is_running(&self) -> bool {
+            self.alive.load(Ordering::SeqCst)
+        }
+    }
+
+    #[test]
+    fn terminate_returns_quickly_and_reaps_child() {
+        // Spawn a long-running child (sleep 30) and terminate it.
+        // terminate() must return well under 2 seconds while the child is alive.
+        let mut cmd = Command::new("sleep");
+        cmd.arg("30");
+        let mut session = TestSession::spawn(&mut cmd);
+
+        // Give the child a moment to start and the monitor to begin polling.
+        thread::sleep(Duration::from_millis(100));
+        assert!(
+            session.is_running(),
+            "child should be running before terminate"
+        );
+
+        let start = Instant::now();
+        session.terminate();
+        let elapsed = start.elapsed();
+
+        // terminate() should return quickly (well under 2s).
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "terminate() took {:?}, expected < 2s",
+            elapsed
+        );
+
+        // Monitor should report Ended (not stopped_by_user).
+        let state = session
+            .monitor_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("monitor should send terminal state");
+        assert_eq!(
+            state,
+            TryState::Ended {
+                stopped_by_user: false
+            }
+        );
+
+        // Child should no longer be running.
+        assert!(
+            !session.is_running(),
+            "child should be marked dead after terminate"
+        );
+    }
 
     #[test]
     fn try_state_labels() {
