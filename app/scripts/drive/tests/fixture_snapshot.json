@@ -1,0 +1,132 @@
+{
+  "window": {"x": 0, "y": 0, "w": 1180, "h": 800},
+  "page": "list",
+  "units": [
+    {
+      "id": 0,
+      "kind": "button",
+      "role": "push button",
+      "name": "Packages",
+      "label": "Packages | tip:Browse packages",
+      "x": 12, "y": 12, "w": 100, "h": 36,
+      "visible": true, "sensitive": true, "focused": false
+    },
+    {
+      "id": 1,
+      "kind": "button",
+      "role": "push button",
+      "name": "Settings",
+      "label": "Settings | tip:System settings",
+      "x": 12, "y": 56, "w": 100, "h": 36,
+      "visible": true, "sensitive": true, "focused": false
+    },
+    {
+      "id": 2,
+      "kind": "button",
+      "role": "push button",
+      "name": "Updates",
+      "label": "Updates | tip:System updates",
+      "x": 12, "y": 100, "w": 100, "h": 36,
+      "visible": true, "sensitive": true, "focused": false
+    },
+    {
+      "id": 3,
+      "kind": "button",
+      "role": "push button",
+      "name": "Your system",
+      "label": "Your system | tip:System info",
+      "x": 12, "y": 144, "w": 100, "h": 36,
+      "visible": true, "sensitive": true, "focused": false
+    },
+    {
+      "id": 4,
+      "kind": "entry",
+      "role": "search entry",
+      "name": "Searches packages and settings everywhere",
+      "label": "Searches packages and settings everywhere",
+      "x": 130, "y": 12, "w": 400, "h": 36,
+      "visible": true, "sensitive": true, "focused": true
+    },
+    {
+      "id": 5,
+      "kind": "button",
+      "role": "push button",
+      "name": "Apply changes",
+      "label": "Apply changes | tip:Apply pending changes",
+      "x": 1000, "y": 12, "w": 150, "h": 36,
+      "visible": true, "sensitive": false, "focused": false
+    },
+    {
+      "id": 6,
+      "kind": "row",
+      "role": "list item",
+      "name": "firefox  Application · v128.0",
+      "label": "firefox  Application · v128.0 | Web browser | tip:Mozilla Firefox",
+      "x": 130, "y": 60, "w": 1000, "h": 50,
+      "visible": true, "sensitive": true, "focused": false
+    },
+    {
+      "id": 7,
+      "kind": "row",
+      "role": "list item",
+      "name": "vim  Application · v9.1",
+      "label": "vim  Application · v9.1 | Text editor | tip:Vi Improved",
+      "x": 130, "y": 110, "w": 1000, "h": 50,
+      "visible": true, "sensitive": true, "focused": false
+    },
+    {
+      "id": 8,
+      "kind": "row",
+      "role": "list item",
+      "name": "git  Application · v2.45",
+      "label": "git  Application · v2.45 | Version control | tip:Git",
+      "x": 130, "y": 160, "w": 1000, "h": 50,
+      "visible": true, "sensitive": true, "focused": false
+    },
+    {
+      "id": 9,
+      "kind": "button",
+      "role": "push button",
+      "name": "",
+      "label": "tip:No label",
+      "x": 500, "y": 500, "w": 80, "h": 30,
+      "visible": true, "sensitive": true, "focused": false
+    },
+    {
+      "id": 10,
+      "kind": "switch",
+      "role": "toggle button",
+      "name": "Hide packages with licence restrictions",
+      "label": "Hide packages with licence restrictions | tip:Filter unfree",
+      "x": 130, "y": 550, "w": 300, "h": 30,
+      "visible": true, "sensitive": true, "focused": false
+    },
+    {
+      "id": 11,
+      "kind": "button",
+      "role": "push button",
+      "name": "Install",
+      "label": "Install | tip:Install firefox",
+      "x": 130, "y": 210, "w": 80, "h": 30,
+      "visible": false, "sensitive": true, "focused": false
+    },
+    {
+      "id": 12,
+      "kind": "button",
+      "role": "push button",
+      "name": "Install",
+      "label": "Install | tip:Install vim",
+      "x": 130, "y": 260, "w": 80, "h": 30,
+      "visible": true, "sensitive": true, "focused": false
+    },
+    {
+      "id": 13,
+      "kind": "row",
+      "role": "list item",
+      "name": "Offscreen Package",
+      "label": "Offscreen Package | tip:Outside window",
+      "x": 1500, "y": 100, "w": 200, "h": 50,
+      "visible": true, "sensitive": true, "focused": false
+    }
+  ]
+}
