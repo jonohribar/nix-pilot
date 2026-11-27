@@ -57,6 +57,28 @@ class Unit:
         return (self.x + self.w <= 0 or self.x >= window_w or
                 self.y + self.h <= 0 or self.y >= window_h)
 
+    def is_effectively_visible(self, window_w: int, window_h: int) -> bool:
+        """Whether the unit is really on screen.
+
+        The app's raw `visible` flag is unreliable for hidden stack pages
+        (unrealized units report a tiny default allocation); require a
+        plausible size and on-window bounds on top of the flag.
+        """
+        return (self.visible and self.w >= 8 and self.h >= 8
+                and not self.is_offscreen(window_w, window_h))
+
+    def is_window_chrome(self, window_w: int, window_h: int) -> bool:
+        """Whether this is a GTK titlebar window control.
+
+        The headerbar's minimize/maximize/close buttons have no text label;
+        their names come from the window manager, which our text-based
+        emitter cannot see. Exclude them from the unnamed-unit audit.
+        """
+        return (self.kind == "button" and not self.name.strip()
+                and self.w >= 16 and self.h >= 16
+                and self.y <= 60
+                and self.x + self.w >= window_w - 160)
+
 
 @dataclass
 class Snapshot:
@@ -83,6 +105,10 @@ class Snapshot:
     @property
     def hidden_units(self) -> List[Unit]:
         return [u for u in self.units if not u.visible]
+
+    @property
+    def effectively_visible_units(self) -> List[Unit]:
+        return [u for u in self.units if u.is_effectively_visible(self.window_w, self.window_h)]
 
     @property
     def offscreen_units(self) -> List[Unit]:
@@ -182,8 +208,15 @@ def summarize(snapshot: Snapshot) -> Summary:
     for u in snapshot.units:
         counts_by_kind[u.kind] = counts_by_kind.get(u.kind, 0) + 1
 
-    # Unnamed interactive units
-    unnamed_interactive = [u for u in snapshot.units if u.is_unnamed]
+    # Unnamed interactive units that are really on screen (hidden stack
+    # pages must not count as gaps)
+    unnamed_interactive = [
+        u for u in snapshot.units
+        if u.is_unnamed and u.is_effectively_visible(snapshot.window_w, snapshot.window_h)
+        and u.sensitive
+        and not u.role.startswith("__Unknown")
+        and not u.is_window_chrome(snapshot.window_w, snapshot.window_h)
+    ]
 
     # Duplicate names among interactive units
     name_to_units: Dict[str, List[Unit]] = {}
@@ -205,8 +238,8 @@ def summarize(snapshot: Snapshot) -> Summary:
     # Visible page
     visible_page = snapshot.page
 
-    # Total visible text length (sum of label lengths of visible units)
-    total_visible_text_length = sum(len(u.label) for u in snapshot.visible_units)
+    # Total visible text length (sum of label lengths of on-screen units)
+    total_visible_text_length = sum(len(u.label) for u in snapshot.effectively_visible_units)
 
     return Summary(
         counts_by_kind=counts_by_kind,

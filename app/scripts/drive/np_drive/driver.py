@@ -669,24 +669,34 @@ def screenshot(path: str, display: Optional[str] = None) -> bool:
         return False
 
 
-def click_unit(driver: AtspiDriver, unit: Unit, use_fallback: bool = True) -> bool:
+def click_unit(
+    driver: AtspiDriver,
+    unit: Unit,
+    use_fallback: bool = True,
+    display: Optional[str] = None,
+) -> bool:
     """
     Click a unit: try AT-SPI action first, fall back to xdotool at unit center.
+    `display` is the live session's X display for the xdotool fallback; when
+    the AT-SPI driver is not connected (it must run inside the same dbus
+    session), the fallback is the only path, so the display must be threaded
+    from the session rather than taken from the REPL process's environment.
     """
-    # Try AT-SPI click via find_by_role_and_name (need to locate the accessible)
-    # We don't have the accessible object directly from Unit, so try by name+role
     accessible = None
-    for child in _iter_children(driver.app):
-        if _find_unit_accessible(child, unit):
-            accessible = _find_unit_accessible(child, unit)
-            break
+    if driver is not None:
+        for child in _iter_children(driver.app):
+            if _find_unit_accessible(child, unit):
+                accessible = _find_unit_accessible(child, unit)
+                break
 
     if accessible and driver.click(accessible):
         return True
 
     if use_fallback:
         cx, cy = unit.center
-        return xdotool_click(cx, cy, driver.xvfb_display)
+        if display is None and driver is not None:
+            display = driver.xvfb_display
+        return xdotool_click(cx, cy, display)
 
     return False
 

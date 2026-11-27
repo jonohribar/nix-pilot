@@ -143,23 +143,42 @@ class Repl:
         except ValueError:
             pass
 
+        def resolve(units: List[Unit]) -> Optional[Unit]:
+            if len(units) == 1:
+                return units[0]
+            if len(units) > 1:
+                # Resolve ambiguity by preferring a unit that is really on
+                # screen and interactive (the nav button over a hidden
+                # heading that shares its name).
+                visible = [
+                    u for u in units
+                    if u.is_effectively_visible(snap.window_w, snap.window_h)
+                ]
+                interactive = [u for u in visible if u.is_interactive]
+                if len(interactive) == 1:
+                    return interactive[0]
+                if len(visible) == 1:
+                    return visible[0]
+            return None
+
         # Try exact name match
         units = snap.find_by_name(arg, exact=True)
-        if len(units) == 1:
-            return units[0]
+        hit = resolve(units) if units else None
+        if hit is not None:
+            return hit
         if len(units) > 1:
             print(f"Multiple units with name '{arg}': {[u.id for u in units]}")
-            return None
 
         # Try label substring
         units = snap.find_by_label_substring(arg)
-        if len(units) == 1:
-            return units[0]
+        hit = resolve(units) if units else None
+        if hit is not None:
+            return hit
         if len(units) > 1:
             print(f"Multiple units with label containing '{arg}': {[u.id for u in units]}")
-            return None
 
-        print(f"No unit found for '{arg}'")
+        if not units:
+            print(f"No unit found for '{arg}'")
         return None
 
     def _format_unit(self, u: Unit, verbose: bool = False) -> str:
@@ -360,18 +379,26 @@ np-drive commands:
 
         print(f"Clicking unit [{unit.id}] '{unit.name}' at {unit.center}...")
         success = False
+        # xdotool must run against the live session's X display, not the REPL
+        # process's environment (the AT-SPI driver is not connected from
+        # outside the dbus session, so the fallback is the active path).
+        display = None
+        if self.state.session is not None:
+            display = self.state.session.xvfb_display
 
         # Try AT-SPI click if driver available
         if self.state.driver:
-            success = click_unit(self.state.driver, unit, use_fallback=False)
+            success = click_unit(self.state.driver, unit, use_fallback=False, display=display)
             if success:
                 print("  AT-SPI click succeeded")
             else:
                 print("  AT-SPI click failed, trying xdotool fallback...")
-                success = click_unit(self.state.driver, unit, use_fallback=True)
+                success = click_unit(
+                    self.state.driver, unit, use_fallback=True, display=display
+                )
         else:
             # No driver, use xdotool directly
-            success = click_unit(None, unit, use_fallback=True)
+            success = click_unit(None, unit, use_fallback=True, display=display)
 
         if success:
             print("  Click succeeded")
@@ -437,7 +464,16 @@ np-drive commands:
         # Map surface names to sidebar button labels
         label_map = {
             "packages": "Packages",
-            "settings": "Settings",
+            # Settings is a two-column router: the sidebar shows only the
+            # category items, so opening it clicks the first category.
+            "settings": "System",
+            "system": "System",
+            "software": "Software",
+            "network": "Network & internet",
+            "accounts": "Accounts",
+            "time": "Time & language",
+            "personalisation": "Personalisation",
+            "privacy": "Privacy & security",
             "updates": "Updates",
             "your system": "Your system",
             "your-system": "Your system",
@@ -558,7 +594,13 @@ np-drive commands:
                 return False
 
         elif assertion == "none-unnamed":
-            unnamed = [u for u in snap.units if u.is_unnamed]
+            unnamed = [
+                u for u in snap.units
+                if u.is_unnamed and u.is_effectively_visible(snap.window_w, snap.window_h)
+                and u.sensitive
+                and not u.role.startswith("__Unknown")
+                and not u.is_window_chrome(snap.window_w, snap.window_h)
+            ]
             if not unnamed:
                 print("ASSERT OK: no unnamed interactive units")
                 return True

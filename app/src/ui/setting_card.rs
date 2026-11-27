@@ -108,6 +108,10 @@ impl SettingCard {
             ValueKind::Boolean => {
                 let sw = gtk4::Switch::new();
                 sw.set_valign(gtk4::Align::Center);
+                // The switch itself carries no text; the setting name as its
+                // tooltip gives it an accessible identity (naming the toggle
+                // for screen readers and the UI driver).
+                sw.set_tooltip_text(Some(spec.label));
                 // Await the mirror-reality live read before the control is
                 // usable, so a card never appears to change itself on load.
                 sw.set_sensitive(false);

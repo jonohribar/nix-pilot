@@ -1,0 +1,52 @@
+# a11y completeness sweep: no surface may have an unnamed interactive unit.
+# Each interactive unit (button/switch/entry/row) must carry a name or a
+# tooltip, so the AT-SPI tree (and np-drive) can address it. GTK window
+# chrome (the headerbar's title buttons) is exempt, as are disabled controls
+# (not actionable) and units with an unassigned (__Unknown) role.
+#
+# Launch: np-drive --app ./target/debug/nix-pilot-app --config-dir /tmp/np-drive-fixture scenarios/a11y-sweep.drv
+assert page:setup
+assert none-unnamed
+open packages
+wait 1
+assert page:list
+assert none-unnamed
+# Every Settings category must be fully named (the two-column router reaches
+# them individually through the sidebar; Settings itself is not a page).
+open system
+wait 1
+assert page:settings
+assert none-unnamed
+open software
+wait 1
+assert page:settings
+assert none-unnamed
+open network
+wait 1
+assert page:settings
+assert none-unnamed
+open accounts
+wait 1
+assert page:settings
+assert none-unnamed
+open time
+wait 1
+assert page:settings
+assert none-unnamed
+open personalisation
+wait 1
+assert page:settings
+assert none-unnamed
+open privacy
+wait 1
+assert page:settings
+assert none-unnamed
+open updates
+wait 1
+assert page:updates
+assert none-unnamed
+open your-system
+wait 1
+assert page:your-system
+assert none-unnamed
+summary
