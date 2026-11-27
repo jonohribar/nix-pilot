@@ -132,6 +132,23 @@ Adopt off-the-shelf (computer-use-linux, DesktopKit, Spire, or pinchy) only
 if the homegrown driver proves limiting; the homegrown core is small and uses
 what we already ship.
 
+## Confirmed session recipe (2026-11-27, sandbox-verified)
+
+The app appears in the AT-SPI tree when `at-spi-bus-launcher` runs INSIDE
+`dbus-run-session`. The earlier 300-600s "hang" was a teardown timeout, not a
+failure to find the app.
+
+```bash
+cd app
+xvfb-run --auto-servernum dbus-run-session -- at-spi-bus-launcher --launch-immediately &
+./target/debug/nix-pilot-app &
+# then: from gi.repository import Atspi; Atspi.get_desktop(0) sees frame 'nix-pilot'
+```
+
+Environment: `GDK_BACKEND=x11`; `AT_SPI_BUS_ADDRESS` must NOT be set (the
+app discovers the bus through the session); unique `XDG_RUNTIME_DIR`,
+`XDG_DATA_HOME`, `XDG_CONFIG_HOME` per test. No window manager required.
+
 ## Snapshot schema (the integration seam)
 
 The app emits one canonical description of every user-visible unit; the
