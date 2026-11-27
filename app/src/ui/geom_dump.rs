@@ -84,13 +84,18 @@ pub fn collect<T: IsA<gtk4::Widget>>(toplevel: &T, page: Option<&str>) -> Snapsh
 }
 
 fn collect_into(w: &gtk4::Widget, toplevel: &gtk4::Widget, out: &mut Vec<Node>) {
-    if let Some(kind) = classify(w) {
+    let kind = classify(w);
+    if kind.is_some() || (!has_classified_ancestor(w, toplevel) && has_text(w)) {
         if let Some((x, y)) = w.translate_coordinates(toplevel, 0.0, 0.0) {
             let a = w.allocation();
             let mut text = Vec::new();
             super::widgets::widget_text(w, &mut text);
             out.push(Node {
-                kind,
+                // Plain Labels in unclassified containers become "text"
+                // units, so the driver sees all visible copy, not just
+                // interactive widgets. Text under a classified widget (a
+                // button, row, entry) is already in that unit's label.
+                kind: kind.unwrap_or("text"),
                 role: format!("{:?}", w.accessible_role()),
                 name: text.first().cloned().unwrap_or_default(),
                 label: text.join(" | "),
@@ -109,6 +114,29 @@ fn collect_into(w: &gtk4::Widget, toplevel: &gtk4::Widget, out: &mut Vec<Node>) 
         collect_into(&c, toplevel, out);
         child = c.next_sibling();
     }
+}
+
+/// Whether the widget carries any text (labels, button text, tooltips).
+fn has_text(w: &gtk4::Widget) -> bool {
+    let mut text = Vec::new();
+    super::widgets::widget_text(w, &mut text);
+    text.iter().any(|t| !t.trim().is_empty())
+}
+
+/// Whether a classified widget between `w` and the toplevel already captures
+/// `w`'s text in its own label (so `w` must not be emitted again).
+fn has_classified_ancestor(w: &gtk4::Widget, toplevel: &gtk4::Widget) -> bool {
+    let mut parent = w.parent();
+    while let Some(p) = parent {
+        if p == *toplevel {
+            break;
+        }
+        if classify(&p).is_some() {
+            return true;
+        }
+        parent = p.parent();
+    }
+    false
 }
 
 /// Serialize a snapshot to JSON (JSON, not JSON-lite, so any parser works).

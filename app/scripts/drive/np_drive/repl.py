@@ -687,6 +687,12 @@ np-drive commands:
         print("Scenario completed successfully")
         return 0
 
+    def close(self) -> None:
+        """Tear down the live session, if any."""
+        if self.state.session is not None:
+            self.state.session.close()
+            self.state.session = None
+
 
 def create_repl(
     app_binary: str = "",
@@ -694,6 +700,7 @@ def create_repl(
     config_dir: Optional[str] = None,
     dump_file: str = "/tmp/nix-pilot-ui.json",
     use_session: bool = False,
+    skip_setup: bool = False,
 ) -> Repl:
     """Factory to create a Repl with optional live session."""
     state = ReplState(
@@ -710,17 +717,20 @@ def create_repl(
             catalogue_path=catalogue_path,
             config_dir=config_dir,
             dump_file=dump_file,
+            skip_setup=skip_setup,
         )
         session.start()
         time.sleep(2)  # Let session stabilize
         state.session = session
+        # The dump file was cleared at session start; wait for the app's
+        # first snapshot so the REPL never reads stale state.
+        if not session.wait_for_snapshot():
+            print("warning: no UI snapshot appeared from the app")
 
-        # Try to get AT-SPI driver connected
-        # Note: The driver needs to be started inside the same dbus session
-        # For now, we rely on the dump file. A full AT-SPI connection
-        # would require the driver to be a child of the dbus-run-session.
-
-    return Repl(state)
+    repl = Repl(state)
+    if use_session and app_binary:
+        repl._refresh_snapshot()
+    return repl
 
 
 if __name__ == "__main__":

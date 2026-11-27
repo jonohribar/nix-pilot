@@ -38,6 +38,7 @@ Examples:
     parser.add_argument("--app", help="Path to nix-pilot-app binary (starts live session)")
     parser.add_argument("--catalogue", help="Path to catalogue-index.json")
     parser.add_argument("--config-dir", help="Path to config directory")
+    parser.add_argument("--skip-setup", action="store_true", help="Skip first-run setup (drive the store shell)")
     parser.add_argument("--dump-file", default="/tmp/nix-pilot-ui.json", help="UI dump file path")
     parser.add_argument("--self-test", action="store_true", help="Run unit tests (no session)")
 
@@ -63,12 +64,16 @@ Examples:
         config_dir=args.config_dir,
         dump_file=args.dump_file,
         use_session=bool(args.app),
+        skip_setup=args.skip_setup,
     )
 
-    if args.scenario:
-        return repl.run_scenario(args.scenario)
-    else:
-        return repl.run_interactive()
+    try:
+        if args.scenario:
+            return repl.run_scenario(args.scenario)
+        else:
+            return repl.run_interactive()
+    finally:
+        repl.close()
 
 
 if __name__ == "__main__":

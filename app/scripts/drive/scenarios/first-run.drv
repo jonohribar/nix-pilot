@@ -1,0 +1,15 @@
+# First run against a scratch flake fixture.
+# Regression for the 2026-11-27 live-test failures: the app must resolve the
+# flake (not a stale /etc/nixos), write its app-owned files into the config
+# tree, and show the flake snippet on the setup page.
+#
+# Launch: np-drive --app ./target/debug/nix-pilot-app --config-dir /tmp/np-drive-fixture scenarios/first-run.drv
+state
+assert page:setup
+assert text:Found your configuration
+assert text:flake
+assert text:./nix-pilot/module.nix
+shell "ls /tmp/np-drive-fixture/nix-pilot"
+shell-assert "test -f /tmp/np-drive-fixture/nix-pilot/module.nix"
+shell-assert "test -f /tmp/np-drive-fixture/nix-pilot/state.nix"
+summary

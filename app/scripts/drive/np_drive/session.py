@@ -11,6 +11,7 @@ fails — every wait is bounded, processes are killed on close.
 import os
 import sys
 import time
+import json
 import subprocess
 import tempfile
 import shutil
@@ -49,14 +50,27 @@ class Session:
         config_dir: Optional[str] = None,
         xvfb_display: Optional[str] = None,
         dump_file: Optional[str] = None,
+        skip_setup: bool = False,
         extra_env: Optional[Dict[str, str]] = None,
     ):
         self.app_binary = app_binary
         self.catalogue_path = catalogue_path
-        self.config_dir = config_dir
-        self.xvfb_display = xvfb_display or f":{100 + os.getpid() % 5000}"
-        self.dump_file = dump_file
+        self.skip_setup = skip_setup
         self.extra_env = extra_env or {}
+        # Isolation: a launch without an explicit config dir must never
+        # resolve a real configuration (the app writes its files into the
+        # resolved root). Default to a scratch flake fixture instead.
+        if config_dir:
+            self.config_dir = config_dir
+        else:
+            self.config_dir = os.path.join(tempfile.mkdtemp(prefix="np-drive-cfg-"), "fixture")
+            os.makedirs(self.config_dir, exist_ok=True)
+            with open(os.path.join(self.config_dir, "flake.nix"), "w") as f:
+                f.write("{ outputs = { }; }\n")
+        self.xvfb_display = xvfb_display or f":{100 + os.getpid() % 5000}"
+        # A per-session dump path: concurrent or leftover app runs must never
+        # share the same file and race over its contents.
+        self.dump_file = dump_file or os.path.join(self.test_home, "ui.json")
 
         # Process tracking
         self.processes: List[subprocess.Popen] = []
@@ -99,6 +113,27 @@ class Session:
                     return True
             except OSError:
                 pass
+            time.sleep(0.1)
+        return False
+
+    def wait_for_snapshot(self, timeout: float = DEFAULT_TIMEOUT) -> bool:
+        """Wait until the app has written a realized UI snapshot.
+
+        The app writes an initial dump before the window is laid out; only a
+        snapshot with a real window size and units is usable.
+        """
+        start = time.time()
+        while time.time() - start < timeout:
+            if os.path.exists(self.dump_file) and os.path.getsize(self.dump_file) > 0:
+                try:
+                    with open(self.dump_file) as f:
+                        data = json.load(f)
+                    window = data.get("window", {})
+                    units = data.get("units", [])
+                    if window.get("w", 0) > 200 and window.get("h", 0) > 200 and units:
+                        return True
+                except (OSError, ValueError):
+                    pass
             time.sleep(0.1)
         return False
 
@@ -145,10 +180,15 @@ class Session:
         if self.config_dir:
             base_env["NIX_PILOT_CONFIG_DIR"] = self.config_dir
 
-        # NIX_PILOT_SKIP_SETUP=1 avoids first-run setup; tests drive the store shell
-        base_env["NIX_PILOT_SKIP_SETUP"] = "1"
+        if self.skip_setup:
+            base_env["NIX_PILOT_SKIP_SETUP"] = "1"
 
         base_env.update(self.extra_env)
+
+        # A stale dump from an earlier run must never be read as this
+        # session's state; delete it so the next appearance is fresh.
+        if self.dump_file and os.path.exists(self.dump_file):
+            os.remove(self.dump_file)
 
         # Start Xvfb
         self.xvfb_proc = self._run_cmd([
@@ -176,7 +216,7 @@ export NIX_PILOT_UI_DUMP=1
 {f'export NIX_PILOT_UI_DUMP_FILE={self.dump_file}' if self.dump_file else ''}
 {f'export NIX_PILOT_CATALOGUE={self.catalogue_path}' if self.catalogue_path else ''}
 {f'export NIX_PILOT_CONFIG_DIR={self.config_dir}' if self.config_dir else ''}
-export NIX_PILOT_SKIP_SETUP=1
+{f'export NIX_PILOT_SKIP_SETUP=1' if self.skip_setup else ''}
 
 # Start at-spi-bus-launcher
 at-spi-bus-launcher --launch-immediately &
@@ -208,12 +248,6 @@ exit $EXIT_CODE
         # We can't easily get their PIDs from here, but we track the wrapper
 
         self._started = True
-
-    def wait_for_snapshot(self, timeout: float = DEFAULT_TIMEOUT) -> bool:
-        """Wait for the snapshot file to appear and be non-empty."""
-        if not self.dump_file:
-            return False
-        return self._wait_for_file(self.dump_file, timeout)
 
     def wait_for_app_ready(self, timeout: float = DEFAULT_TIMEOUT) -> bool:
         """Wait for the app to be responsive (best effort via snapshot)."""
@@ -294,7 +328,11 @@ def isolated_session(
 def find_catalogue_index(repo_root: Optional[str] = None) -> Optional[str]:
     """Find the catalogue index file (fixture or generated)."""
     if repo_root is None:
-        repo_root = os.environ.get("NIX_PILOT_REPO_ROOT", "/tmp/np-drive-wt")
+        # This module lives at <repo>/app/scripts/drive/np_drive/.
+        repo_root = os.environ.get(
+            "NIX_PILOT_REPO_ROOT",
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")),
+        )
 
     # Try committed fixture first
     fixture = os.path.join(repo_root, "app", "testdata", "catalogue-index.json")
