@@ -48,19 +48,44 @@ const UNSET: &str = "__nix_pilot_config_unset__";
 /// attrset has no declared sub-options, so an unset subkey is a missing
 /// attribute: read it through `or <sentinel>` to distinguish "unset (system
 /// default)" from the "option removed" error a typed option gives.
-fn build_read_expr(option_path: &str, config_path: &std::path::Path) -> (String, bool) {
+fn build_read_expr(
+    option_path: &str,
+    config_path: &std::path::Path,
+    flake_root: Option<&std::path::Path>,
+) -> (String, bool) {
     let under_nixpkgs_config = option_path.starts_with("nixpkgs.config.");
     let option_expr = if under_nixpkgs_config {
         format!("{option_path} or \"{UNSET}\"")
     } else {
         option_path.to_string()
     };
-    let expr = format!(
-        r#"(import <nixpkgs/nixos> {{ configuration = import {}; }}).config.{}"#,
-        config_path.display(),
-        option_expr
-    );
+    let expr = match flake_root {
+        // Mirror nixos-rebuild: with no `#name` the hostname selects the
+        // configuration, so the live values come from the same system that
+        // a rebuild would switch to.
+        Some(root) => format!(
+            r#"(builtins.getFlake "{}").nixosConfigurations."{}".config.{}"#,
+            root.display(),
+            machine_hostname(),
+            option_expr
+        ),
+        None => format!(
+            r#"(import <nixpkgs/nixos> {{ configuration = import {}; }}).config.{}"#,
+            config_path.display(),
+            option_expr
+        ),
+    };
     (expr, under_nixpkgs_config)
+}
+
+/// Hostname used as the flake's `nixosConfigurations` attribute.
+fn machine_hostname() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .map(|name| name.trim().to_string())
+        .ok()
+        .filter(|name| !name.is_empty())
+        .or_else(|| std::env::var("HOSTNAME").ok())
+        .unwrap_or_else(|| "default".to_string())
 }
 
 /// Parse the output of `nix-instantiate --eval --strict` into a ConfigValue.
@@ -163,9 +188,14 @@ pub fn read_config_value(option_path: &str) -> Result<ConfigValue, ConfigValueEr
         ));
     }
 
-    // Discover the live NixOS configuration
-    let sources = config_source::discover().map_err(|_| ConfigValueError::NoLiveConfig)?;
-    let config_path = sources.configuration;
+    // Read from the same root that apply and setup use, so a flake system
+    // never reports values from a stale /etc/nixos copy.
+    let root = config_source::resolve_config_root().ok_or(ConfigValueError::NoLiveConfig)?;
+    let flake_root = match root.kind {
+        crate::config_source::ConfigKind::Flake => Some(root.path.clone()),
+        crate::config_source::ConfigKind::Classic => None,
+    };
+    let config_path = root.path.join("configuration.nix");
 
     // Find nix-instantiate
     let nix_instantiate = which::which("nix-instantiate")
@@ -174,7 +204,8 @@ pub fn read_config_value(option_path: &str) -> Result<ConfigValue, ConfigValueEr
         .ok_or(ConfigValueError::NoNixInstantiate)?;
 
     // Build the read-only Nix expression for the requested option.
-    let (expr, under_nixpkgs_config) = build_read_expr(option_path, &config_path);
+    let (expr, under_nixpkgs_config) =
+        build_read_expr(option_path, &config_path, flake_root.as_deref());
 
     // Run nix-instantiate --eval --strict
     let output = Command::new(&nix_instantiate)
@@ -199,7 +230,7 @@ pub fn read_config_value(option_path: &str) -> Result<ConfigValue, ConfigValueEr
 /// Check if NixOS config reading is available (non-blocking heuristic).
 /// Returns true if we're on a NixOS system with nix-instantiate available.
 pub fn is_available() -> bool {
-    config_source::discover().is_ok() && which::which("nix-instantiate").is_ok()
+    config_source::resolve_config_root().is_some() && which::which("nix-instantiate").is_ok()
 }
 
 /// Decide whether an eval failure means the option no longer exists (removed
@@ -245,18 +276,28 @@ mod tests {
         let cfg = std::path::Path::new("/etc/nixos/configuration.nix");
         // Typed options keep a plain read and still surface a missing
         // attribute as "option removed", never as a default.
-        let (typed, is_open) = build_read_expr("networking.hostName", cfg);
+        let (typed, is_open) = build_read_expr("networking.hostName", cfg, None);
         assert!(!is_open);
         assert!(typed.contains(".config.networking.hostName"), "{typed}");
         assert!(!typed.contains(" or "), "{typed}");
         // The open nixpkgs.config.* attrset reads through `or <sentinel>` so
         // an unset subkey reports as "unset" rather than "removed".
-        let (open, is_open) = build_read_expr("nixpkgs.config.allowUnfree", cfg);
+        let (open, is_open) = build_read_expr("nixpkgs.config.allowUnfree", cfg, None);
         assert!(is_open);
         assert!(
             open.contains(r#".config.nixpkgs.config.allowUnfree or "__nix_pilot_config_unset__"#),
             "{open}"
         );
+    }
+
+    #[test]
+    fn read_expr_evaluates_a_flake_root_as_a_flake() {
+        let root = std::path::Path::new("/home/u/nixos-config");
+        let (expr, _) = build_read_expr("time.timeZone", root, Some(root));
+        assert!(expr.contains("builtins.getFlake"), "{expr}");
+        assert!(expr.contains("nixosConfigurations"), "{expr}");
+        assert!(expr.contains(".config.time.timeZone"), "{expr}");
+        assert!(!expr.contains("<nixpkgs/nixos>"), "{expr}");
     }
 
     #[test]
