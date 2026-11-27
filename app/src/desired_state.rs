@@ -1164,8 +1164,8 @@ mod tests {
         let nix = d
             .render_module(crate::desired_state::UserBackend::NixUsers)
             .unwrap();
-        assert!(nix.contains(&"networking.hostName = lib.mkOverride 10 \"myhost\";".to_string()));
-        assert!(nix.contains("services.openssh.enable = lib.mkOverride 10 true;"));
+        assert!(nix.contains(&"networking.hostName = lib.mkOverride 90 \"myhost\";".to_string()));
+        assert!(nix.contains("services.openssh.enable = lib.mkOverride 90 true;"));
     }
 
     #[test]
@@ -1211,7 +1211,7 @@ mod tests {
         );
         let nix = doc.render_module(UserBackend::NixUsers).unwrap();
         assert!(nix.contains("nixpkgs.overlays = [ (import ./per-app-overlays.nix) ];"));
-        assert!(nix.contains("nixpkgs.config.allowUnfree = lib.mkOverride 10 true;"));
+        assert!(nix.contains("nixpkgs.config.allowUnfree = lib.mkOverride 90 true;"));
         assert!(doc.validate().is_ok());
     }
 

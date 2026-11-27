@@ -50,7 +50,7 @@ The first-release surface covers the areas in REQ-5: networking, display, sound,
 
 ### First-release workflows
 
-Shipped in `app/src/settings.rs` (single-value overrides, verified against the pinned nixpkgs; each renders as an app-wins `lib.mkOverride 10` line and is stored in `DesiredDoc.settings`):
+Shipped in `app/src/settings.rs` (single-value overrides, verified against the pinned nixpkgs; each renders as a `lib.mkOverride 90` line — beats plain user definitions, loses to the user's `mkForce` (D33 tandem) — and is stored in `DesiredDoc.settings`):
 
 | Setting | NixOS option | Type | Plain label |
 |---|---|---|---|

@@ -6,8 +6,9 @@
 //! means the same thing on every desktop, and the app owns its versioning (D14).
 //! Only settings the user actively changed are stored (in
 //! `DesiredDoc.settings`); everything else is untouched and falls back to the
-//! system config. Rendered settings use `lib.mkOverride 10`, a priority a
-//! step above `mkForce`, so "what you change in the app always wins".
+//! system config. Rendered settings use `lib.mkOverride 90`: a priority that
+//! beats plain user definitions (100) yet loses to the user's `mkForce` (50),
+//! so the app wins unless the user deliberately overrides (D33 tandem).
 use std::collections::BTreeMap;
 
 use crate::setting_value::SettingValue;
@@ -404,10 +405,11 @@ pub fn validate(key: &str, value: &SettingValue) -> Result<(), String> {
 
 /// Render the settings block for a desired-state settings map. Only keys the
 /// user set appear (the desired state stores exactly what changed), each as
-/// `option.path = lib.mkOverride 10 <value>;`. Prefixes the block so it is
-/// emitted verbatim into the generated module. Call [`validate`] before
-/// rendering untrusted or persisted values; this function assumes the map is
-/// valid and omits keys that are not in [`SPECS`].
+/// `option.path = lib.mkOverride 90 <value>;` (beats plain definitions, loses
+/// to the user's `mkForce`). Prefixes the block so it is emitted verbatim
+/// into the generated module. Call [`validate`] before rendering untrusted or
+/// persisted values; this function assumes the map is valid and omits keys
+/// that are not in [`SPECS`].
 pub fn render_block(settings: &BTreeMap<String, SettingValue>) -> String {
     let mut out = String::new();
     for spec in SPECS {
@@ -426,13 +428,13 @@ pub fn render_block(settings: &BTreeMap<String, SettingValue>) -> String {
                     .replace('"', "\\\"")
                     .replace('$', r#"${"$"}"#);
                 out.push_str(&format!(
-                    "  {} = lib.mkOverride 10 \"{}\";\n",
+                    "  {} = lib.mkOverride 90 \"{}\";\n",
                     spec.key, esc
                 ));
             }
             SettingValue::Bool(b) => {
                 out.push_str(&format!(
-                    "  {} = lib.mkOverride 10 {};\n",
+                    "  {} = lib.mkOverride 90 {};\n",
                     spec.key,
                     if *b { "true" } else { "false" }
                 ));
@@ -583,7 +585,7 @@ mod tests {
         let out = render_block(&m);
         assert_eq!(
             out,
-            "  networking.hostName = lib.mkOverride 10 \"myhost\";\n  services.openssh.enable = lib.mkOverride 10 true;\n"
+            "  networking.hostName = lib.mkOverride 90 \"myhost\";\n  services.openssh.enable = lib.mkOverride 90 true;\n"
         );
         assert!(!out.contains("timeZone"));
         assert!(!out.contains("defaultLocale"));
@@ -645,7 +647,7 @@ mod tests {
         )
         .is_err());
         let out = render_block(&m);
-        assert!(out.contains("  nixpkgs.config.allowUnfree = lib.mkOverride 10 true;\n"));
+        assert!(out.contains("  nixpkgs.config.allowUnfree = lib.mkOverride 90 true;\n"));
     }
 
     #[test]
