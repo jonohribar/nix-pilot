@@ -41,13 +41,12 @@ pub enum ConfigValueError {
 /// Sentinel returned by the read expression for an unset open-config subkey.
 const UNSET: &str = "__nix_pilot_config_unset__";
 
-/// The read-only Nix expression for `option_path` against the live config,
-/// plus whether the path is the open `nixpkgs.config.*` attrset.
+/// The read-only expression for `option_path`, plus whether the path is the
+/// open `nixpkgs.config.*` attrset.
 ///
-/// Typed options are read as `.config.<path>`. The open `nixpkgs.config.*`
-/// attrset has no declared sub-options, so an unset subkey is a missing
-/// attribute: read it through `or <sentinel>` to distinguish "unset (system
-/// default)" from the "option removed" error a typed option gives.
+/// An unset `nixpkgs.config.*` subkey is a missing attribute, so it is read
+/// through `or <sentinel>`: that separates "unset" from "removed", which a
+/// typed option reports as an error.
 fn build_read_expr(
     option_path: &str,
     config_path: &std::path::Path,
@@ -140,12 +139,10 @@ fn unescape_nix_string(s: &str) -> String {
                 None => result.push('\\'), // trailing backslash
             }
         } else if c == '$' && chars.peek() == Some(&'{') {
-            // In Nix string interpolation, ${...} is the marker.
-            // Since we're parsing *output* of nix-instantiate --eval,
-            // the string value should already have interpolations resolved.
-            // But if we see a bare ${
+            // Interpolation is already resolved in eval output, so a literal
+            // `${` here is data and keeps both characters.
             result.push('$');
-            chars.next(); // consume the {
+            chars.next();
         } else {
             result.push(c);
         }

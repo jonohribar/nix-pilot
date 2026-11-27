@@ -208,6 +208,10 @@ impl TrySession {
         let Some(mut child) = taken else {
             return Ok(());
         };
+        // Already exited on its own: reap and return without any grace sleep.
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            return Ok(());
+        }
         #[cfg(unix)]
         {
             let pgid = child_handle.pgid;
@@ -217,8 +221,11 @@ impl TrySession {
             // Short grace: this runs on the UI thread, so stay well under a
             // visible stall.
             thread::sleep(Duration::from_millis(200));
+            if child.try_wait().ok().flatten().is_none() {
+                let _ = child.kill();
+            }
+            // Reap whatever is left, so no zombie outlives the session.
             let _ = child.try_wait();
-            let _ = child.kill();
         }
 
         #[cfg(not(unix))]

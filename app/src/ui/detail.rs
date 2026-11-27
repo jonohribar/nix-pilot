@@ -455,7 +455,17 @@ impl DetailUi {
             };
             *try_session.borrow_mut() = None;
             *try_receiver.borrow_mut() = None;
-            apply_try_state(terminal, &try_state, &btn_try, &status, &title);
+            // A user stop already explained itself; the monitor's plain end
+            // would overwrite "Stopped" with "Finished".
+            let stopped_by_user = matches!(
+                *try_state.borrow(),
+                TryState::Ended {
+                    stopped_by_user: true
+                }
+            );
+            if !stopped_by_user {
+                apply_try_state(terminal, &try_state, &btn_try, &status, &title);
+            }
             glib::ControlFlow::Break
         });
     }
