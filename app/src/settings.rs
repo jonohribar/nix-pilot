@@ -418,15 +418,7 @@ pub fn render_block(settings: &BTreeMap<String, SettingValue>) -> String {
         };
         match v {
             SettingValue::Str(s) => {
-                // Escape for a Nix double-quoted string: backslash, quote,
-                // and every `$` as the interpolation `${...}` marker. A bare
-                // `$` (or a `$` that opens no `{`) is not dangerous, but
-                // replacing all of them with a literal is always valid, so no
-                // accepted value can ever become Nix code.
-                let esc = s
-                    .replace('\\', "\\\\")
-                    .replace('"', "\\\"")
-                    .replace('$', r#"${"$"}"#);
+                let esc = crate::desired_state::escape_nix_str(s);
                 out.push_str(&format!(
                     "  {} = lib.mkOverride 90 \"{}\";\n",
                     spec.key, esc

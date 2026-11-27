@@ -451,7 +451,10 @@ fn render_account_packages(
     }
     match backend {
         UserBackend::NixUsers => {
-            let mut lines = vec![format!("  users.users.\"{account}\" = {{")];
+            let mut lines = vec![format!(
+                "  users.users.\"{}\" = {{",
+                escape_nix_str(account)
+            )];
             if !packages.packages.is_empty() {
                 lines.push(format!(
                     "    packages = [ {} ];",
@@ -472,7 +475,8 @@ fn render_account_packages(
                 String::new()
             } else {
                 format!(
-                    "  home-manager.users.\"{account}\".home.packages = [ {} ];\n",
+                    "  home-manager.users.\"{}\".home.packages = [ {} ];\n",
+                    escape_nix_str(account),
                     render_package_list(&packages.packages)
                 )
             }
@@ -482,7 +486,10 @@ fn render_account_packages(
 
 /// The Nix lines defining one app-owned user account.
 fn render_owned_account(account: &str, profile: &AccountProfile) -> String {
-    let mut lines = vec![format!("  users.users.\"{account}\" = {{")];
+    let mut lines = vec![format!(
+        "  users.users.\"{}\" = {{",
+        escape_nix_str(account)
+    )];
     lines.push("    isNormalUser = true;".into());
     if !profile.full_name.is_empty() {
         lines.push(format!(
@@ -559,7 +566,7 @@ fn render_package_list(packages: &[String]) -> String {
         .map(|attr| {
             let path = attr
                 .split('.')
-                .map(|component| format!("\"{component}\""))
+                .map(|component| format!("\"{}\"", escape_nix_str(component)))
                 .collect::<Vec<_>>()
                 .join(".");
             format!("pkgs.{path}")
@@ -571,7 +578,7 @@ fn render_package_list(packages: &[String]) -> String {
 /// Escape a value for embedding inside a Nix double-quoted string (so no
 /// accepted value can ever become Nix code: quotes, backslashes and the `$`
 /// interpolation marker are all neutralised).
-fn escape_nix_str(value: &str) -> String {
+pub(crate) fn escape_nix_str(value: &str) -> String {
     value
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
@@ -1303,6 +1310,20 @@ mod tests {
             out.status.success(),
             "per-app overlay did not parse:\n{}",
             String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// The render helpers must escape on their own, not lean on `validate`.
+    #[test]
+    fn render_helpers_escape_identifiers() {
+        let packages = vec![r#"a"b"#.to_string()];
+        assert_eq!(render_package_list(&packages), r#"pkgs."a\"b""#);
+
+        let profile = AccountProfile::new(String::new(), false);
+        let rendered = render_owned_account("a$b", &profile);
+        assert!(
+            rendered.starts_with(r#"  users.users."a${"$"}b" = {"#),
+            "account name must be escaped: {rendered}"
         );
     }
 
