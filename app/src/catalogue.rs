@@ -5,9 +5,11 @@
 //! `$NIX_PILOT_CATALOGUE` (a local path or an https:// URL), then the
 //! conventional local paths under the repo. A URL is downloaded with curl
 //! into the app cache and re-fetched on each start (freshness surfaces as an
-//! install-check R07 later). When a `.sha256` sidecar exists next to the
-//! index (or next to the cached URL copy), the loaded bytes are verified
-//! against it; a mismatch is a first-class error, never silently used.
+//! install-check R07 later). A remote index MUST have a `.sha256` sidecar
+//! at `<url>.sha256`; it is fetched with the same curl flags and stored next
+//! to the cached copy. Missing or mismatched sidecar is a hard error.
+//! Local sources are verified when a sidecar exists; absence means no
+//! verification available (not an error).
 use std::path::{Path, PathBuf};
 
 use crate::model;
@@ -66,7 +68,9 @@ fn cache_path() -> PathBuf {
 /// sidecar when one exists.
 ///
 /// Remote bytes are fetched on each call; a local cache copy is best-effort
-/// only and is not used as a fallback if the fetch fails.
+/// only and is not used as a fallback if the fetch fails. Remote sources
+/// require a sidecar; missing or mismatched sidecar is a hard error.
+/// Local sources are verified when a sidecar exists; absence is allowed.
 ///
 /// # Errors
 /// Returns a plain-language error for read/download failures or invalid
@@ -76,47 +80,86 @@ pub fn load_raw(source: &Source) -> Result<Vec<u8>, String> {
         Source::Local(path) => {
             let raw = std::fs::read(path)
                 .map_err(|e| format!("cannot read catalogue index {}: {e}", path.display()))?;
-            verify_sidecar(path, &raw)?;
+            verify_sidecar_local(path, &raw)?;
             Ok(raw)
         }
         Source::Remote(url) => {
-            let raw = fetch_remote(url)?;
+            let (raw, sidecar) = fetch_remote_with_sidecar(url)?;
             let cached = cache_path();
             if let Some(dir) = cached.parent() {
                 let _ = std::fs::create_dir_all(dir);
             }
-            let _ = std::fs::write(&cached, &raw);
-            verify_sidecar(&cached, &raw)?;
+            std::fs::write(&cached, &raw)
+                .map_err(|e| format!("cannot write cache {}: {e}", cached.display()))?;
+            let sidecar_path = format!("{}.sha256", cached.display());
+            std::fs::write(&sidecar_path, &sidecar)
+                .map_err(|e| format!("cannot write sidecar {}: {e}", sidecar_path))?;
+            verify_sidecar_remote(&cached, &raw)?;
             Ok(raw)
         }
     }
 }
 
-/// Fetch a URL with curl (present on every NixOS), with a timeout.
-fn fetch_remote(url: &str) -> Result<Vec<u8>, String> {
+/// Fetch a URL and its `.sha256` sidecar with curl (same flags).
+/// Remote catalogues require a sidecar; missing sidecar is a hard error.
+fn fetch_remote_with_sidecar(url: &str) -> Result<(Vec<u8>, String), String> {
     let curl = which::which("curl")
         .map_err(|_| "curl is not available to download the catalogue".to_string())?;
-    let output = std::process::Command::new(&curl)
+    let raw = fetch_with_curl(&curl, url)?;
+    let sidecar_url = format!("{}.sha256", url);
+    let sidecar = fetch_with_curl(&curl, &sidecar_url)
+        .map_err(|e| format!("remote catalogue missing .sha256 sidecar: {e}"))?;
+    let sidecar =
+        String::from_utf8(sidecar).map_err(|_| "sidecar is not valid UTF-8".to_string())?;
+    let sidecar = sidecar.trim().to_string();
+    if sidecar.is_empty() {
+        return Err("sidecar is empty".to_string());
+    }
+    Ok((raw, sidecar))
+}
+
+/// Fetch a single URL with curl using the standard flags.
+fn fetch_with_curl(curl: &Path, url: &str) -> Result<Vec<u8>, String> {
+    let output = std::process::Command::new(curl)
         .args(["-fsSL", "--max-time", "60", url])
         .output()
         .map_err(|e| format!("could not run curl: {e}"))?;
     if !output.status.success() {
         return Err(format!(
-            "could not download the catalogue: {}",
+            "could not download {}: {}",
+            url,
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
     Ok(output.stdout)
 }
 
-/// Verify `path` against the `<path>.sha256` sidecar (hex digest, first
-/// whitespace-separated token) when the sidecar exists; absence means "no
-/// verification available", a mismatch is an error.
-fn verify_sidecar(index_path: &Path, raw: &[u8]) -> Result<(), String> {
+/// Verify a local source against its sidecar.
+/// Sidecar absence is allowed (no verification available).
+fn verify_sidecar_local(index_path: &Path, raw: &[u8]) -> Result<(), String> {
     let sidecar = PathBuf::from(format!("{}.sha256", index_path.display()));
     if !sidecar.exists() {
         return Ok(());
     }
+    let expected = std::fs::read_to_string(&sidecar)
+        .map_err(|e| format!("cannot read sidecar {}: {e}", sidecar.display()))?;
+    let expected = expected
+        .split_whitespace()
+        .next()
+        .ok_or_else(|| format!("sidecar {} is empty", sidecar.display()))?;
+    let actual = sha256_hex(raw);
+    if !actual.eq_ignore_ascii_case(expected) {
+        return Err(format!(
+            "catalogue checksum mismatch: expected {expected}, got {actual}"
+        ));
+    }
+    Ok(())
+}
+
+/// Verify a remote source against its sidecar.
+/// Sidecar MUST exist (fetch_remote_with_sidecar ensures it).
+fn verify_sidecar_remote(index_path: &Path, raw: &[u8]) -> Result<(), String> {
+    let sidecar = PathBuf::from(format!("{}.sha256", index_path.display()));
     let expected = std::fs::read_to_string(&sidecar)
         .map_err(|e| format!("cannot read sidecar {}: {e}", sidecar.display()))?;
     let expected = expected
@@ -182,27 +225,80 @@ mod tests {
     }
 
     #[test]
-    fn sha256_verifies_and_rejects() {
+    fn local_sidecar_verifies_and_rejects() {
         let raw = b"hello catalogue";
         let good = sha256_hex(raw);
         assert_eq!(good.len(), 64);
-        // sidecar present + matching -> ok (with the expected digest written by
-        // the caller; here we only exercise the hash function)
         assert!(good.chars().all(|c| c.is_ascii_hexdigit()));
 
-        let dir = std::env::temp_dir().join(format!("np-cat-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("np-cat-local-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let index = dir.join("index.json");
         std::fs::write(&index, raw).unwrap();
-        // no sidecar: loads without verification
-        assert!(verify_sidecar(&index, raw).is_ok());
+        // no sidecar: loads without verification (local source)
+        assert!(verify_sidecar_local(&index, raw).is_ok());
         // matching sidecar: ok
         std::fs::write(format!("{}.sha256", index.display()), &good).unwrap();
-        assert!(verify_sidecar(&index, raw).is_ok());
+        assert!(verify_sidecar_local(&index, raw).is_ok());
         // mismatching sidecar: hard error
         std::fs::write(format!("{}.sha256", index.display()), "0".repeat(64)).unwrap();
-        assert!(verify_sidecar(&index, raw).is_err());
+        assert!(verify_sidecar_local(&index, raw).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn remote_requires_sidecar_missing_is_error() {
+        let raw = b"remote index";
+        let dir = std::env::temp_dir().join(format!("np-cat-remote-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let index = dir.join("index.json");
+        std::fs::write(&index, raw).unwrap();
+        // Remote-shaped path with NO sidecar -> error
+        let err = verify_sidecar_remote(&index, raw).unwrap_err();
+        assert!(err.contains("cannot read sidecar") || err.contains("No such file"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn remote_sidecar_mismatch_errors() {
+        let raw = b"remote index";
+        let dir = std::env::temp_dir().join(format!("np-cat-remote2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let index = dir.join("index.json");
+        std::fs::write(&index, raw).unwrap();
+        std::fs::write(format!("{}.sha256", index.display()), "0".repeat(64)).unwrap();
+        let err = verify_sidecar_remote(&index, raw).unwrap_err();
+        assert!(err.contains("checksum mismatch"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn remote_sidecar_match_verifies() {
+        let raw = b"remote index";
+        let good = sha256_hex(raw);
+        let dir = std::env::temp_dir().join(format!("np-cat-remote3-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let index = dir.join("index.json");
+        std::fs::write(&index, raw).unwrap();
+        std::fs::write(format!("{}.sha256", index.display()), &good).unwrap();
+        assert!(verify_sidecar_remote(&index, raw).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn local_source_no_sidecar_loads() {
+        let raw = b"local index";
+        let dir = std::env::temp_dir().join(format!("np-cat-local2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let index = dir.join("index.json");
+        std::fs::write(&index, raw).unwrap();
+        // Local source without sidecar is allowed
+        assert!(verify_sidecar_local(&index, raw).is_ok());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
