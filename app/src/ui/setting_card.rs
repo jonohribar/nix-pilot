@@ -29,6 +29,12 @@ enum LiveValue {
     Str(String),
 }
 
+/// A restored live value used when resetting a card to its system default.
+enum RestoredValue {
+    Bool(bool),
+    Str(String),
+}
+
 impl Clone for Control {
     fn clone(&self) -> Self {
         match self {
@@ -381,11 +387,12 @@ impl SettingCard {
             }
             desired.borrow_mut().settings.remove(key);
             syncing.set(true);
-            restore_live(
-                &control,
-                live_bool.get().unwrap_or(false),
-                live_str.borrow().as_deref(),
-            );
+            let restored = if matches!(&control, Control::Switch(_)) {
+                RestoredValue::Bool(live_bool.get().unwrap_or(false))
+            } else {
+                RestoredValue::Str(live_str.borrow().clone().unwrap_or_default())
+            };
+            restore_live(&control, restored);
             syncing.set(false);
             if let Some(status_label) = &status {
                 let on = settings::stored_bool(&desired.borrow().settings, key)
@@ -400,24 +407,29 @@ impl SettingCard {
 
 /// Point a card's control at its "no stored change" state (mirror-reality's
 /// reset-to-default): the stored choice has already been removed.
-fn restore_live(control: &Control, live_bool: bool, live_str: Option<&str>) {
-    match control {
-        Control::Switch(sw) => sw.set_active(live_bool),
+fn restore_live(control: &Control, value: RestoredValue) {
+    match (control, value) {
+        (Control::Switch(sw), RestoredValue::Bool(b)) => sw.set_active(b),
         // The dropdown's first seat is the explicit "use the system default".
-        Control::Dropdown(combo) => {
-            let _ = live_str;
+        (Control::Dropdown(combo), RestoredValue::Str(_)) => {
             combo.set_active(Some(0));
         }
-        Control::Entry(entry) => {
-            let _ = live_bool;
-            entry.set_text(live_str.unwrap_or(""));
+        (Control::Entry(entry), RestoredValue::Str(s)) => {
+            entry.set_text(&s);
+        }
+        // Mismatched pairs are programmer errors; they should not occur.
+        (Control::Switch(_), RestoredValue::Str(_)) => {
+            unreachable!("Switch control passed Str restore value");
+        }
+        (Control::Dropdown(_) | Control::Entry(_), RestoredValue::Bool(_)) => {
+            unreachable!("Non-switch control passed Bool restore value");
         }
     }
 }
 
-/// Read the live config values for a set of cards on background threads and
-/// apply them as they land (mirror-reality preselection). No-op when config
-/// values cannot be read; non-blocking on the main context.
+/// Read the live config values for a set of cards on a single background
+/// worker and apply them as they land (mirror-reality preselection). No-op
+/// when config values cannot be read; non-blocking on the main context.
 pub fn refresh_live_values(cards: &[SettingCard], desired: &Rc<RefCell<DesiredDoc>>) {
     if !crate::config_value::is_available() {
         // No live value can ever arrive (non-NixOS): release every card's
@@ -428,11 +440,10 @@ pub fn refresh_live_values(cards: &[SettingCard], desired: &Rc<RefCell<DesiredDo
         return;
     }
     let (tx, rx) = mpsc::channel::<(String, LiveValue)>();
-    for card in cards {
-        let key: &'static str = card.key;
-        let is_boolean = card.is_boolean();
-        let tx = tx.clone();
-        std::thread::spawn(move || {
+    // Capture the card specs we need for the single worker thread.
+    let specs: Vec<(&'static str, bool)> = cards.iter().map(|c| (c.key, c.is_boolean())).collect();
+    std::thread::spawn(move || {
+        for (key, is_boolean) in specs {
             let result = read_config_value(key);
             let live = if is_boolean {
                 LiveValue::Bool(match result {
@@ -448,9 +459,10 @@ pub fn refresh_live_values(cards: &[SettingCard], desired: &Rc<RefCell<DesiredDo
                 })
             };
             let _ = tx.send((key.to_string(), live));
-        });
-    }
-    drop(tx);
+        }
+        // Drop tx so the main-loop poll sees Disconnected when done.
+        drop(tx);
+    });
 
     let cards = cards.to_vec();
     let desired = desired.clone();
