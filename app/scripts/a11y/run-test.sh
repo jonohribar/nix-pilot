@@ -39,9 +39,14 @@ if [ -z "${NIX_PILOT_CATALOGUE:-}" ]; then
     fi
   fi
 fi
-# Locate the session.conf shipped by the nix dbus package so the harness
-# works on non-NixOS hosts (e.g. ubuntu-latest) that lack /etc/dbus-1/session.conf.
-DBUS_BIN=$(command -v dbus-run-session)
+# Use the session.conf shipped with the dbus package, so the harness works on
+# hosts without /etc/dbus-1 (CI runners). readlink -f resolves a wrapped or
+# symlinked dbus-run-session to its real store path.
+DBUS_BIN=$(readlink -f "$(command -v dbus-run-session)")
 DBUS_SESSION_CONF="${DBUS_BIN%/bin/dbus-run-session}/share/dbus-1/session.conf"
+if [ ! -f "$DBUS_SESSION_CONF" ]; then
+  echo "error: dbus session config not found at $DBUS_SESSION_CONF" >&2
+  exit 1
+fi
 # The test driver starts launcher + app itself inside this single session.
 dbus-run-session --config-file="$DBUS_SESSION_CONF" -- python3 "$TEST" "$APP_BIN"
