@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""
+np-drive — UI snapshot REPL and scenario runner for nix-pilot.
+
+Usage:
+  np-drive                    # Interactive REPL
+  np-drive file.drv           # Run scenario file
+  np-drive --self-test        # Run unit tests (no session)
+"""
+
+import sys
+import os
+import argparse
+
+# Add the np_drive package to path
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PKG_DIR = os.path.join(SCRIPT_DIR, "np_drive")
+sys.path.insert(0, SCRIPT_DIR)
+
+from np_drive.repl import create_repl, Repl
+from np_drive.session import find_catalogue_index
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="np-drive — UI snapshot REPL and scenario runner",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  np-drive                                    # Interactive REPL
+  np-drive scenario.drv                       # Run scenario file
+  np-drive --app ./target/debug/nix-pilot-app # REPL with live session
+  np-drive --app ./app --scenario test.drv    # Run scenario with live session
+  np-drive --self-test                        # Run unit tests
+"""
+    )
+    parser.add_argument("scenario", nargs="?", help="Scenario file to run (.drv)")
+    parser.add_argument("--app", help="Path to nix-pilot-app binary (starts live session)")
+    parser.add_argument("--catalogue", help="Path to catalogue-index.json")
+    parser.add_argument("--config-dir", help="Path to config directory")
+    parser.add_argument("--dump-file", default="/tmp/nix-pilot-ui.json", help="UI dump file path")
+    parser.add_argument("--self-test", action="store_true", help="Run unit tests (no session)")
+
+    args = parser.parse_args()
+
+    if args.self_test:
+        # Run unit tests via our test runner
+        import subprocess
+        test_runner = os.path.join(SCRIPT_DIR, "tests", "run_tests.py")
+        result = subprocess.run([sys.executable, test_runner])
+        return result.returncode
+
+    # Find catalogue if not provided
+    catalogue = args.catalogue
+    if not catalogue:
+        catalogue = find_catalogue_index()
+        if catalogue:
+            print(f"Using catalogue: {catalogue}")
+
+    repl = create_repl(
+        app_binary=args.app or "",
+        catalogue_path=catalogue,
+        config_dir=args.config_dir,
+        dump_file=args.dump_file,
+        use_session=bool(args.app),
+    )
+
+    if args.scenario:
+        return repl.run_scenario(args.scenario)
+    else:
+        return repl.run_interactive()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
