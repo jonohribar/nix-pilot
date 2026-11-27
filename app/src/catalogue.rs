@@ -85,6 +85,8 @@ pub fn load_raw(source: &Source) -> Result<Vec<u8>, String> {
         }
         Source::Remote(url) => {
             let (raw, sidecar) = fetch_remote_with_sidecar(url)?;
+            // Verify before caching, so unverified bytes never reach the disk.
+            verify_remote_bytes(&raw, &sidecar)?;
             let cached = cache_path();
             if let Some(dir) = cached.parent() {
                 let _ = std::fs::create_dir_all(dir);
@@ -94,7 +96,6 @@ pub fn load_raw(source: &Source) -> Result<Vec<u8>, String> {
             let sidecar_path = format!("{}.sha256", cached.display());
             std::fs::write(&sidecar_path, &sidecar)
                 .map_err(|e| format!("cannot write sidecar {}: {e}", sidecar_path))?;
-            verify_sidecar_remote(&cached, &raw)?;
             Ok(raw)
         }
     }
@@ -157,15 +158,12 @@ fn verify_sidecar_local(index_path: &Path, raw: &[u8]) -> Result<(), String> {
 }
 
 /// Verify a remote source against its sidecar.
-/// Sidecar MUST exist (fetch_remote_with_sidecar ensures it).
-fn verify_sidecar_remote(index_path: &Path, raw: &[u8]) -> Result<(), String> {
-    let sidecar = PathBuf::from(format!("{}.sha256", index_path.display()));
-    let expected = std::fs::read_to_string(&sidecar)
-        .map_err(|e| format!("cannot read sidecar {}: {e}", sidecar.display()))?;
-    let expected = expected
+/// Check downloaded bytes against the sidecar text fetched beside them.
+fn verify_remote_bytes(raw: &[u8], sidecar: &str) -> Result<(), String> {
+    let expected = sidecar
         .split_whitespace()
         .next()
-        .ok_or_else(|| format!("sidecar {} is empty", sidecar.display()))?;
+        .ok_or_else(|| "sidecar is empty".to_string())?;
     let actual = sha256_hex(raw);
     if !actual.eq_ignore_ascii_case(expected) {
         return Err(format!(
@@ -248,45 +246,16 @@ mod tests {
     }
 
     #[test]
-    fn remote_requires_sidecar_missing_is_error() {
-        let raw = b"remote index";
-        let dir = std::env::temp_dir().join(format!("np-cat-remote-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let index = dir.join("index.json");
-        std::fs::write(&index, raw).unwrap();
-        // Remote-shaped path with NO sidecar -> error
-        let err = verify_sidecar_remote(&index, raw).unwrap_err();
-        assert!(err.contains("cannot read sidecar") || err.contains("No such file"));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn remote_sidecar_mismatch_errors() {
-        let raw = b"remote index";
-        let dir = std::env::temp_dir().join(format!("np-cat-remote2-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let index = dir.join("index.json");
-        std::fs::write(&index, raw).unwrap();
-        std::fs::write(format!("{}.sha256", index.display()), "0".repeat(64)).unwrap();
-        let err = verify_sidecar_remote(&index, raw).unwrap_err();
-        assert!(err.contains("checksum mismatch"));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn remote_sidecar_match_verifies() {
+    fn remote_bytes_verify_against_the_fetched_sidecar() {
         let raw = b"remote index";
         let good = sha256_hex(raw);
-        let dir = std::env::temp_dir().join(format!("np-cat-remote3-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let index = dir.join("index.json");
-        std::fs::write(&index, raw).unwrap();
-        std::fs::write(format!("{}.sha256", index.display()), &good).unwrap();
-        assert!(verify_sidecar_remote(&index, raw).is_ok());
-        let _ = std::fs::remove_dir_all(&dir);
+        assert!(verify_remote_bytes(raw, &good).is_ok());
+        // Sidecars usually carry the "<digest>  <name>" form.
+        assert!(verify_remote_bytes(raw, &format!("{good}  index.json")).is_ok());
+        // A mismatch or an empty sidecar must fail closed.
+        let err = verify_remote_bytes(raw, &"0".repeat(64)).unwrap_err();
+        assert!(err.contains("checksum mismatch"), "{err}");
+        assert!(verify_remote_bytes(raw, "   ").is_err());
     }
 
     #[test]
