@@ -88,15 +88,8 @@ fn machine_hostname() -> String {
         .unwrap_or_else(|| "default".to_string())
 }
 
-/// Parse the output of `nix-instantiate --eval --strict` into a ConfigValue.
-///
-/// The output format is the Nix REPL printed representation:
-/// - Strings: quoted with escapes (e.g., `"Europe/Berlin"`)
-/// - Booleans: `true` or `false`
-/// - Null: `null`
-/// - Attrsets: `{ ... }`
-/// - Lists: `[ ... ]`
-/// - Functions: `«lambda»`
+/// Parse `nix-instantiate --eval --strict` output (the Nix REPL printed form):
+/// quoted strings, `true`/`false`, `null`, attrsets, lists, and `«lambda»`.
 pub fn parse_nix_value(output: &str) -> ConfigValue {
     let trimmed = output.trim();
 
@@ -161,16 +154,14 @@ fn unescape_nix_string(s: &str) -> String {
     result
 }
 
-/// Read a single NixOS option value from the live system configuration.
+/// Read one option from the user's live configuration.
 ///
-/// This is a read-only operation: it runs `nix-instantiate --eval --strict`
-/// on an expression that imports the live configuration and extracts the
-/// requested option. It never writes, edits, or builds anything.
+/// Read-only: it evaluates an expression, and never writes, edits, or builds.
+/// The root is the one apply uses, so a flake system reads its own flake.
 ///
 /// # Errors
-/// Returns a typed error when the option path is malformed, the live
-/// configuration or evaluator is unavailable, the option is absent, or
-/// evaluation fails.
+/// A malformed option path, no live configuration, no evaluator, an absent
+/// option, or a failed evaluation.
 pub fn read_config_value(option_path: &str) -> Result<ConfigValue, ConfigValueError> {
     if option_path.is_empty() {
         return Err(ConfigValueError::InvalidOptionPath(

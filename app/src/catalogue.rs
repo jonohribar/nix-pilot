@@ -1,15 +1,13 @@
-//! Catalogue consumption: resolve where the catalogue
-//! index comes from and load it honestly.
+//! Where the catalogue index comes from, and how it is verified.
 //!
-//! Sources, in precedence order: the first CLI argument, then
-//! `$NIX_PILOT_CATALOGUE` (a local path or an https:// URL), then the
-//! conventional local paths under the repo. A URL is downloaded with curl
-//! into the app cache and re-fetched on each start (freshness surfaces as an
-//! install-check R07 later). A remote index MUST have a `.sha256` sidecar
-//! at `<url>.sha256`; it is fetched with the same curl flags and stored next
-//! to the cached copy. Missing or mismatched sidecar is a hard error.
-//! Local sources are verified when a sidecar exists; absence means no
-//! verification available (not an error).
+//! Precedence: the first CLI argument, then `$NIX_PILOT_CATALOGUE` (a path or
+//! an https URL), then the conventional repo paths. A URL is fetched on each
+//! start and cached.
+//!
+//! A remote index must ship `<url>.sha256`. It is fetched with the same flags
+//! and kept beside the cache; a missing or mismatched sidecar is a hard error,
+//! so unverified bytes are never used. A local index is verified only when a
+//! sidecar sits next to it.
 use std::path::{Path, PathBuf};
 
 use crate::model;
@@ -64,17 +62,13 @@ fn cache_path() -> PathBuf {
     base.join("nix-pilot/catalogue-index.json")
 }
 
-/// Load the index bytes for the given source, verifying the `.sha256`
-/// sidecar when one exists.
+/// Load the index bytes, verifying them before use.
 ///
-/// Remote bytes are fetched on each call; a local cache copy is best-effort
-/// only and is not used as a fallback if the fetch fails. Remote sources
-/// require a sidecar; missing or mismatched sidecar is a hard error.
-/// Local sources are verified when a sidecar exists; absence is allowed.
+/// Remote bytes are fetched on every call; the cache is never a fallback, so
+/// a failed fetch is an error rather than stale data.
 ///
 /// # Errors
-/// Returns a plain-language error for read/download failures or invalid
-/// checksums.
+/// Plain-language errors for read, download, or checksum failures.
 pub fn load_raw(source: &Source) -> Result<Vec<u8>, String> {
     match source {
         Source::Local(path) => {

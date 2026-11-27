@@ -1,25 +1,15 @@
-//! Desired-state model: the app owns *what the user wants*, and the
-//! NixOS configuration is generated output (see architecture.md; decision D9). This
-//! module is the persisted source of truth plus a pure
-//! config renderer. This module performs no external I/O; the candidate-build
-//! adapter consumes the rendered module, while activation is handled
-//! separately. Per-user scope targets `users.users.<name>.packages` or, when
-//! selected, `home-manager.users.<name>.home.packages`.
+//! What the user wants: the source of truth, rendered to a NixOS module.
 //!
-//! Format: JSON, one file per running account (the account's per-user scope
-//! plus the machine's system scope). It is app-rewritten state — users never
-//! hand-edit it (C2) — so JSON's strong typing and deterministic output beat
-//! comment-capable formats. Deterministic: packages sort, keys sort. Versioned
-//! (`schema_version`) so the file can grow additively (e.g. settings values
-//! per settings-schema.md) without breaking older app installs, and a file
-//! written by a *newer* version is refused with a clear message rather than
-//! misparsed. Writes are atomic (temp file + rename) so a crash never
-//! corrupts the source of truth.
+//! The module is generated output; this state is what the app owns. It holds
+//! no external I/O, so the same state always renders the same module.
 //!
-//! Multi-account note: the schema already carries a per-account `users` map.
-//! Today the running account writes its own file (system scope + its own user
-//! scope). A future machine-wide/merged layout (elevation, multiple accounts)
-//! is a `schema_version` migration on top of this shape, not a rewrite.
+//! The file is JSON, written only by the app, with sorted keys and atomic
+//! replacement, so a crash never leaves it corrupt. `schema_version` lets the
+//! shape grow additively; a file from a newer version is refused with a clear
+//! message instead of being misread.
+//!
+//! Per-user packages go to `users.users.<name>.packages`, or to
+//! `home-manager.users.<name>.home.packages` when that backend is chosen.
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs::{File, OpenOptions};
@@ -377,15 +367,12 @@ impl DesiredDoc {
 
     /// Render this desired state as a deterministic NixOS module.
     ///
-    /// System packages, settings, and per-user packages are emitted for the
-    /// selected backend. Authorized keys are emitted only for the NixOS-native
-    /// backend. Per-user package and key entries refer to accounts that must
-    /// already exist in the system configuration. Separately, profiles in
-    /// [`DesiredDoc::accounts`] are app-owned account definitions and are
-    /// emitted as NixOS `users.users` declarations.
+    /// Per-user entries assume the account already exists; accounts in
+    /// [`DesiredDoc::accounts`] are app-owned and emitted as declarations.
+    /// Authorized keys need the NixOS-native backend.
     ///
     /// # Errors
-    /// Returns an error if any value cannot safely or correctly be rendered.
+    /// A value that cannot be rendered safely.
     pub fn render_module(&self, backend: UserBackend) -> Result<String, StateValidationError> {
         self.validate()?;
         let mut body = String::new();
