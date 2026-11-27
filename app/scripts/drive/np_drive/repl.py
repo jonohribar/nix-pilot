@@ -130,6 +130,19 @@ class Repl:
 
         return False
 
+    def _display(self) -> str:
+        """The live session's X display for input synthesis and screenshots.
+
+        xdotool must run against the isolated session's display, not the REPL
+        process's; the session owns it even when no AT-SPI driver is connected
+        (the common fallback path).
+        """
+        if self.state.session is not None:
+            return self.state.session.xvfb_display
+        if self.state.driver is not None:
+            return self.state.driver.xvfb_display
+        return os.environ.get("DISPLAY", ":0")
+
     def _find_unit(self, arg: str) -> Optional[Unit]:
         """Find a unit by id, exact name, or label substring."""
         if not self._ensure_snapshot():
@@ -378,15 +391,10 @@ np-drive commands:
             return True
 
         print(f"Clicking unit [{unit.id}] '{unit.name}' at {unit.center}...")
-        success = False
-        # xdotool must run against the live session's X display, not the REPL
-        # process's environment (the AT-SPI driver is not connected from
-        # outside the dbus session, so the fallback is the active path).
-        display = None
-        if self.state.session is not None:
-            display = self.state.session.xvfb_display
+        display = self._display()
 
-        # Try AT-SPI click if driver available
+        # Prefer an AT-SPI action; outside the dbus session the driver is not
+        # connected, so the xdotool fallback is usually the active path.
         if self.state.driver:
             success = click_unit(self.state.driver, unit, use_fallback=False, display=display)
             if success:
@@ -397,7 +405,6 @@ np-drive commands:
                     self.state.driver, unit, use_fallback=True, display=display
                 )
         else:
-            # No driver, use xdotool directly
             success = click_unit(None, unit, use_fallback=True, display=display)
 
         if success:
@@ -414,15 +421,12 @@ np-drive commands:
             print("Usage: type <text>")
             return True
         text = " ".join(args)
-        if self.state.driver:
-            # Type via xdotool (AT-SPI set_text is unreliable for non-focused)
-            success = xdotool_type(text, self.state.driver.xvfb_display)
-            if success:
-                print(f"Typed: {text}")
-            else:
-                print("Type failed")
+        # Type via xdotool (AT-SPI set_text is unreliable for non-focused).
+        success = xdotool_type(text, self._display())
+        if success:
+            print(f"Typed: {text}")
         else:
-            print("No driver session for typing")
+            print("Type failed")
         return True
 
     def cmd_type_into(self, args: List[str]) -> bool:
@@ -446,14 +450,11 @@ np-drive commands:
             print("Usage: key <combo> (e.g., ctrl+f, Escape, Tab)")
             return True
         combo = " ".join(args)
-        if self.state.driver:
-            success = xdotool_key(combo, self.state.driver.xvfb_display)
-            if success:
-                print(f"Sent key: {combo}")
-            else:
-                print("Key send failed")
+        success = xdotool_key(combo, self._display())
+        if success:
+            print(f"Sent key: {combo}")
         else:
-            print("No driver session for keys")
+            print("Key send failed")
         return True
 
     def cmd_open(self, args: List[str]) -> bool:
@@ -489,8 +490,7 @@ np-drive commands:
             return True
         name = args[0]
         path = self.state.shots_dir / f"{name}.png"
-        display = self.state.driver.xvfb_display if self.state.driver else os.environ.get("DISPLAY", ":0")
-        if screenshot(str(path), display):
+        if screenshot(str(path), self._display()):
             print(f"Screenshot saved to {path}")
         else:
             print("Screenshot failed (need ImageMagick 'import')")
@@ -596,10 +596,7 @@ np-drive commands:
         elif assertion == "none-unnamed":
             unnamed = [
                 u for u in snap.units
-                if u.is_unnamed and u.is_effectively_visible(snap.window_w, snap.window_h)
-                and u.sensitive
-                and not u.role.startswith("__Unknown")
-                and not u.is_window_chrome(snap.window_w, snap.window_h)
+                if u.is_unnamed_addressable(snap.window_w, snap.window_h)
             ]
             if not unnamed:
                 print("ASSERT OK: no unnamed interactive units")

@@ -79,6 +79,21 @@ class Unit:
                 and self.y <= 60
                 and self.x + self.w >= window_w - 160)
 
+    def is_unnamed_addressable(self, window_w: int, window_h: int) -> bool:
+        """Whether this is an actionable control that lacks a name.
+
+        Combines an interactive, unnamed unit with effective visibility,
+        sensitivity, a known role and non-window-chrome. Hidden stack-page
+        units, disabled controls and unassigned-role widgets therefore never
+        count as naming gaps. Shared by the summary and the none-unnamed
+        assert so the definition lives in one place.
+        """
+        return (self.is_unnamed
+                and self.is_effectively_visible(window_w, window_h)
+                and self.sensitive
+                and not self.role.startswith("__Unknown")
+                and not self.is_window_chrome(window_w, window_h))
+
 
 @dataclass
 class Snapshot:
@@ -208,14 +223,11 @@ def summarize(snapshot: Snapshot) -> Summary:
     for u in snapshot.units:
         counts_by_kind[u.kind] = counts_by_kind.get(u.kind, 0) + 1
 
-    # Unnamed interactive units that are really on screen (hidden stack
-    # pages must not count as gaps)
+    # Actionable units that lack a name (hidden, disabled and unknown-role
+    # widgets never count as gaps).
     unnamed_interactive = [
         u for u in snapshot.units
-        if u.is_unnamed and u.is_effectively_visible(snapshot.window_w, snapshot.window_h)
-        and u.sensitive
-        and not u.role.startswith("__Unknown")
-        and not u.is_window_chrome(snapshot.window_w, snapshot.window_h)
+        if u.is_unnamed_addressable(snapshot.window_w, snapshot.window_h)
     ]
 
     # Duplicate names among interactive units
@@ -225,17 +237,13 @@ def summarize(snapshot: Snapshot) -> Summary:
             name_to_units.setdefault(u.name, []).append(u)
     duplicate_names = {name: units for name, units in name_to_units.items() if len(units) > 1}
 
-    # Hidden units
     hidden_units = snapshot.hidden_units
 
-    # Offscreen units
     offscreen_units = snapshot.offscreen_units
 
-    # Focused unit
     focused = snapshot.focused_unit
     focused_unit_id = focused.id if focused else None
 
-    # Visible page
     visible_page = snapshot.page
 
     # Total visible text length (sum of label lengths of on-screen units)
