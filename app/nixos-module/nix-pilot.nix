@@ -2,13 +2,13 @@
 #
 # Enable with: services.nix-pilot.enable = true;  (in the user's flake/modules)
 #
-# D33 model (config-authority.md): the app writes a generated module
-# `nix-pilot/state.nix` into the user's config tree carrying the app-owned
-# surface (packages, settings, accounts, keys), and the user's config imports
-# it — one config, one switch, fully pure: the state travels with the repo, so
-# the config stays reproducible and portable. This module provides only the
-# sanctioned apply helper (which switches the user's own config) and the
-# polkit action.
+# D33 model (config-authority.md): the app writes its own module copy and a
+# generated state module into the user's config tree (`nix-pilot/module.nix`
+# and `nix-pilot/state.nix`, carrying packages, settings, accounts, keys),
+# and the user's config imports them — one config, one switch, fully pure:
+# the state travels with the repo, so the config stays reproducible and
+# portable. This module provides only the sanctioned apply helper (which
+# switches the user's own config) and the polkit action.
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.nix-pilot;
