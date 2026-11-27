@@ -1,14 +1,11 @@
 # nix-pilot NixOS module — the app's system integration.
 #
-# Enable with: services.nix-pilot.enable = true;  (in the user's flake/modules)
+# Enable with: services.nix-pilot.enable = true;  (in the user's config)
 #
-# D33 model (config-authority.md): the app writes its own module copy and a
-# generated state module into the user's config tree (`nix-pilot/module.nix`
-# and `nix-pilot/state.nix`, carrying packages, settings, accounts, keys),
-# and the user's config imports them — one config, one switch, fully pure:
-# the state travels with the repo, so the config stays reproducible and
-# portable. This module provides only the sanctioned apply helper (which
-# switches the user's own config) and the polkit action.
+# Under D33 (config-authority.md) the app writes its module and state files
+# into the user's config tree and the user imports them; this module only
+# provides the sanctioned apply helper (switches the user's own config) and
+# the polkit action.
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.nix-pilot;
@@ -28,10 +25,9 @@ let
         chmod +x /etc/nix-pilot/nix-pilot-apply 2>/dev/null || true
       }
       self_preserve || true
-      # D33: the app writes its nix-pilot/state.nix module into the user's
-      # config tree and this helper switches that same config — one config,
-      # one pure rebuild (no generated area, no stdin archive). The config
-      # directory is the only accepted argument.
+      # The app writes its state module into the user's config tree; this
+      # helper switches that same config. The config directory is the only
+      # accepted argument.
       require_config_dir() {
         [ $# -ge 2 ] || { echo "nix-pilot-apply: '$1' needs a config directory" >&2; exit 2; }
         [ -d "$2" ] || { echo "nix-pilot-apply: not a directory: $2" >&2; exit 2; }

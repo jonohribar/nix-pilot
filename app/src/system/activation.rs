@@ -71,18 +71,11 @@ fn activate_switch(doc: &DesiredDoc, timeout: Duration) -> ActivateResult {
             log: String::new(),
         };
     };
-    if let Err(error) = state_file::write_state_file(&root.path, doc) {
+    if let Err(error) = state_file::write_and_track(&root, doc) {
         return ActivateResult {
             ok: false,
-            note: "could not write the state module into your configuration".into(),
-            log: error.to_string(),
-        };
-    }
-    if let Err(error) = state_file::git_add_once(&root.path) {
-        return ActivateResult {
-            ok: false,
-            note: "could not track the state module in your configuration's git repository".into(),
-            log: error.to_string(),
+            note: error.to_string(),
+            log: error.log(),
         };
     }
     run_via_helper(ActivateAction::Switch, Some(&root.path), timeout)

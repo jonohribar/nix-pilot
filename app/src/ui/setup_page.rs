@@ -1,9 +1,7 @@
-//! First-run setup surface (config-authority.md, "Install and first run").
-//! Shown as the initial stack page until the user's NixOS configuration
-//! references nix-pilot: it detects the config kind, shows the exact
-//! copy-paste snippet, verifies the config parses after the user pastes
-//! (never evaluates), and hands over to the store shell. The page stays in
-//! the stack afterwards so Settings can reopen it.
+//! First-run setup surface (config-authority.md, "Install and first run"):
+//! the initial stack page until the user's configuration references
+//! nix-pilot — detect, show the exact snippet, parse-verify after pasting,
+//! then hand over to the store. Stays in the stack so Settings can reopen it.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -136,11 +134,7 @@ impl SetupPage {
         let root_for_open = self.root.clone();
         open_for.connect_clicked(move |_| {
             if let Some(root) = root_for_open.borrow().clone() {
-                let mut command = std::process::Command::new("xdg-open");
-                command.arg(&root.path);
-                if let Err(error) =
-                    crate::process::run(&mut command, std::time::Duration::from_secs(10))
-                {
+                if let Err(error) = crate::process::open_folder(&root.path) {
                     log::warn!("could not open the configuration folder: {error}");
                 }
             }

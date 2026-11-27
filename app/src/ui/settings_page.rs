@@ -75,9 +75,8 @@ impl SettingsPage {
             cards.push(card);
         }
 
-        // Integration card (System page, top): the nix-pilot module connection
-        // status, the path back to the setup steps, and removal. Ongoing
-        // status lives here rather than in a separate nav surface (4tk.5).
+        // Integration card (top of System): nix-pilot connection status, setup
+        // re-entry, and removal. Ongoing status lives here, not in a nav item.
         let integration_card = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
         integration_card.add_css_class("card");
         integration_card.set_margin_top(6);
@@ -109,8 +108,8 @@ impl SettingsPage {
         integration_card.append(&integration_actions);
         cat_pages["system"].prepend(&integration_card);
 
-        // Wire the card actions: reopen the setup steps, open the config
-        // folder, and confirmed removal of the app-owned files.
+        // Reopen the setup steps, open the config folder, or remove the
+        // app-owned files (confirmed).
         let integration_root: Rc<RefCell<Option<ConfigRoot>>> = Rc::new(RefCell::new(None));
         let open_setup_for_steps = open_setup.clone();
         integration_steps_btn.connect_clicked(move |_| open_setup_for_steps());
@@ -118,11 +117,7 @@ impl SettingsPage {
         let root_for_open = integration_root.clone();
         integration_open_btn.connect_clicked(move |_| {
             if let Some(root) = root_for_open.borrow().clone() {
-                let mut command = std::process::Command::new("xdg-open");
-                command.arg(&root.path);
-                if let Err(error) =
-                    crate::process::run(&mut command, std::time::Duration::from_secs(10))
-                {
+                if let Err(error) = crate::process::open_folder(&root.path) {
                     log::warn!("could not open the configuration folder: {error}");
                 }
             }

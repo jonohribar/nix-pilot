@@ -1,14 +1,11 @@
 //! First-run integration engine (config-authority.md, "Install and first
-//! run"). Pure and unit-testable: detects the user's configuration root,
-//! writes the app-owned `nix-pilot/` files (the module plus the state
-//! module), produces the copy-paste snippet that connects a config to them,
-//! verifies a config parses (never evaluates), and removes the app's
-//! footprint. The GUI and any future CLI share this engine.
+//! run"): detect the user's config, write the app-owned `nix-pilot/` files,
+//! show the copy-paste snippet, parse-verify, and remove the app's footprint.
+//! Pure and unit-testable; the GUI and any future CLI share it.
 //!
-//! The module travels as a copy inside the user's config tree (written by the
-//! app from its embedded source), so both flake and classic layouts import
-//! the same `./nix-pilot/module.nix` — no flake-input surgery, and the module
-//! version always matches the app that wrote it.
+//! The module travels as a copy in the config tree (embedded in the app), so
+//! flake and classic layouts import the same `./nix-pilot/module.nix` and the
+//! module version always matches the app.
 
 use std::path::{Path, PathBuf};
 
@@ -22,8 +19,7 @@ pub const MODULE_TEXT: &str = include_str!("../nixos-module/nix-pilot.nix");
 /// File name of the module copy inside the app-owned directory.
 pub const MODULE_FILE: &str = "module.nix";
 
-/// The marker that tells whether a configuration references nix-pilot.
-/// Matches the module import, the state import, and `services.nix-pilot`.
+/// Marker for any nix-pilot reference (imports or `services.nix-pilot`).
 const INTEGRATION_MARKER: &str = "nix-pilot";
 
 /// Resolve the user's configuration root, if any (see
@@ -39,10 +35,12 @@ pub fn resolve_root() -> Option<ConfigRoot> {
 /// Returns an I/O error for directory or file operations, or an
 /// `InvalidData` I/O error if the desired state cannot be rendered.
 pub fn write_app_files(root: &ConfigRoot, doc: &DesiredDoc) -> std::io::Result<PathBuf> {
+    // The state write creates the directory; the module copy must follow.
+    // (fs::write does not create parent directories.)
+    let state = state_file::write_state_file(&root.path, doc)?;
     let directory = root.path.join(state_file::STATE_DIR);
-    std::fs::create_dir_all(&directory)?;
     std::fs::write(directory.join(MODULE_FILE), MODULE_TEXT)?;
-    state_file::write_state_file(&root.path, doc)
+    Ok(state)
 }
 
 /// Whether the user's configuration already references nix-pilot. Scans the
@@ -183,8 +181,7 @@ mod tests {
     fn module_text_is_the_shipped_module() {
         assert!(MODULE_TEXT.starts_with("# nix-pilot NixOS module"));
         assert!(MODULE_TEXT.contains("services.nix-pilot"));
-        // Parses as Nix (checked by the verify gate); at least well-formed
-        // braces here.
+        // Brace balance is a cheap sanity proxy; the verify gate parses Nix.
         assert_eq!(
             MODULE_TEXT.matches('{').count(),
             MODULE_TEXT.matches('}').count()

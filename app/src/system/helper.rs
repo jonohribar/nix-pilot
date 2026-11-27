@@ -75,9 +75,8 @@ fn find_helper() -> Option<PathBuf> {
 }
 
 /// Run a fixed helper action, optionally naming the user's configuration
-/// directory (D33: switch/build act on the user's own config, not a
-/// generated area). Only `Switch` passes a directory; every other action
-/// must pass `None`.
+/// directory. Only `Switch` passes a directory; every other action passes
+/// `None`.
 pub(super) fn run_action(
     action: HelperAction,
     config_dir: Option<&Path>,

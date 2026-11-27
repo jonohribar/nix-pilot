@@ -180,23 +180,14 @@ fn prepare_changes(
             // state module written in, so the check matches what apply would
             // switch. The state file is app-owned; writing it here is the
             // D33 apply contract (the user's config imports it).
-            match crate::system::state_file::write_state_file(&root.path, doc) {
-                Ok(_) => match crate::system::state_file::git_add_once(&root.path) {
-                    Ok(()) => {
-                        build::build_user_config(&root, false, std::time::Duration::from_secs(1500))
-                    }
-                    Err(error) => build::CandidateBuild {
-                        ok: false,
-                        note: "could not track the state module in your configuration's git \
-                               repository"
-                            .into(),
-                        log: error.to_string(),
-                    },
-                },
+            match crate::system::state_file::write_and_track(&root, doc) {
+                Ok(()) => {
+                    build::build_user_config(&root, false, std::time::Duration::from_secs(1500))
+                }
                 Err(error) => build::CandidateBuild {
                     ok: false,
-                    note: "could not write the state module into your configuration".into(),
-                    log: error.to_string(),
+                    note: error.to_string(),
+                    log: error.log(),
                 },
             }
         })

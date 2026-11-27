@@ -4,6 +4,7 @@
 //! read failures instead of silently turning them into empty diagnostics.
 use std::fmt;
 use std::io::{self, Read};
+use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -108,6 +109,14 @@ pub fn terminate(child: &mut Child) {
 /// deadline fails.
 pub fn run(command: &mut Command, timeout: Duration) -> Result<Output, Error> {
     run_inner(command, timeout)
+}
+
+/// Open a folder in the desktop's file manager (best effort, via `xdg-open`).
+///
+/// # Errors
+/// Returns an [`Error`] when the command cannot be started or times out.
+pub fn open_folder(path: &Path) -> Result<(), Error> {
+    run(Command::new("xdg-open").arg(path), Duration::from_secs(10)).map(|_| ())
 }
 
 /// Keep only the trailing `lines` of `output`, oldest first, as a single

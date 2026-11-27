@@ -1,9 +1,9 @@
-//! Writing the app-owned `nix-pilot/state.nix` module into the user's config
-//! tree (D33). The user's config imports this one file; the app owns it and
-//! rewrites it on every apply. Pure flake evaluation reads the dirty working
-//! tree, so the file only needs `git add` once — afterwards it can just
-//! change. The per-app overlay travels beside it when pinned sources exist.
+//! The app-owned `nix-pilot/state.nix` module the user's config imports
+//! (D33): rewritten on every apply. Pure flake evaluation reads the dirty
+//! working tree, so the file needs `git add` only once. The per-app overlay
+//! travels beside it when pinned sources exist.
 
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -40,9 +40,8 @@ pub fn write_state_file(root: &Path, doc: &DesiredDoc) -> std::io::Result<PathBu
     Ok(state_path)
 }
 
-/// Track the state module so pure flake evaluation sees it. No-op when the
-/// root is not inside a git working tree. An error means a git repo whose
-/// add failed, in which case the next rebuild would read stale state.
+/// Track the state module so pure flake evaluation sees it. No-op outside a
+/// git working tree; an add failure means the next rebuild reads stale state.
 ///
 /// # Errors
 /// Returns an I/O error when `git add` fails.
@@ -61,6 +60,55 @@ pub fn git_add_once(root: &Path) -> std::io::Result<()> {
     } else {
         Err(std::io::Error::other("git add failed"))
     }
+}
+
+/// Why the app-owned files could not be prepared for a build or switch.
+/// `Display` is the user-facing note; [`PrepareError::log`] carries the
+/// underlying technical detail. Both apply-path callers (build and switch)
+/// share this type so the failure wording cannot drift.
+#[derive(Debug)]
+pub enum PrepareError {
+    /// The state module could not be rendered or written.
+    Write(std::io::Error),
+    /// A git working tree refused to track the app-owned directory.
+    Git(std::io::Error),
+}
+
+impl fmt::Display for PrepareError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Write(_) => {
+                f.write_str("could not write the state module into your configuration")
+            }
+            Self::Git(_) => f.write_str(
+                "could not track the state module in your configuration's git repository",
+            ),
+        }
+    }
+}
+
+impl PrepareError {
+    /// Technical detail for the log tail.
+    pub fn log(&self) -> String {
+        match self {
+            Self::Write(error) => format!("writing the state module failed: {error}"),
+            Self::Git(error) => format!("tracking the app-owned directory failed: {error}"),
+        }
+    }
+}
+
+/// Write the state module and track it, in one step. The single "apply
+/// contract" shared by the build check and the switch: both must see exactly
+/// the files the user's config imports.
+///
+/// # Errors
+/// Returns a [`PrepareError`] describing the failing step in plain language.
+pub fn write_and_track(
+    root: &crate::config_source::ConfigRoot,
+    doc: &DesiredDoc,
+) -> Result<(), PrepareError> {
+    write_state_file(&root.path, doc).map_err(PrepareError::Write)?;
+    git_add_once(&root.path).map_err(PrepareError::Git)
 }
 
 #[cfg(test)]
@@ -135,5 +183,33 @@ mod tests {
     fn git_add_once_is_a_noop_outside_a_git_work_tree() {
         let fixture = Fixture::new("no-git");
         assert!(git_add_once(&fixture.0).is_ok());
+    }
+
+    #[test]
+    fn write_and_track_is_the_shared_apply_contract() {
+        use crate::config_source::{ConfigKind, ConfigRoot};
+        let fixture = Fixture::new("contract");
+        let root = ConfigRoot {
+            path: fixture.0.clone(),
+            kind: ConfigKind::Classic,
+        };
+        let mut doc = DesiredDoc::current();
+        doc.add_package("alice", "hello".into(), PackageScope::System);
+
+        write_and_track(&root, &doc).unwrap();
+        assert!(fixture.0.join(STATE_DIR).join(STATE_MODULE).is_file());
+
+        // The user-facing wording is the contract the UI shows; protect it.
+        let prepare_error = PrepareError::Write(std::io::Error::other("boom"));
+        assert_eq!(
+            prepare_error.to_string(),
+            "could not write the state module into your configuration"
+        );
+        assert!(prepare_error.log().contains("boom"));
+        let git_error = PrepareError::Git(std::io::Error::other("boom"));
+        assert_eq!(
+            git_error.to_string(),
+            "could not track the state module in your configuration's git repository"
+        );
     }
 }
