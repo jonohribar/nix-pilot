@@ -19,8 +19,11 @@ pub const MODULE_TEXT: &str = include_str!("../nixos-module/nix-pilot.nix");
 /// File name of the module copy inside the app-owned directory.
 pub const MODULE_FILE: &str = "module.nix";
 
-/// Marker for any nix-pilot reference (imports or `services.nix-pilot`).
-const INTEGRATION_MARKER: &str = "nix-pilot";
+/// The reference that proves D33 integration: the config imports the app's
+/// generated state module. Deliberately narrower than any `nix-pilot`
+/// mention, so stale wiring (a pinned module input, `services.nix-pilot`
+/// enablement) never counts as integrated.
+const INTEGRATION_MARKER: &str = "nix-pilot/state.nix";
 
 /// Resolve the user's configuration root, if any (see
 /// [`config_source::resolve_config_root`]).
@@ -225,7 +228,7 @@ mod tests {
         };
         fixture.write(
             "configuration.nix",
-            "{ ... }: { services.nix-pilot.enable = true; }",
+            "{ ... }: { imports = [ ./nix-pilot/state.nix ]; }",
         );
         assert!(is_integrated(&root));
 
@@ -235,6 +238,30 @@ mod tests {
         write_app_files(&root, &doc).unwrap();
         std::fs::write(fixture.0.join("configuration.nix"), "{ ... }: { }").unwrap();
         assert!(!is_integrated(&root));
+    }
+
+    #[test]
+    fn stale_wiring_never_counts_as_integrated() {
+        // The old module model left a pinned input and an enable flag in the
+        // config; only the D33 state-module import proves integration.
+        let fixture = Fixture::new("stale-wiring");
+        let root = ConfigRoot {
+            path: fixture.0.clone(),
+            kind: ConfigKind::Flake,
+        };
+        fixture.write(
+            "flake.nix",
+            "{ inputs = { nix-pilot.url = \"github:jonohribar/nix-pilot/5f5791c?dir=app/nixos-module\"; }; outputs = { ... }: { }; }",
+        );
+        fixture.write("host.nix", "{ ... }: { services.nix-pilot.enable = true; }");
+        assert!(!is_integrated(&root));
+
+        // The real import flips it to integrated.
+        fixture.write(
+            "flake.nix",
+            "{ modules = [ ./nix-pilot/module.nix ./nix-pilot/state.nix ]; }",
+        );
+        assert!(is_integrated(&root));
     }
 
     #[test]
